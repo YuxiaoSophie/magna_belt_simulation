@@ -9,8 +9,8 @@ my_projects/
 ├── assets/
 │   └── project assets and additional simulation resources
 │
-├── media/
-│   └── simulation videos and result recordings
+├── external/
+│   └── newton
 │
 ├── task_board_urdf/
 │   ├── common/
@@ -53,13 +53,7 @@ my_projects/
 ### Terminal 2: Run the full simulation
 
 ```bash
-vglrun -d :1 python round_belt.py
-```
-
-### Run the commanded robot/gripper version
-
-```bash
-vglrun -d :1 python round_belt_command.py
+vglrun -d :1 uv run python round_belt_command.py
 ```
 
 ---

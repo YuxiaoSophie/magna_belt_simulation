@@ -1,0 +1,16 @@
+[project]
+name = "magna-belt-simulation"
+version = "0.1.0"
+description = "Newton and Warp simulation for robotic belt manipulation"
+requires-python = ">=3.10,<3.11"
+
+dependencies = [
+    "newton[examples]",
+]
+
+[tool.uv]
+package = false
+prerelease = "allow"
+
+[tool.uv.sources]
+newton = { path = "external/newton", editable = true }

@@ -1,0 +1,195 @@
+<?xml version="1.0" ?>
+<robot name="round_belt" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- board side length is .384m -->
+
+  <link name="board">
+    <visual name="board">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="task_board_urdf/common/task_board_just_board.glb" scale="1 1 1"/>
+      </geometry>
+      <material name="light_grey">
+        <color rgba="0.8 0.8 0.8 1"/>
+      </material>
+    </visual>
+    <collision name="board_collision">
+      <origin xyz="0.192 0.192 -0.005" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.384 0.384 0.01"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Round Belt Pulleys -->
+  <xacro:if value="$(arg load_round_belt_pulleys)">
+    <!-- bracket mounting length in y is .033m, in x is .028m-->
+    <!-- task board edge to bracket closest mounting hole center in y is .1799m, in x is .3373m-->
+    <joint name="small_round_pulley_bracket_joint" type="fixed">
+      <parent link="board"/>
+      <child link="small_round_pulley_bracket"/>
+      <origin xyz="0.3504 0.1964 0" rpy="0 0 0"/>
+    </joint>
+    <link name="small_round_pulley_bracket">
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.05"/>
+        <inertia ixx="3.06677e-05" iyy="3.0667375e-05" izz="6.0454911e-05" ixy="5.7518697e-14" ixz="1.6724428e-11" iyz="-1.9003215e-11"/>
+      </inertial>
+      <visual name="bracket_visual">
+        <origin xyz="0 0 0" rpy="${pi/2} 0 ${pi/2}"/>
+        <geometry>
+          <mesh filename="task_board_urdf/round_belt_task/round_belt_task_board/small_round_pulley/slide_tensioner_bracket.gltf"/>
+        </geometry>
+        <material name="dark_grey">
+          <color rgba="0.1 0.1 0.1 1"/>
+        </material>
+      </visual>
+      <collision name="bracket_collision">
+        <origin xyz="0 0 0" rpy="${pi/2} 0 ${pi/2}"/>
+        <geometry>
+          <mesh filename="task_board_urdf/round_belt_task/round_belt_task_board/small_round_pulley/slide_tensioner_bracket.gltf"/>
+        </geometry>
+      </collision>
+    </link>
+    <!-- x distance from edge of board to closest part of bracket 0.33839155m -->
+    <!-- bracket sliding distance is .025m -->
+      <!-- <origin xyz="0.355 0.196 0.0248" rpy="0 0 0"/> -->
+      <!-- <origin xyz="0.33839155 0.196 0.0248" rpy="0 0 0"/> -->
+    <joint name="small_round_pulley_slide_joint" type="fixed">
+      <parent link="small_round_pulley_bracket"/>
+      <child link="small_round_pulley_slide"/>
+      <!-- <origin xyz="-0.01200845 -0.0004 0.0248" rpy="0 0 0"/> -->
+      <origin xyz="-0.01200845 -0.0004 0.0248" rpy="0 0 0"/>
+      <axis xyz="1 0 0"/>
+      <limit lower="0" upper="0.025" effort="10" velocity="1"/>
+    </joint>
+    <!-- insert dummy link for slide  -->
+    <link name="small_round_pulley_slide">
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.05"/>
+        <inertia ixx="3.06677e-05" iyy="3.0667375e-05" izz="6.0454911e-05" ixy="5.7518697e-14" ixz="1.6724428e-11" iyz="-1.9003215e-11"/>
+      </inertial>
+    </link>
+    <joint name="small_round_pulley_joint" type="prismatic">
+      <parent link="small_round_pulley_slide"/>
+      <child link="small_round_pulley"/>
+      <!-- <origin xyz="-0.01200845 -0.0004 0.0248" rpy="0 0 0"/> -->
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <axis xyz="1 0 0"/>
+      <limit lower="0" upper="0.025" effort="10" velocity="1"/>
+    </joint>
+    <link name="small_round_pulley">
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.05"/>
+        <inertia ixx="3.06677e-05" iyy="3.0667375e-05" izz="6.0454911e-05" ixy="5.7518697e-14" ixz="1.6724428e-11" iyz="-1.9003215e-11"/>
+      </inertial>
+      <visual name="bearing_visual">
+        <origin xyz="0 0 0.0035" rpy="0 ${pi/2} 0"/>
+        <geometry>
+          <mesh filename="task_board_urdf/round_belt_task/round_belt_task_board/small_round_pulley/slide_tensioner_bearing.gltf"/>
+        </geometry>
+        <material name="dark_grey">
+          <color rgba="0.1 0.1 0.1 1"/>
+        </material>
+      </visual>
+      <visual name="bolt_visual">
+        <origin xyz="0 0 0" rpy="0 ${pi/2} 0"/>
+        <geometry>
+          <mesh filename="task_board_urdf/round_belt_task/round_belt_task_board/small_round_pulley/slide_tensioner_bolt.gltf"/>
+        </geometry>
+        <material name="dark_grey">
+          <color rgba="0.1 0.1 0.1 1"/>
+        </material>
+      </visual>
+      <!-- <collision name="bearing_collision">
+        <origin xyz="0 0 -0.0035" rpy="0 -${pi/2} 0"/>
+        <geometry>
+          <mesh filename="task_board_urdf/round_belt_task/round_belt_task_board/small_round_pulley/slide_tensioner_bearing.gltf"/>
+        </geometry>
+      </collision> -->
+      <visual name="first_half">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="task_board_urdf/round_belt_task/round_belt_task_board/small_round_pulley/small_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="white">
+          <color rgba="0.8 0.8 0.8 1"/>
+        </material>
+      </visual>
+      <!-- <collision name="first_half_volume">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="task_board_urdf/round_belt_task/round_belt_task_board/small_round_pulley/small_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision> -->
+      <visual name="second_half">
+        <origin xyz="0 0 0" rpy="${pi} 0 0"/>
+        <geometry>
+          <mesh filename="task_board_urdf/round_belt_task/round_belt_task_board/small_round_pulley/small_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="white">
+          <color rgba="0.8 0.8 0.8 1"/>
+        </material>
+      </visual>
+      <!-- <collision name="second_half_volume">
+        <origin xyz="0 0 0" rpy="${pi} 0 0"/>
+        <geometry>
+          <mesh filename="task_board_urdf/round_belt_task/round_belt_task_board/small_round_pulley/small_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision> -->
+      <collision name="small_round_pulley_simple_collision">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <cylinder radius="0.015" length="0.009"/>
+        </geometry>
+      </collision>
+    </link>
+
+    <joint name="large_round_pulley_joint" type="fixed">
+      <parent link="board"/>
+      <child link="large_round_pulley"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+    <link name="large_round_pulley">
+      <inertial>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <mass value="0.05"/>
+        <inertia ixx="3.06677e-05" iyy="3.0667375e-05" izz="6.0454911e-05" ixy="5.7518697e-14" ixz="1.6724428e-11" iyz="-1.9003215e-11"/>
+      </inertial>
+      <visual name="first_half">
+        <origin xyz="0.140 0.196 0.0248" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="task_board_urdf/round_belt_task/round_belt_task_board/large_round_pulley/large_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="dark_grey">
+          <color rgba="0.1 0.1 0.1 1"/>
+        </material>
+      </visual>
+      <collision name="first_half_volume">
+        <origin xyz="0.140 0.196 0.0248" rpy="0 0 0"/>
+        <geometry>
+          <mesh filename="task_board_urdf/round_belt_task/round_belt_task_board/large_round_pulley/large_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
+      <visual name="second_half">
+        <origin xyz="0.140 0.196 0.0248" rpy="${pi} 0 0"/>
+        <geometry>
+          <mesh filename="task_board_urdf/round_belt_task/round_belt_task_board/large_round_pulley/large_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+        </geometry>
+        <material name="dark_grey">
+          <color rgba="0.1 0.1 0.1 1"/>
+        </material>
+      </visual>
+      <collision name="second_half_volume">
+        <origin xyz="0.140 0.196 0.0248" rpy="${pi} 0 0"/>
+        <geometry>
+          <mesh filename="task_board_urdf/round_belt_task/round_belt_task_board/large_round_pulley/large_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+        </geometry>
+      </collision>
+    </link>
+  </xacro:if>
+
+</robot>

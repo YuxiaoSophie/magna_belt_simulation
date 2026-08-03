@@ -1,3 +1,6 @@
 [submodule "task_board_urdf"]
 	path = task_board_urdf
 	url = https://github.com/DAIRLab/task_board_urdf.git
+[submodule "external/newton"]
+	path = external/newton
+	url = https://github.com/newton-physics/newton.git

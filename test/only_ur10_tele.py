@@ -34,8 +34,8 @@ DEADZONE = 0.10 # ignore |axis| below this
 MAX_DT = 0.10 # cap integration dt
 INPUT_STALE_TIMEOUT = 0.12 # s; no fresh SpaceMouse packet -> velocity = 0
 
-LIN_SIGN = np.array([+1.0, +1.0, +1.0], dtype=np.float64) # (x, y, z)
-ANG_SIGN = np.array([+1.0, +1.0, +1.0], dtype=np.float64) # (roll, pitch, yaw)
+LIN_SIGN = np.array([+1.0, -1.0, -1.0], dtype=np.float64) # (x, y, z)
+ANG_SIGN = np.array([+1.0, -1.0, -1.0], dtype=np.float64) # (roll, pitch, yaw)
 
 LINEAR_FRAME = "world" # "world" (fixed axes, top-down friendly) or "body"
 ANGULAR_FRAME = "world"

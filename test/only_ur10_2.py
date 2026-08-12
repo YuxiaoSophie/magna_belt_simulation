@@ -171,6 +171,35 @@ def _quat_conj(q):
     return np.array([-x, -y, -z, w], dtype=np.float64)
 
 
+def _quat_mul(a, b):
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return np.array([
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    ], dtype=np.float64)
+
+
+def _quat_to_rotvec(q):
+    """Shortest rotation vector for an xyzw quaternion."""
+    q = _norm4(q)
+
+    # q and -q represent the same orientation.  Keep w >= 0 so that
+    # the returned axis-angle is always the short rotation.
+    if q[3] < 0.0:
+        q = -q
+
+    v = q[:3]
+    s = float(np.linalg.norm(v))
+    if s < 1.0e-12:
+        return np.zeros(3, dtype=np.float64)
+
+    angle = 2.0 * math.atan2(s, float(q[3]))
+    return v * (angle / s)
+
+
 def _rotate_vec(q, v):
     x, y, z, w = q
     vx, vy, vz = v
@@ -569,6 +598,7 @@ class Example:
 
         self.ik_model = ik_builder.finalize(device=self.device)
         self.ik_n_coords = int(self.ik_model.joint_coord_count)
+        self.ik_tcp_body = int(ik_tcp_body)
 
         # First six actuated coordinates are the UR10, same as round_belt.
         q_start = as_numpy(self.ik_model.joint_q_start)
@@ -627,23 +657,195 @@ class Example:
             jacobian_mode=ik.IKJacobianType.ANALYTIC,
         )
 
+        # Null-space FK workspace
+        # We compute that small Jacobian numerically with six tiny joint
+        # perturbations.  This keeps the null-space code independent of
+        # Newton's internal/private Jacobian buffers.
+        ns_seed = ik_seed.copy()
+        self._ns_joint_q = wp.array(ns_seed, dtype=float, device=self.device)
+        self._ns_joint_qd = wp.zeros(
+            int(self.ik_model.joint_dof_count), dtype=float, device=self.device
+        )
+        self._ns_state = self.ik_model.state()
+
         # One high-iteration solve at t=0. Since the target is the current TCP,
         # this should return the current joint branch rather than jumping elsewhere.
         self.ik_solver.step(self.ik_joint_q, self.ik_joint_q, iterations=IK_INIT_ITERS)
 
+    @staticmethod
+    def _nearest_equivalent_angle(angle, reference):
+        """Return angle + 2*pi*k that is closest to reference."""
+        return reference + ((angle - reference + np.pi) % (2.0 * np.pi) - np.pi)
+
+    def _ik_tcp_pose_for_arm(self, arm_q):
+        """Evaluate the IK model TCP pose for one 6-joint arm configuration."""
+        q_all = self._ns_joint_q.numpy()
+
+        for ik_qi, qj in zip(self.ik_arm_coord_indices, arm_q):
+            q_all[ik_qi] = float(qj)
+
+        self._ns_joint_q.assign(q_all)
+        self._ns_joint_qd.zero_()
+
+        newton.eval_fk(
+            self.ik_model,
+            self._ns_joint_q,
+            self._ns_joint_qd,
+            self._ns_state,
+        )
+
+        body = self._ns_state.body_q.numpy()[self.ik_tcp_body]
+        base_pos = np.asarray(body[0:3], dtype=np.float64)
+        base_quat = _norm4(np.asarray(body[3:7], dtype=np.float64))
+
+        # The actual IK position objective is not the gripper-base origin.
+        # It is the TCP offset used everywhere else in this controller.
+        tcp_pos = base_pos + _rotate_vec(base_quat, self.tip_offset)
+
+        return tcp_pos, base_quat
+
+    def _numeric_task_jacobian(self, arm_q):
+        """
+        Numerical 6x6 TCP Jacobian around arm_q.
+
+        rows 0:3 -> TCP translation
+        rows 3:6 -> TCP world-frame rotation vector
+
+        This Jacobian is used only for the secondary null-space projector.
+        Newton's own analytic Jacobian still performs the primary IK solve.
+        """
+        arm_q = np.asarray(arm_q, dtype=np.float64)
+        eps = float(self.args.nullspace_eps)
+
+        p0, r0 = self._ik_tcp_pose_for_arm(arm_q)
+        J = np.zeros((6, len(arm_q)), dtype=np.float64)
+
+        for j in range(len(arm_q)):
+            q1 = arm_q.copy()
+            q1[j] += eps
+
+            p1, r1 = self._ik_tcp_pose_for_arm(q1)
+
+            # Translational differential.
+            J[0:3, j] = (p1 - p0) / eps
+
+            # Rotational differential.
+            # r1 * inverse(r0) gives the small world-frame rotation that
+            # moves the original TCP orientation to the perturbed one.
+            dq = _norm4(_quat_mul(r1, _quat_conj(r0)))
+            J[3:6, j] = _quat_to_rotvec(dq) / eps
+
+        return J
+
+    def _nullspace_posture_seed(self, solved_q):
+        """
+        Build a posture-biased IK seed without changing the final TCP command.
+        Procedure:
+            1. Newton IK solves the primary TCP task.
+            2. Compute the local TCP Jacobian J.
+            3. Find the TRUE numerical null space of J with SVD.
+            4. Project a "stay near previous posture" correction into it.
+            5. Use that corrected posture only as the seed for a second IK solve.
+            6. The second IK solve restores the exact TCP position/orientation.
+        """
+        q_ik = np.array(
+            [float(solved_q[i]) for i in self.ik_arm_coord_indices],
+            dtype=np.float64,
+        )
+
+        # Keep revolute coordinates on the representation nearest the
+        # previous command.
+        for j in range(len(q_ik)):
+            q_ik[j] = self._nearest_equivalent_angle(
+                q_ik[j],
+                self._arm_cmd[j],
+            )
+
+        # Compute the local TCP Jacobian.
+        J = self._numeric_task_jacobian(q_ik)
+
+        # Null-space projector from SVD.
+        U, S, Vt = np.linalg.svd(J, full_matrices=True)
+
+        sigma_max = float(S[0]) if len(S) else 0.0
+        tol = max(
+            float(self.args.nullspace_svd_abs_tol),
+            float(self.args.nullspace_svd_rel_tol) * sigma_max,
+        )
+
+        rank = int(np.sum(S > tol))
+
+        if rank >= len(q_ik):
+            # Full-rank 6D task -> no true null space.
+            return q_ik
+
+        # Columns of V corresponding to zero / near-zero singular values
+        # span the numerical null space.
+        V = Vt.T
+        Z = V[:, rank:]
+
+        # Orthogonal projector onto that null space.
+        N = Z @ Z.T
+
+        # Stay near the previous commanded arm posture.
+        posture_error = self._arm_cmd - q_ik
+
+        dq_null = (
+            float(self.args.nullspace_gain)
+            * (N @ posture_error)
+        )
+
+        # Keep the null-space seed correction small.
+        max_null_step = float(self.args.max_nullspace_step)
+        dq_null = np.clip(
+            dq_null,
+            -max_null_step,
+            max_null_step,
+        )
+
+        return q_ik + dq_null
+
     def _write_control_targets(self, solved_q):
-        """Write IK + gripper targets exactly like round_belt (no extra rate limiter)."""
+        """
+        Write the final primary-task IK solution to the robot.
+        """
         targets = self.control.joint_target_q.numpy().copy()
 
-        for ti, ik_qi in zip(self.arm_target_indices, self.ik_arm_coord_indices):
-            targets[ti] = float(solved_q[ik_qi])
+        desired = np.array(
+            [float(solved_q[i]) for i in self.ik_arm_coord_indices],
+            dtype=np.float64,
+        )
+
+        # Keep every revolute coordinate on the nearest equivalent branch.
+        for j in range(len(desired)):
+            desired[j] = self._nearest_equivalent_angle(
+                desired[j],
+                self._arm_cmd[j],
+            )
+
+        # Joint command slew limit.
+        max_step = float(self.args.max_arm_speed) * self.frame_dt
+
+        delta = np.clip(
+            desired - self._arm_cmd,
+            -max_step,
+            max_step,
+        )
+
+        self._arm_cmd = self._arm_cmd + delta
+
+        for ti, cmd in zip(self.arm_target_indices, self._arm_cmd):
+            targets[ti] = float(cmd)
 
         frac = float(np.clip(self._grip_fraction, 0.0, 1.0))
         grip_vals = (
             np.asarray(self.g_open, dtype=np.float64)
-            + frac * (np.asarray(self.g_closed, dtype=np.float64)
-                      - np.asarray(self.g_open, dtype=np.float64))
+            + frac * (
+                np.asarray(self.g_closed, dtype=np.float64)
+                - np.asarray(self.g_open, dtype=np.float64)
+            )
         )
+
         for ti, val in zip(self.gripper_target_indices, grip_vals):
             targets[ti] = float(val)
 
@@ -660,15 +862,51 @@ class Example:
                 self._target_xyzw = quat.copy()
             self._grip_fraction = float(np.clip(grip, 0.0, 1.0))
 
-        # 2) Solve the TCP objective.
+        # 2) Solve the PRIMARY TCP objective.
         self.pos_obj.set_target_position(0, _v3(self._target_pos))
         self.rot_obj.set_target_rotation(0, _v4(self._target_xyzw))
+
+        # Solve from the joint configuration we are already following.
+        ik_seed = self.ik_joint_q.numpy()
+
+        for j, ik_qi in enumerate(self.ik_arm_coord_indices):
+            ik_seed[0, ik_qi] = float(self._arm_cmd[j])
+
+        self.ik_joint_q.assign(ik_seed)
+
         self.ik_solver.step(
-            self.ik_joint_q, self.ik_joint_q, iterations=IK_TRACK_ITERS
+            self.ik_joint_q,
+            self.ik_joint_q,
+            iterations=IK_TRACK_ITERS,
         )
-        solved = self.ik_joint_q.numpy().reshape(-1)
-        if np.isfinite(solved).all():
-            self._write_control_targets(solved)
+
+        solved_1 = self.ik_joint_q.numpy().reshape(-1)
+
+        if np.isfinite(solved_1).all():
+
+            # Use the true numerical null space, if one exists, to bias the
+            # next solve toward the previous posture.
+            q_posture_seed = self._nullspace_posture_seed(solved_1)
+
+            ik_seed_2 = self.ik_joint_q.numpy()
+
+            for j, ik_qi in enumerate(self.ik_arm_coord_indices):
+                ik_seed_2[0, ik_qi] = float(q_posture_seed[j])
+
+            self.ik_joint_q.assign(ik_seed_2)
+
+            # Re-solve the primary TCP task after the posture bias.
+            self.ik_solver.step(
+                self.ik_joint_q,
+                self.ik_joint_q,
+                iterations=IK_TRACK_ITERS,
+            )
+
+            solved_2 = self.ik_joint_q.numpy().reshape(-1)
+
+            if np.isfinite(solved_2).all():
+                self._write_control_targets(solved_2)
+
 
         # 3) Dynamic MuJoCo tracking, then synchronize joint state exactly as in
         #    the working round_belt simulation.
@@ -748,6 +986,18 @@ class Example:
         p.add_argument("--gripper-closed", type=float, default=0.8)
         p.add_argument("--arm-ke", type=float, default=700.0)   # match round_belt
         p.add_argument("--arm-kd", type=float, default=110.0)   # match round_belt
+        p.add_argument("--max-arm-speed", type=float, default=1.5,
+                       help="maximum commanded UR10 joint speed in rad/s")
+        p.add_argument("--nullspace-gain", type=float, default=0.35,
+                       help="strength of previous-posture preference in the task null space")
+        p.add_argument("--nullspace-svd-rel-tol", type=float, default=1.0e-3,
+                       help="relative SVD threshold for detecting a true null-space direction")
+        p.add_argument("--nullspace-svd-abs-tol", type=float, default=1.0e-5,
+                       help="absolute SVD threshold for detecting a true null-space direction")
+        p.add_argument("--max-nullspace-step", type=float, default=0.02,
+                       help="maximum null-space seed correction per joint in rad")
+        p.add_argument("--nullspace-eps", type=float, default=1.0e-4,
+                       help="joint perturbation in rad used for numerical TCP Jacobian")
         p.add_argument("--gripper-ke", type=float, default=260.0)
         p.add_argument("--gripper-kd", type=float, default=45.0)
         p.add_argument("--sim-substeps", type=int, default=8)

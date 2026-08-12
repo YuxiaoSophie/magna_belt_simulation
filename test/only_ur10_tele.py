@@ -28,10 +28,10 @@ MAC_HOST = "127.0.0.1"
 MAC_PORT = 5005 # SpaceMouse bridge (SSH -R tunnel from the Mac)
 SPACEMOUSE_DEVICE = None # None = automatically find 3Dconnexion SpaceMouse on Linux
 
-LIN_SPEED = 0.12 # m/s of TCP motion at full stick deflection
+LIN_SPEED = 0.5 # m/s of TCP motion at full stick deflection
 ANG_SPEED = 1.20 # rad/s of TCP rotation at full twist
 DEADZONE = 0.10 # ignore |axis| below this
-MAX_DT = 0.10 # cap integration dt
+MAX_DT = 0.025 # cap integration dt; prevents one delayed loop from creating a large pose jump
 INPUT_STALE_TIMEOUT = 0.12 # s; no fresh SpaceMouse packet -> velocity = 0
 
 LIN_SIGN = np.array([+1.0, -1.0, -1.0], dtype=np.float64) # (x, y, z)
@@ -289,6 +289,9 @@ class SpaceMouse:
         if not self.ok or self.device is None:
             return None
 
+        # EV_REL samples are treated as this poll's motion command only..
+        lin = np.zeros(3, dtype=np.float64)
+        ang = np.zeros(3, dtype=np.float64)
         got_motion = False
         got_any = False
 
@@ -302,33 +305,31 @@ class SpaceMouse:
                     value = self._normalize(event.value)
 
                     if event.code == ecodes.REL_X:
-                        self._lin[0] = value
+                        lin[0] = value
                         got_motion = True
                         got_any = True
                     elif event.code == ecodes.REL_Y:
-                        self._lin[1] = value
+                        lin[1] = value
                         got_motion = True
                         got_any = True
                     elif event.code == ecodes.REL_Z:
-                        self._lin[2] = value
+                        lin[2] = value
                         got_motion = True
                         got_any = True
                     elif event.code == ecodes.REL_RX:
-                        self._ang[0] = value
+                        ang[0] = value
                         got_motion = True
                         got_any = True
                     elif event.code == ecodes.REL_RY:
-                        self._ang[1] = value
+                        ang[1] = value
                         got_motion = True
                         got_any = True
                     elif event.code == ecodes.REL_RZ:
-                        self._ang[2] = value
+                        ang[2] = value
                         got_motion = True
                         got_any = True
 
                 elif event.type == ecodes.EV_KEY:
-                    # The Compact exposes two physical buttons. Linux key codes
-                    # can vary slightly by driver, so accept the common pairs.
                     if event.code in (ecodes.BTN_0, ecodes.BTN_LEFT):
                         self._buttons[0] = 1 if event.value else 0
                         got_any = True
@@ -347,26 +348,20 @@ class SpaceMouse:
         if got_any:
             self._last_packet_time = now
 
+        # Save only for diagnostics; these values are not reused as future velocity.
+        self._lin[:] = lin
+        self._ang[:] = ang
+
         if got_any and now - self._last_debug >= 0.5:
             self._last_debug = now
-            print(f"[RX] lin={np.round(self._lin,3).tolist()} "
-                  f"ang={np.round(self._ang,3).tolist()} btn={self._buttons}")
+            print(f"[RX] lin={np.round(lin,3).tolist()} "
+                  f"ang={np.round(ang,3).tolist()} btn={self._buttons}")
 
-        # SpaceMouse motion events are relative. When no fresh motion arrives,
-        # zero the velocity so the target holds instead of continuing to drift.
-        if self._last_packet_time is None or now - self._last_packet_time > INPUT_STALE_TIMEOUT:
-            self._lin[:] = 0.0
-            self._ang[:] = 0.0
-            return self._lin.copy(), self._ang.copy(), list(self._buttons)
-
-        # A button event may arrive without a motion event. Keep the current
-        # button state, but do not invent new Cartesian motion.
+        # No new motion event in this poll -> zero Cartesian velocity immediately.
+        # Button state is still retained.
         if not got_motion:
-            lin = self._lin.copy()
-            ang = self._ang.copy()
-        else:
-            lin = self._lin.copy()
-            ang = self._ang.copy()
+            lin[:] = 0.0
+            ang[:] = 0.0
 
         return lin, ang, list(self._buttons)
 

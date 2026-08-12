@@ -18,6 +18,8 @@ import os
 import math
 import mmap
 import time
+import json
+import atexit
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +31,7 @@ import newton.examples
 import newton.ik as ik
 import newton.utils
 from newton import JointTargetMode
+from newton.viewer import ViewerFile
 from newton.solvers import SolverMuJoCo, SolverVBD
 from newton.solvers.experimental.coupled import SolverCoupled, SolverCoupledProxy
 
@@ -126,11 +129,10 @@ CABLE_CONTACT_MU = 1.0
 PULLEY_CONTACT_KE = 3.0e5
 PULLEY_CONTACT_KD = 1.0e-5 * PULLEY_CONTACT_KE
 
-# Firmer, higher-friction finger pads so the belt does not slip out of
-# the gripper while it is carried and dragged over both pulleys.
+# Gripper-pad contact used by the mjc -> vbd proxy coupling.
 GRIPPER_CONTACT_KE = 2.0e4
-GRIPPER_CONTACT_KD = 1.0e-5 * GRIPPER_CONTACT_KE
-GRIPPER_CONTACT_MU = 4.0
+GRIPPER_CONTACT_KD = 20.0
+GRIPPER_CONTACT_MU = 8.0
 
 # Pulley parameters.
 PULLEY_DENSITY = 1000.0
@@ -159,9 +161,23 @@ GRIPPER_PAD_KEYWORDS = ("pad",)
 
 ROBOTIQ_GRIPPER_SAFE_CLOSE_FRACTION = 0.93
 
+# Gripper grasp-safety settings.
+GRIPPER_DRIVE_KE = 180.0
+GRIPPER_DRIVE_KD = 80.0
+GRIPPER_EFFORT_LIMIT = 1.0
+
+# Anti-crush grasp latch.
+GRIPPER_STALL_MIN_FRACTION = 0.60
+GRIPPER_STALL_ERROR_FRACTION = 0.010
+GRIPPER_STALL_SPEED_FRACTION_PER_SEC = 0.15
+GRIPPER_STALL_FRAMES = 1
+GRIPPER_HOLD_PRELOAD_FRACTION = 0.004
+GRIPPER_RELEASE_HYSTERESIS = 0.020
+
 # Proxy-coupling / solver settings.
 PROXY_ITERATIONS = 1
-PROXY_MASS_SCALE = 1.0
+# Make the robot pad proxies dynamically dominant over the 22 g belt.
+PROXY_MASS_SCALE = 10.0
 PROXY_COUPLING_MODE = "lagged"
 VBD_ITERATIONS = 20
 VBD_RIGID_AVBD_BETA = 1.0e2
@@ -835,6 +851,93 @@ def _add_ur10_and_gripper_assets(builder: newton.ModelBuilder, body_offset: int)
     }
 
 
+# Dataset recording / replay support only
+class TeleopEpisodeRecorder:
+    """Passively save the initial state, actions, and Newton state snapshots."""
+
+    def __init__(self, root_dir: Path, model, state, control, example):
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        self.episode_dir = Path(root_dir).expanduser() / f"episode_{stamp}"
+        suffix = 1
+        while self.episode_dir.exists():
+            self.episode_dir = Path(root_dir).expanduser() / f"episode_{stamp}_{suffix:02d}"
+            suffix += 1
+        self.episode_dir.mkdir(parents=True, exist_ok=False)
+
+        self.actions_file = (self.episode_dir / "actions.jsonl").open(
+            "w", encoding="utf-8", buffering=1
+        )
+        self.state_file = self.episode_dir / "newton_states.bin"
+        self.initial_file = self.episode_dir / "initial_state.npz"
+
+        # Save the exact initial simulation arrays plus the current control/teleop state.
+        initial = {}
+        for name in ("body_q", "body_qd", "joint_q", "joint_qd", "particle_q", "particle_qd"):
+            value = getattr(state, name, None)
+            if value is not None:
+                initial[name] = value.numpy().copy()
+        initial["control_joint_target_q"] = control.joint_target_q.numpy().copy()
+        initial["target_pos"] = np.asarray(example._target_pos, dtype=np.float64).copy()
+        initial["target_xyzw"] = np.asarray(example._target_xyzw, dtype=np.float64).copy()
+        initial["grip_fraction"] = np.asarray([example._grip_fraction], dtype=np.float64)
+        initial["grip_requested_fraction"] = np.asarray([example._grip_requested_fraction], dtype=np.float64)
+        initial["arm_cmd"] = np.asarray(example._arm_cmd, dtype=np.float64).copy()
+        np.savez_compressed(self.initial_file, **initial)
+
+        metadata = {
+            "fps": int(example.fps),
+            "frame_dt": float(example.frame_dt),
+            "sim_substeps": int(example.sim_substeps),
+            "sim_dt": float(example.sim_dt),
+            "targetq_layout": str(example.targetq_layout),
+            "arm_target_indices": [int(i) for i in example.arm_target_indices],
+            "gripper_target_indices": [int(i) for i in example.gripper_target_indices],
+        }
+        (self.episode_dir / "metadata.json").write_text(
+            json.dumps(metadata, indent=2), encoding="utf-8"
+        )
+
+        # Newton-native recording. 
+        self.viewer_file = ViewerFile(str(self.state_file), auto_save=True, save_interval=1)
+        self.viewer_file.set_model(model)
+        self.viewer_file.record(state)
+        self.viewer_file.save_recording(verbose=False)
+        self.closed = False
+        atexit.register(self.close)
+
+        print(f"[RECORD] recording episode to: {self.episode_dir}")
+        print(f"[RECORD] Newton state file: {self.state_file}")
+
+    def record_frame(self, frame_id, sim_time, target_pos, target_xyzw,
+                     grip_fraction, grip_requested_fraction, joint_target_q, state):
+        row = {
+            "frame": int(frame_id),
+            "sim_time": float(sim_time),
+            "target_pos": np.asarray(target_pos, dtype=np.float64).tolist(),
+            "target_xyzw": np.asarray(target_xyzw, dtype=np.float64).tolist(),
+            "grip_fraction": float(grip_fraction),
+            "grip_requested_fraction": float(grip_requested_fraction),
+            "joint_target_q": np.asarray(joint_target_q, dtype=np.float64).reshape(-1).tolist(),
+        }
+        self.actions_file.write(json.dumps(row, separators=(",", ":")) + "\n")
+        self.viewer_file.record(state)
+
+    def close(self):
+        if getattr(self, "closed", True):
+            return
+        self.closed = True
+        try:
+            self.actions_file.flush()
+            self.actions_file.close()
+        finally:
+            try:
+                self.viewer_file.save_recording(verbose=False)
+            finally:
+                self.viewer_file.close()
+        print(f"[RECORD] saved episode: {self.episode_dir}")
+
+
+
 class Example:
     """Full round-belt scene, but the arm TCP now chases the SpaceMouse target
     written into shared memory -- using the exact control/IK logic of the
@@ -1114,7 +1217,12 @@ class Example:
 
         self._target_pos = tip0.copy()
         self._target_xyzw = base_quat.copy()
-        self._grip_fraction = 0.0  # 0=open, 1=closed
+        self._grip_fraction = 0.0 # applied 0=open, 1=closed
+        self._grip_requested_fraction = 0.0
+        self._grip_hold_fraction = None
+        self._grip_stall_frames = 0
+        self._grip_actual_fraction = 0.0
+        self._grip_actual_speed = 0.0
 
         # arm command we follow (used for slew limiting + posture bias).
         main_q = self.model.joint_q.numpy()
@@ -1144,6 +1252,140 @@ class Example:
             self.viewer.set_picking_linear_only_bodies(self.belt_bodies)
         if hasattr(self.viewer, "set_camera"):
             self.viewer.set_camera(wp.vec3(0.30, -1.30, 1.30), -22.0, -38.0)
+
+        # Optional dataset I/O only. 
+        self.episode_recorder = None
+        self._replay_actions = None
+        self._replay_index = 0
+        self._replay_done = False
+
+        if getattr(self.args, "replay_episode", None):
+            self._load_replay_episode(Path(self.args.replay_episode))
+        elif getattr(self.args, "record_episode", False):
+            self.episode_recorder = TeleopEpisodeRecorder(
+                Path(self.args.record_dir), self.model, self.state_0, self.control, self
+            )
+
+    def _load_replay_episode(self, episode_dir: Path) -> None:
+        episode_dir = Path(episode_dir).expanduser()
+        initial_path = episode_dir / "initial_state.npz"
+        actions_path = episode_dir / "actions.jsonl"
+        metadata_path = episode_dir / "metadata.json"
+
+        if not initial_path.exists():
+            raise FileNotFoundError(f"Replay episode missing {initial_path}")
+        if not actions_path.exists():
+            raise FileNotFoundError(f"Replay episode missing {actions_path}")
+
+        if metadata_path.exists():
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            for key, current in (("fps", self.fps), ("sim_substeps", self.sim_substeps)):
+                if key in metadata and int(metadata[key]) != int(current):
+                    raise RuntimeError(
+                        f"Replay metadata mismatch for {key}: recorded={metadata[key]}, current={current}"
+                    )
+            if "sim_dt" in metadata and not np.isclose(float(metadata["sim_dt"]), float(self.sim_dt)):
+                raise RuntimeError(
+                    f"Replay metadata mismatch for sim_dt: recorded={metadata['sim_dt']}, current={self.sim_dt}"
+                )
+
+        data = np.load(initial_path, allow_pickle=False)
+        for state in (self.state_0, self.state_1):
+            for name in ("body_q", "body_qd", "joint_q", "joint_qd", "particle_q", "particle_qd"):
+                if name in data.files:
+                    value = getattr(state, name, None)
+                    if value is not None:
+                        value.assign(data[name])
+
+        if "control_joint_target_q" in data.files:
+            self.control.joint_target_q.assign(data["control_joint_target_q"])
+        if "target_pos" in data.files:
+            self._target_pos = np.asarray(data["target_pos"], dtype=np.float64).copy()
+        if "target_xyzw" in data.files:
+            self._target_xyzw = _norm4(np.asarray(data["target_xyzw"], dtype=np.float64))
+        if "grip_fraction" in data.files:
+            self._grip_fraction = float(np.asarray(data["grip_fraction"]).reshape(-1)[0])
+        if "grip_requested_fraction" in data.files:
+            self._grip_requested_fraction = float(np.asarray(data["grip_requested_fraction"]).reshape(-1)[0])
+        else:
+            self._grip_requested_fraction = self._grip_fraction
+        if "arm_cmd" in data.files:
+            self._arm_cmd = np.asarray(data["arm_cmd"], dtype=np.float64).copy()
+
+        # Reset anti-crush latch internals to their normal t=0 values.
+        self._grip_hold_fraction = None
+        self._grip_stall_frames = 0
+        self._grip_actual_fraction = 0.0
+        self._grip_actual_speed = 0.0
+
+        actions = []
+        with actions_path.open("r", encoding="utf-8") as f:
+            for lineno, line in enumerate(f, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                if "joint_target_q" not in row:
+                    raise RuntimeError(f"{actions_path}:{lineno} has no joint_target_q")
+                actions.append(row)
+        if not actions:
+            raise RuntimeError(f"Replay episode has no actions: {actions_path}")
+
+        expected = self.control.joint_target_q.numpy().size
+        got = len(actions[0]["joint_target_q"])
+        if got != expected:
+            raise RuntimeError(
+                f"Replay action size mismatch: recorded joint_target_q has {got}, current control has {expected}"
+            )
+
+        self._replay_actions = actions
+        self._replay_index = 0
+        self._replay_done = False
+        self.sim_time = 0.0
+        self.frame_id = 0
+        print(f"[REPLAY] loaded {len(actions)} actions from: {episode_dir}")
+        if not (episode_dir / "newton_states.bin").exists():
+            print("[REPLAY] newton_states.bin is absent; replaying from initial_state.npz + actions.jsonl.")
+
+    def _step_replay(self) -> None:
+        if self._replay_done:
+            return
+        if self._replay_index >= len(self._replay_actions):
+            self._replay_done = True
+            print(f"[REPLAY] finished {len(self._replay_actions)} frames.")
+            if hasattr(self.viewer, "_pause"):
+                self.viewer._pause = True
+            return
+
+        row = self._replay_actions[self._replay_index]
+
+        if "target_pos" in row:
+            self._target_pos = np.asarray(row["target_pos"], dtype=np.float64)
+        if "target_xyzw" in row:
+            self._target_xyzw = _norm4(np.asarray(row["target_xyzw"], dtype=np.float64))
+        if "grip_fraction" in row:
+            self._grip_fraction = float(row["grip_fraction"])
+        if "grip_requested_fraction" in row:
+            self._grip_requested_fraction = float(row["grip_requested_fraction"])
+        else:
+            self._grip_requested_fraction = self._grip_fraction
+
+        # Replay the exact robot action generated during recording.
+        self.control.joint_target_q.assign(
+            np.asarray(row["joint_target_q"], dtype=np.float32)
+        )
+        
+        for _ in range(self.sim_substeps):
+            self.state_0.clear_forces()
+            newton.examples.apply_coupled_viewer_forces(self, self.state_0)
+            self.model.collide(self.state_0, self.contacts, collision_pipeline=self.collision_pipeline)
+            self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.sim_dt)
+            newton.eval_ik(self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd)
+            self.state_0, self.state_1 = self.state_1, self.state_0
+
+        self._replay_index += 1
+        self.sim_time += self.frame_dt
+        self.frame_id += 1
 
     # IK model
     def _build_ik(self) -> None:
@@ -1336,6 +1578,77 @@ class Example:
 
         return q_ik + dq_null
 
+    def _measure_actual_gripper(self):
+        """Return actual Robotiq closure fraction and closure speed from the solved state."""
+        if not self.gripper_coord_indices:
+            return 0.0, 0.0
+
+        jq = self.state_0.joint_q.numpy()
+        jqd = self.state_0.joint_qd.numpy()
+        fractions = []
+        speeds = []
+
+        for coord_idx, dof_idx, q_open, q_closed in zip(
+                self.gripper_coord_indices, self.gripper_dof_indices, self.g_open, self.g_closed):
+            span = float(q_closed) - float(q_open)
+            if abs(span) < 1.0e-9:
+                continue
+            fractions.append((float(jq[coord_idx]) - float(q_open)) / span)
+            speeds.append(float(jqd[dof_idx]) / span)
+
+        if not fractions:
+            return 0.0, 0.0
+
+        frac = float(np.clip(np.median(fractions), 0.0, 1.0))
+        speed = float(np.median(speeds)) if speeds else 0.0
+        return frac, speed
+
+    def _update_gripper_antcrush(self):
+        """Convert the raw SpaceMouse close request into a load-limited grasp command.
+        """
+        requested = float(np.clip(self._grip_requested_fraction, 0.0, 1.0))
+        actual, actual_speed = self._measure_actual_gripper()
+        self._grip_actual_fraction = actual
+        self._grip_actual_speed = actual_speed
+
+        # If a grasp has already been latched, keep only the small preload.
+        # The user must command OPEN below the latch point to release it.
+        if self._grip_hold_fraction is not None:
+            if requested < self._grip_hold_fraction - GRIPPER_RELEASE_HYSTERESIS:
+                print(f"[GRASP] release latch: requested={requested:.3f}, actual={actual:.3f}")
+                self._grip_hold_fraction = None
+                self._grip_stall_frames = 0
+                self._grip_fraction = requested
+            else:
+                self._grip_fraction = min(requested, self._grip_hold_fraction)
+            return
+
+        # Detect a closing stall.
+        error = requested - actual
+        closing_request = requested > self._grip_fraction + 1.0e-5
+        stalled = (
+            closing_request
+            and actual >= GRIPPER_STALL_MIN_FRACTION
+            and error >= GRIPPER_STALL_ERROR_FRACTION
+            and actual_speed <= GRIPPER_STALL_SPEED_FRACTION_PER_SEC
+        )
+
+        if stalled:
+            self._grip_stall_frames += 1
+        else:
+            self._grip_stall_frames = 0
+
+        if self._grip_stall_frames >= GRIPPER_STALL_FRAMES:
+            hold = min(requested, actual + GRIPPER_HOLD_PRELOAD_FRACTION)
+            self._grip_hold_fraction = float(np.clip(hold, 0.0, 1.0))
+            self._grip_fraction = self._grip_hold_fraction
+            print(
+                f"[GRASP] anti-crush latch: requested={requested:.3f}, actual={actual:.3f}, "
+                f"hold={self._grip_hold_fraction:.3f}, speed={actual_speed:.3f}/s"
+            )
+        else:
+            self._grip_fraction = requested
+
     def _write_control_targets(self, solved_q):
         """Write the final primary-task IK solution to the robot (slew-limited)."""
         targets = self.control.joint_target_q.numpy().copy()
@@ -1439,13 +1752,23 @@ class Example:
             kd_np[idx] = 110.0
             mode_np[idx] = int(JointTargetMode.POSITION)
         for idx in grip_t:
-            ke_np[idx] = 260.0
-            kd_np[idx] = 45.0
+            ke_np[idx] = GRIPPER_DRIVE_KE
+            kd_np[idx] = GRIPPER_DRIVE_KD
             mode_np[idx] = int(JointTargetMode.POSITION)
 
         model.joint_target_ke.assign(ke_np)
         model.joint_target_kd.assign(kd_np)
         model.joint_target_mode.assign(mode_np)
+
+        # Force/effort safety for grasping the deformable belt.
+        # The SpaceMouse may continue commanding frac=1.0, but the actuator is
+        # not allowed to build unbounded squeeze effort against the trapped belt.
+        effort_np = as_numpy(model.joint_effort_limit).copy()
+        for dof_idx in gripper_dof_indices:
+            effort_np[dof_idx] = GRIPPER_EFFORT_LIMIT
+        model.joint_effort_limit.assign(effort_np)
+        print(f"[INFO] Gripper compliant drive: ke={GRIPPER_DRIVE_KE}, kd={GRIPPER_DRIVE_KD}, "
+              f"effort_limit={GRIPPER_EFFORT_LIMIT}")
 
         return {"gains_layout": layout,
                 "arm_coord_indices": arm_coord_indices, "arm_dof_indices": arm_dof_indices,
@@ -1473,8 +1796,12 @@ class Example:
               f"({n_pulley_pairs} of them belt<->pulley; belt self-contact disabled).")
         return wp.array(np.asarray(pairs, dtype=np.int32), dtype=wp.vec2i, device=self.model.device)
 
-    # Sim loop: teleop control (verbatim demo) + coupled physics stepping
+    # Sim loop: teleop control + coupled physics stepping
     def step(self):
+        if self._replay_actions is not None:
+            self._step_replay()
+            return
+
         # 1) Read the SpaceMouse target. Neutral input leaves the pose unchanged.
         pos, quat, grip, ready = self.shared.read()
         if ready >= 0.5:
@@ -1483,7 +1810,10 @@ class Example:
             if np.isfinite(pos).all() and np.isfinite(quat).all():
                 self._target_pos = pos.copy()
                 self._target_xyzw = quat.copy()
-            self._grip_fraction = float(np.clip(grip, 0.0, 1.0))
+            self._grip_requested_fraction = float(np.clip(grip, 0.0, 1.0))
+
+        # Convert the raw SpaceMouse command into an anti-crush applied command.
+        self._update_gripper_antcrush()
 
         # 2) Solve the PRIMARY TCP objective.
         self.pos_obj.set_target_position(0, _v3(self._target_pos))
@@ -1520,6 +1850,19 @@ class Example:
             self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.sim_dt)
             newton.eval_ik(self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd)
             self.state_0, self.state_1 = self.state_1, self.state_0
+
+        # Passive recording hook
+        if self.episode_recorder is not None:
+            self.episode_recorder.record_frame(
+                self.frame_id,
+                self.sim_time,
+                self._target_pos,
+                self._target_xyzw,
+                self._grip_fraction,
+                self._grip_requested_fraction,
+                self.control.joint_target_q.numpy().copy(),
+                self.state_0,
+            )
 
         self.sim_time += self.frame_dt
         self.frame_id += 1
@@ -1560,8 +1903,11 @@ class Example:
         if now - self._last_dbg >= 0.5:
             self._last_dbg = now
             err = float(np.linalg.norm(self._target_pos - tip))
+            latch = "ON" if self._grip_hold_fraction is not None else "off"
             print(f"[track] target-tip error = {err*1000:6.1f} mm  "
-                  f"grip={self._grip_fraction:0.2f}")
+                  f"grip_req={self._grip_requested_fraction:0.2f} "
+                  f"grip_cmd={self._grip_fraction:0.2f} "
+                  f"grip_actual={self._grip_actual_fraction:0.2f} latch={latch}")
 
         if self.proxy_contacts is not None and self._proxy_contact_layer is not None:
             output_valid = getattr(self.solver, "entry_output_state_valid", None)
@@ -1593,6 +1939,14 @@ class Example:
 
         # shared-memory target buffer
         parser.add_argument("--buffer", type=str, default=SHARED_PATH_DEFAULT)
+
+        # Dataset recording/replay only; these do not change normal simulation settings.
+        parser.add_argument("--record-episode", action="store_true",
+                            help="record initial state, per-frame controls, and Newton states")
+        parser.add_argument("--record-dir", type=str, default="recordings",
+                            help="directory in which recording episodes are created")
+        parser.add_argument("--replay-episode", type=str, default=None,
+                            help="replay an episode directory using initial_state.npz + actions.jsonl")
 
         # teleop target visuals
         parser.add_argument("--axis-len", type=float, default=0.08)
@@ -1629,6 +1983,11 @@ class Example:
                     f"A pulley fell off its axle: min_z={float(pulley_xyz[:, 2].min()):.4f}")
 
     def __del__(self):
+        try:
+            if getattr(self, "episode_recorder", None) is not None:
+                self.episode_recorder.close()
+        except Exception:
+            pass
         try:
             self.shared.close()
         except Exception:

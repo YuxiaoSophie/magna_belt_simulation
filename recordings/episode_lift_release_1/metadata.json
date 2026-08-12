@@ -1,0 +1,19 @@
+{
+  "fps": 60,
+  "frame_dt": 0.016666666666666666,
+  "sim_substeps": 10,
+  "sim_dt": 0.0016666666666666666,
+  "targetq_layout": "dof",
+  "arm_target_indices": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "gripper_target_indices": [
+    6,
+    10
+  ]
+}

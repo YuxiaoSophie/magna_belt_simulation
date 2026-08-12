@@ -1,85 +1,115 @@
 """
-SpaceMouse tele-operation of the UR10 + Robotiq gripper in the round-belt scene.
-
-Every frame we read the SpaceMouse (6-DoF), treat the six axes as an end-effector
-twist (linear + angular velocity), integrate it into the current TCP target pose,
-and hand that pose to the unchanged `set_task_target(pos, quat, gripper_values)`.
-The IK solver already tracks whatever target we give it, so the arm follows.
-
-Gripper: the two SpaceMouse buttons are a binary open/close (no partial closing),
-matching the two gripper presets the base class already computes
-(`gripper_open_values` / `gripper_closed_values`).
+SpaceMouse -> target pose producer.
+  * connects to the Mac SpaceMouse bridge over the socket (localhost:5005),
+    same transport as your existing sender;
+  * turns the 6 axes (each in [-1, 1]) into a Cartesian velocity twist;
+  * integrates it into a target pose every loop:  p = p + v*dt  (and the
+    orientation by the angular velocity);
+  * reads the two buttons -> continuous 0..1 gripper closure fraction;
+  * constanty overwrites a shared memory buffer with (pos, quat, gripper).
 """
 
 from __future__ import annotations
 
+import os
 import math
+import mmap
 import time
 import json
 import socket
+import argparse
 
 import numpy as np
+from evdev import InputDevice, ecodes, list_devices
 
-import newton
-import newton.examples
 
-from round_belt import (
-    BELT_APPROACH_POS,
-    GRIPPER_DOWN_QUAT,
-    Example,
-)
+# Tuning
+MAC_HOST = "127.0.0.1"
+MAC_PORT = 5005 # SpaceMouse bridge (SSH -R tunnel from the Mac)
+SPACEMOUSE_DEVICE = None # None = automatically find 3Dconnexion SpaceMouse on Linux
 
-# Tuning knobs
-LIN_SPEED = 0.12 # m/s of TCP motion at full stick deflection
-ANG_SPEED = 1.20 # rad/s of TCP rotation at full twist
-DEADZONE = 0.10 # ignore |axis| below this (device noise floor)
-MAX_DT = 0.10 # cap integration dt so a slow physics frame can't jump
+LIN_SPEED = 0.05 # m/s of TCP motion at full stick deflection
+ANG_SPEED = 0.10 # rad/s of TCP rotation at full twist
+DEADZONE = 0.10 # ignore |axis| below this
+MAX_DT = 0.025 # cap integration dt; prevents one delayed loop from creating a large pose jump
+INPUT_STALE_TIMEOUT = 0.12 # s; no fresh SpaceMouse packet -> velocity = 0
 
-# Per-axis sign flips. Order is (x, y, z) for translation and
-# (roll, pitch, yaw) for rotation.
-LIN_SIGN = np.array([+1.0, +1.0, +1.0], dtype=np.float64)
-ANG_SIGN = np.array([+1.0, +1.0, +1.0], dtype=np.float64)
+LIN_SIGN = np.array([-1.0, +1.0, -1.0], dtype=np.float64) # (x, y, z)
+ANG_SIGN = np.array([-1.0, +1.0, -1.0], dtype=np.float64) # (roll, pitch, yaw)
 
-# "world" : x/y/z move along world axes, twist about world axes (intuitive
-#            relative to the fixed camera -- recommended for a top-down grasp).
-# "body" : motion/rotation is expressed in the gripper's own frame.
-LINEAR_FRAME = "world"
+LINEAR_FRAME = "world" # "world" (fixed axes, top-down friendly) or "body"
 ANGULAR_FRAME = "world"
 
-# Integrate against real wall-clock time (so the arm moves at LIN_SPEED m/s of
-# actual seconds even though this coupled sim runs slower than real time).
-# Set False to integrate against the fixed sim frame_dt instead.
-USE_WALLCLOCK_DT = True
-
-# Keep the target inside a sane box so a shove can't fling the IK target to
-# infinity.  Set to None to disable.  (min_xyz, max_xyz) in world metres.
-WORKSPACE_BOX = (
-    np.array([-0.65, -0.45, 0.72], dtype=np.float64), # min x,y,z
-    np.array([+0.65, +0.55, 1.30], dtype=np.float64), # max x,y,z
-)
-
-# Button mapping. Two-button mode: one button closes, one opens (edge-triggered).
-# Single-button mode: button 0 toggles open<->close on each press.
 TWO_BUTTON_MODE = True
-BUTTON_CLOSE_INDEX = 0 # left button closes / grasps
-BUTTON_OPEN_INDEX = 1 # right button opens / releases
+BUTTON_CLOSE_INDEX = 0
+BUTTON_OPEN_INDEX = 1
+GRIP_SPEED = 0.55 # closure-fraction / second while a button is held
 
-# GRIPPER_DOWN_QUAT in round_belt.py is written scalar-first: (w, x, y, z).
-# Warp/Newton quaternions are (x, y, z, w).  This flag tells the teleop how to
-# read/write that 4-vector so incremental rotations compose correctly.
-TARGET_QUAT_IS_WXYZ = True
+LOOP_HZ = 200.0 # producer update rate.
+BOX_HALF = np.array([0.6, 0.6, 0.5], dtype=np.float64)
+
+# Shared memory target buffer
+SHARED_PATH_DEFAULT = "/tmp/sm_teleop_target.bin"
 
 
-# Quaternion helpers
+class SharedTarget:
+    N = 10
+    SIZE = N * 8
+
+    def __init__(self, path=SHARED_PATH_DEFAULT):
+        self.path = path
+        if (not os.path.exists(path)) or os.path.getsize(path) != self.SIZE:
+            with open(path, "wb") as f:
+                f.write(b"\x00" * self.SIZE)
+        self.f = open(path, "r+b")
+        self.mm = mmap.mmap(self.f.fileno(), self.SIZE)
+        self.arr = np.ndarray((self.N,), dtype=np.float64, buffer=self.mm)  # writable
+        self._last = None
+
+    def write(self, pos, quat, grip, ready=1.0):
+        seq = float(self.arr[0])
+        self.arr[0] = seq + 1.0
+        self.arr[1:4] = pos
+        self.arr[4:8] = quat
+        self.arr[8] = float(grip)
+        self.arr[9] = float(ready)
+        self.arr[0] = seq + 2.0
+
+    def read(self):
+        for _ in range(16):
+            s1 = float(self.arr[0])
+            if int(s1) & 1:
+                continue
+            pos = np.array(self.arr[1:4], dtype=np.float64)
+            quat = np.array(self.arr[4:8], dtype=np.float64)
+            grip = float(self.arr[8])
+            ready = float(self.arr[9])
+            if float(self.arr[0]) == s1:
+                self._last = (pos, quat, grip, ready)
+                return pos, quat, grip, ready
+        if self._last is not None:
+            return self._last
+        return (np.zeros(3), np.array([0.0, 0.0, 0.0, 1.0]), 0.0, 0.0)
+
+    def is_ready(self):
+        return float(self.arr[9]) >= 0.5
+
+    def close(self):
+        try:
+            self.mm.close()
+            self.f.close()
+        except Exception:
+            pass
+
+
+# quaternion helpers (xyzw)
 def _norm4(q):
     q = np.asarray(q, dtype=np.float64)
     n = float(np.linalg.norm(q))
     return q / n if n > 1e-12 else np.array([0.0, 0.0, 0.0, 1.0])
 
 
-def _quat_mul_xyzw(a, b):
-    """Hamilton product a (x) b, both xyzw.  Rotating a vector by the result
-    applies b first, then a."""
+def _quat_mul(a, b):
     ax, ay, az, aw = a
     bx, by, bz, bw = b
     return np.array([
@@ -90,7 +120,7 @@ def _quat_mul_xyzw(a, b):
     ], dtype=np.float64)
 
 
-def _quat_from_axis_angle_xyzw(axis, angle):
+def _quat_from_axis_angle(axis, angle):
     axis = np.asarray(axis, dtype=np.float64)
     n = float(np.linalg.norm(axis))
     if n < 1e-12 or abs(angle) < 1e-12:
@@ -100,11 +130,9 @@ def _quat_from_axis_angle_xyzw(axis, angle):
     return np.array([axis[0] * s, axis[1] * s, axis[2] * s, math.cos(0.5 * angle)])
 
 
-def _rotate_vec_xyzw(q, v):
-    """Rotate vec3 v by quaternion q (xyzw)."""
+def _rotate_vec(q, v):
     x, y, z, w = q
     vx, vy, vz = v
-    # t = 2 * cross(q_vec, v)
     tx = 2.0 * (y * vz - z * vy)
     ty = 2.0 * (z * vx - x * vz)
     tz = 2.0 * (x * vy - y * vx)
@@ -115,247 +143,268 @@ def _rotate_vec_xyzw(q, v):
     ], dtype=np.float64)
 
 
-def _target_to_xyzw(q4):
-    """Convert a round_belt-layout quaternion to internal xyzw."""
-    if TARGET_QUAT_IS_WXYZ:
-        w, x, y, z = q4
-        return _norm4([x, y, z, w])
-    return _norm4(q4)
-
-
-def _xyzw_to_target(q_xyzw):
-    """Convert internal xyzw back to round_belt layout for set_task_target."""
-    x, y, z, w = q_xyzw
-    if TARGET_QUAT_IS_WXYZ:
-        return (float(w), float(x), float(y), float(z))
-    return (float(x), float(y), float(z), float(w))
-
-
 def _shape_axis(v, dz):
-    """Deadzone + rescale so motion ramps from 0 at the deadzone edge."""
     a = abs(v)
     if a < dz:
         return 0.0
     return math.copysign((a - dz) / (1.0 - dz), v)
 
 
-# SpaceMouse wrapper
-#
-# IMPORTANT: Newton runs on the remote Linux machine, while the physical
-# SpaceMouse is connected to the Mac.  Therefore this class does NOT try to
-# open a local HID device.  It receives SpaceMouse samples from the Mac sender
-# through the SSH reverse tunnel on localhost:5005.
+# Direct Linux SpaceMouse reader
 class SpaceMouse:
-    def __init__(self, host="127.0.0.1", port=5005):
+    def __init__(self, device_path=SPACEMOUSE_DEVICE):
         self.ok = False
-        self.sock = None
-        self._buffer = b""
-
+        self.device = None
+        self.device_path = device_path
         self._lin = np.zeros(3, dtype=np.float64)
         self._ang = np.zeros(3, dtype=np.float64)
         self._buttons = [0, 0]
-
-        self._packet_count = 0
         self._last_debug = 0.0
+        self._last_packet_time = None
+
+        # SpaceMouse Compact reports relative values whose practical full range
+        # is usually around +/-350. Normalize them to roughly [-1, 1].
+        self.axis_scale = 350.0
 
         try:
-            self.sock = socket.create_connection((host, port), timeout=3.0)
-            self.sock.setblocking(False)
+            if self.device_path is None:
+                self.device_path = self._find_spacemouse()
+
+            if self.device_path is None:
+                raise RuntimeError("No 3Dconnexion SpaceMouse found under /dev/input/event*")
+
+            self.device = InputDevice(self.device_path)
             self.ok = True
-            print(f"[SpaceMouse] Connected to Mac bridge at {host}:{port}.")
-            print("[SpaceMouse] Push/tilt to move TCP; "
-                  f"button {BUTTON_CLOSE_INDEX}=close, "
+            print(f"[SpaceMouse] Connected directly to Linux device {self.device_path}.")
+            print(f"[SpaceMouse] Device name: {self.device.name}")
+            print(f"[SpaceMouse] button {BUTTON_CLOSE_INDEX}=close, "
                   f"button {BUTTON_OPEN_INDEX}=open.")
         except Exception as e:
-            print(f"[SpaceMouse] Could not connect to Mac bridge at {host}:{port}: {e}")
-            print("[SpaceMouse] Arm will hold. Check the Mac sender and SSH -R tunnel.")
+            print(f"[SpaceMouse] Could not open Linux SpaceMouse: {e}")
+            print("[SpaceMouse] Target will HOLD until the device is available.")
             self.ok = False
 
+    @staticmethod
+    def _find_spacemouse():
+        for path in list_devices():
+            try:
+                dev = InputDevice(path)
+                name = (dev.name or "").lower()
+                if "3dconnexion" in name or "spacemouse" in name:
+                    dev.close()
+                    return path
+                dev.close()
+            except Exception:
+                pass
+        return None
+
+    def _normalize(self, value):
+        return float(np.clip(float(value) / self.axis_scale, -1.0, 1.0))
+
     def read(self):
-        """Return (lin[3], ang[3], buttons[list]) from the Mac bridge."""
-        if not self.ok or self.sock is None:
+        if not self.ok or self.device is None:
             return None
 
-        # Drain every byte currently available without blocking the simulation.
+        # EV_REL samples are treated as this poll's motion command only..
+        lin = np.zeros(3, dtype=np.float64)
+        ang = np.zeros(3, dtype=np.float64)
+        got_motion = False
+        got_any = False
+
         try:
             while True:
-                chunk = self.sock.recv(4096)
-                if not chunk:
-                    print("[SpaceMouse] Mac bridge disconnected.")
-                    self.ok = False
-                    return None
-                self._buffer += chunk
+                event = self.device.read_one()
+                if event is None:
+                    break
+
+                if event.type == ecodes.EV_REL:
+                    value = self._normalize(event.value)
+
+                    if event.code == ecodes.REL_X:
+                        lin[0] = value
+                        got_motion = True
+                        got_any = True
+                    elif event.code == ecodes.REL_Y:
+                        lin[1] = value
+                        got_motion = True
+                        got_any = True
+                    elif event.code == ecodes.REL_Z:
+                        lin[2] = value
+                        got_motion = True
+                        got_any = True
+                    elif event.code == ecodes.REL_RX:
+                        ang[0] = value
+                        got_motion = True
+                        got_any = True
+                    elif event.code == ecodes.REL_RY:
+                        ang[1] = value
+                        got_motion = True
+                        got_any = True
+                    elif event.code == ecodes.REL_RZ:
+                        ang[2] = value
+                        got_motion = True
+                        got_any = True
+
+                elif event.type == ecodes.EV_KEY:
+                    if event.code in (ecodes.BTN_0, ecodes.BTN_LEFT):
+                        self._buttons[0] = 1 if event.value else 0
+                        got_any = True
+                    elif event.code in (ecodes.BTN_1, ecodes.BTN_RIGHT):
+                        self._buttons[1] = 1 if event.value else 0
+                        got_any = True
+
         except BlockingIOError:
             pass
         except Exception as e:
-            print(f"[SpaceMouse] socket read failed: {e!r}")
+            print(f"[SpaceMouse] Linux read failed: {e!r}")
             self.ok = False
             return None
 
-        # Consume complete newline-delimited JSON packets.  If several arrived
-        # during one slow simulation frame, the last packet becomes the current
-        # SpaceMouse state.
-        got_packet = False
-        while b"\n" in self._buffer:
-            line, self._buffer = self._buffer.split(b"\n", 1)
-            if not line:
-                continue
-            try:
-                msg = json.loads(line.decode("utf-8"))
-                self._lin = np.array(
-                    [msg.get("x", 0.0), msg.get("y", 0.0), msg.get("z", 0.0)],
-                    dtype=np.float64,
-                )
-                self._ang = np.array(
-                    [msg.get("roll", 0.0), msg.get("pitch", 0.0), msg.get("yaw", 0.0)],
-                    dtype=np.float64,
-                )
-                self._buttons = list(msg.get("buttons", [0, 0]) or [0, 0])
-                self._packet_count += 1
-                got_packet = True
-            except Exception as e:
-                print(f"[SpaceMouse] bad packet ignored: {e!r}")
-
-        # Temporary diagnostic: at most twice per second print the actual values
-        # reaching Newton.  Once everything works, these lines can be removed.
         now = time.perf_counter()
-        if got_packet and now - self._last_debug >= 0.5:
-            self._last_debug = now
-            print(
-                "[SpaceMouse RX] "
-                f"lin={np.round(self._lin, 3).tolist()} "
-                f"ang={np.round(self._ang, 3).tolist()} "
-                f"buttons={self._buttons}"
-            )
+        if got_any:
+            self._last_packet_time = now
 
-        return self._lin.copy(), self._ang.copy(), list(self._buttons)
+        # Save only for diagnostics; these values are not reused as future velocity.
+        self._lin[:] = lin
+        self._ang[:] = ang
+
+        if got_any and now - self._last_debug >= 0.5:
+            self._last_debug = now
+            print(f"[RX] lin={np.round(lin,3).tolist()} "
+                  f"ang={np.round(ang,3).tolist()} btn={self._buttons}")
+
+        # No new motion event in this poll -> zero Cartesian velocity immediately.
+        # Button state is still retained.
+        if not got_motion:
+            lin[:] = 0.0
+            ang[:] = 0.0
+
+        return lin, ang, list(self._buttons)
 
     def close(self):
-        if self.sock is not None:
+        if self.device is not None:
             try:
-                self.sock.close()
+                self.device.close()
             except Exception:
                 pass
-            self.sock = None
+            self.device = None
         self.ok = False
 
 
-# The tele-op example
-class SpaceMouseTeleopExample(Example):
-    """Drive the gripper's TCP target with a 6-DoF SpaceMouse; buttons for grip."""
+# main producer loop
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--buffer", type=str, default=SHARED_PATH_DEFAULT)
+    ap.add_argument("--host", type=str, default=MAC_HOST)
+    ap.add_argument("--port", type=int, default=MAC_PORT)
+    ap.add_argument("--use-box", action="store_true",
+                    help="clamp the target to a box around the seed pose")
+    ap.add_argument("--wait-timeout", type=float, default=0.0,
+                    help="seconds to wait for the sim to seed (0 = forever)")
+    args = ap.parse_args()
 
-    def __init__(self, viewer, args):
-        super().__init__(viewer, args)
+    shared = SharedTarget(args.buffer)
 
-        # Current TCP target pose, seeded to the base class's start pose.
-        self._tcp_pos = np.asarray(BELT_APPROACH_POS, dtype=np.float64).copy()
-        self._tcp_xyzw = _target_to_xyzw(GRIPPER_DOWN_QUAT)
+    # Direct Linux SpaceMouse method.
+    mouse = SpaceMouse(SPACEMOUSE_DEVICE)
 
-        # Binary gripper state + button edge memory.
-        self._gripper_closed = False
-        self._prev_close_btn = 0
-        self._prev_open_btn = 0
-        self._prev_toggle_btn = 0
+    # Wait for the sim to seed the buffer, then adopt its pose so the
+    # target starts exactly on the gripper tip.
+    print(f"[target] waiting for the sim to seed the buffer ({args.buffer}) ...")
+    t0 = time.perf_counter()
+    while not shared.is_ready():
+        time.sleep(0.05)
+        if args.wait_timeout > 0 and (time.perf_counter() - t0) > args.wait_timeout:
+            print("[target] no seed yet; starting from identity pose.")
+            break
 
-        self._mouse = SpaceMouse()
-        self._last_wall = None
+    seed_pos, seed_quat, seed_grip, ready = shared.read()
+    if ready < 0.5:
+        seed_pos = np.array([0.0, 0.0, 1.2], dtype=np.float64)
+        seed_quat = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64)
+        seed_grip = 0.0
+    p = seed_pos.copy()
+    q = _norm4(seed_quat)
+    grip = float(np.clip(seed_grip, 0.0, 1.0))
+    print(f"[target] seeded at p={np.round(p,3).tolist()} q={np.round(q,3).tolist()}")
 
-        # Push the seed pose once so t=0 matches the base class exactly.
-        self.set_task_target(
-            tuple(self._tcp_pos),
-            _xyzw_to_target(self._tcp_xyzw),
-            self.gripper_open_values,
-        )
+    box_lo = p - BOX_HALF
+    box_hi = p + BOX_HALF
 
-    # integration dt
-    def _dt(self) -> float:
-        if not USE_WALLCLOCK_DT:
-            return float(self.frame_dt)
-        now = time.perf_counter()
-        if self._last_wall is None:
-            self._last_wall = now
-            return float(self.frame_dt)
-        dt = now - self._last_wall
-        self._last_wall = now
-        return float(min(max(dt, 0.0), MAX_DT))
+    prev_toggle = 0
+    last_wall = None
+    last_dbg = 0.0
+    period = 1.0 / LOOP_HZ
 
-    # gripper button
-    def _update_gripper(self, buttons):
-        def pressed(idx):
-            return 1 if (0 <= idx < len(buttons) and buttons[idx]) else 0
+    try:
+        while True:
+            t = time.perf_counter()
+            dt = period if last_wall is None else min(max(t - last_wall, 0.0), MAX_DT)
+            last_wall = t
 
-        if TWO_BUTTON_MODE:
-            c = pressed(BUTTON_CLOSE_INDEX)
-            o = pressed(BUTTON_OPEN_INDEX)
-            if c and not self._prev_close_btn:
-                self._gripper_closed = True
-            if o and not self._prev_open_btn:
-                self._gripper_closed = False
-            self._prev_close_btn, self._prev_open_btn = c, o
-        else:
-            b = pressed(0)
-            if b and not self._prev_toggle_btn:
-                self._gripper_closed = not self._gripper_closed
-            self._prev_toggle_btn = b
+            reading = mouse.read()
+            if reading is not None:
+                lin_raw, ang_raw, buttons = reading
+                lin = np.array([_shape_axis(v, DEADZONE) for v in lin_raw]) * LIN_SIGN
+                ang = np.array([_shape_axis(v, DEADZONE) for v in ang_raw]) * ANG_SIGN
+                v_lin = lin * LIN_SPEED
+                w_ang = ang * ANG_SPEED
 
-    # per-frame control hook
-    def solve_gripper_targets(self):
-        reading = self._mouse.read()
-        dt = self._dt()
+                # Integrate only the current valid velocity sample.
+                # When input is neutral/stale, v_lin == 0, therefore p HOLDS.
+                # translate: p = p_previous + v*dt
+                world_v = _rotate_vec(q, v_lin) if LINEAR_FRAME == "body" else v_lin
+                p = p + world_v * dt
+                if args.use_box:
+                    p = np.minimum(np.maximum(p, box_lo), box_hi)
 
-        if reading is not None:
-            lin_raw, ang_raw, buttons = reading
+                # rotate: integrate angular velocity into q
+                ang_mag = float(np.linalg.norm(w_ang)) * dt
+                if ang_mag > 1e-9:
+                    axis = w_ang / np.linalg.norm(w_ang)
+                    dq = _quat_from_axis_angle(axis, ang_mag)
+                    if ANGULAR_FRAME == "body":
+                        q = _norm4(_quat_mul(q, dq)) # current (x) delta
+                    else:
+                        q = _norm4(_quat_mul(dq, q)) # delta (x) current
 
-            lin = np.array([_shape_axis(v, DEADZONE) for v in lin_raw]) * LIN_SIGN
-            ang = np.array([_shape_axis(v, DEADZONE) for v in ang_raw]) * ANG_SIGN
+                # Gripper command is continuous:
+                # hold close -> grip moves toward 1.0
+                # hold open  -> grip moves toward 0.0
+                # release both -> hold the current amount of closure.
+                def pressed(i):
+                    return 1 if (0 <= i < len(buttons) and buttons[i]) else 0
 
-            v_lin = lin * LIN_SPEED 
-            w_ang = ang * ANG_SPEED
-
-            # translate
-            if LINEAR_FRAME == "body":
-                world_v = _rotate_vec_xyzw(self._tcp_xyzw, v_lin)
-            else:
-                world_v = v_lin
-            self._tcp_pos = self._tcp_pos + world_v * dt
-
-            if WORKSPACE_BOX is not None:
-                lo, hi = WORKSPACE_BOX
-                self._tcp_pos = np.minimum(np.maximum(self._tcp_pos, lo), hi)
-
-            # rotate
-            angle = float(np.linalg.norm(w_ang)) * dt
-            if angle > 1e-9:
-                axis = w_ang / np.linalg.norm(w_ang)
-                dq = _quat_from_axis_angle_xyzw(axis, angle)
-                if ANGULAR_FRAME == "body":
-                    # rotate about the tool's own axes: current (x) delta
-                    self._tcp_xyzw = _norm4(_quat_mul_xyzw(self._tcp_xyzw, dq))
+                if TWO_BUTTON_MODE:
+                    c = pressed(BUTTON_CLOSE_INDEX)
+                    o = pressed(BUTTON_OPEN_INDEX)
+                    if c and not o:
+                        grip = min(1.0, grip + GRIP_SPEED * dt)
+                    elif o and not c:
+                        grip = max(0.0, grip - GRIP_SPEED * dt)
                 else:
-                    # rotate about world axes: delta (x) current
-                    self._tcp_xyzw = _norm4(_quat_mul_xyzw(dq, self._tcp_xyzw))
+                    b = pressed(0)
+                    if b and not prev_toggle:
+                        # fallback toggle still changes the desired endpoint
+                        grip = 0.0 if grip >= 0.5 else 1.0
+                    prev_toggle = b
 
-            # gripper
-            self._update_gripper(buttons)
+            # Constantly overwrite the current target position.
+            shared.write(p, q, grip, ready=1.0)
 
-        grip_q = (self.gripper_closed_values if self._gripper_closed
-                  else self.gripper_open_values)
+            if t - last_dbg >= 0.5:
+                last_dbg = t
+                print(f"[target] p={np.round(p,3).tolist()} grip={grip:0.2f}")
 
-        self.set_task_target(
-            tuple(float(x) for x in self._tcp_pos),
-            _xyzw_to_target(self._tcp_xyzw),
-            grip_q,
-        )
-
-    def __del__(self):
-        try:
-            self._mouse.close()
-        except Exception:
-            pass
+            sleep_left = period - (time.perf_counter() - t)
+            if sleep_left > 0:
+                time.sleep(sleep_left)
+    except KeyboardInterrupt:
+        print("\n[target] stopping.")
+    finally:
+        mouse.close()
+        shared.close()
 
 
 if __name__ == "__main__":
-    parser = SpaceMouseTeleopExample.create_parser()
-    viewer, args = newton.examples.init(parser)
-    viewer._pause = False
-    newton.examples.run(SpaceMouseTeleopExample(viewer, args), args)
+    main()

@@ -1164,14 +1164,6 @@ class Example:
 
         self.proxy_contacts = (self.solver.get_proxy_contacts("mjc", "vbd")
                                if hasattr(self.solver, "get_proxy_contacts") else None)
-        if self.proxy_contacts is not None and self._proxy_contact_layer is not None:
-            self.viewer.activate(self._proxy_contact_layer)
-            self.viewer.set_model(self.solver.view("vbd"))
-            self.viewer.show_visual = False
-            self.viewer.show_collision = False
-            self.viewer.show_static = False
-            self.viewer.show_contacts = False
-            self.viewer.activate(self._main_view_layer)
 
         newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_0)
         newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_1)
@@ -1954,16 +1946,6 @@ class Example:
             #       f"grip_req={self._grip_requested_fraction:0.2f} "
             #       f"grip_cmd={self._grip_fraction:0.2f} "
             #       f"grip_actual={self._grip_actual_fraction:0.2f} latch={latch}")
-
-        if self.proxy_contacts is not None and self._proxy_contact_layer is not None:
-            output_valid = getattr(self.solver, "entry_output_state_valid", None)
-            sync_entry_states = getattr(self.solver, "sync_entry_states", None)
-            if callable(output_valid) and callable(sync_entry_states) and not output_valid():
-                sync_entry_states(self.state_0)
-            self.viewer.activate(self._proxy_contact_layer)
-            self.viewer.show_contacts = show_contacts
-            self.viewer.log_contacts(self.proxy_contacts, self.solver.entry_state("vbd"))
-            self.viewer.activate(self._main_view_layer)
 
         if (self.debug_belt_positions and self.state_0.body_q is not None
                 and len(self.belt_bodies) > 0 and self.frame_id % self.debug_every_n_frames == 0):

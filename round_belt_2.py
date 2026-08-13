@@ -955,6 +955,16 @@ class Example:
         self.sim_substeps = 10
         self.sim_dt = self.frame_dt / self.sim_substeps
         self.frame_id = 0
+        
+        # Real-time diagnostics
+        # NOTE: wall_start_time is only a placeholder here; it is re-stamped on the
+        # first real step() so construction cost (asset download + finalize + init
+        # IK) does not bias the real-time factor low.
+        self.wall_start_time = time.perf_counter()
+        self.last_timing_print = self.wall_start_time
+        self._last_sim_time = self.sim_time
+        self._last_wall_time = self.wall_start_time
+        
         self.debug_belt_positions = True
         self.debug_every_n_frames = 60
 
@@ -1802,6 +1812,14 @@ class Example:
             self._step_replay()
             return
 
+        # Charge the real-time clock from the first real frame, not from
+        # construction (asset download + finalize + init IK would bias RTF low).
+        if self.frame_id == 0:
+            self.wall_start_time = time.perf_counter()
+            self.last_timing_print = self.wall_start_time
+            self._last_sim_time = self.sim_time
+            self._last_wall_time = self.wall_start_time
+
         # 1) Read the SpaceMouse target. Neutral input leaves the pose unchanged.
         pos, quat, grip, ready = self.shared.read()
         if ready >= 0.5:
@@ -1866,6 +1884,34 @@ class Example:
 
         self.sim_time += self.frame_dt
         self.frame_id += 1
+        
+        wall_now = time.perf_counter()
+        wall_time = wall_now - self.wall_start_time
+
+        if wall_now - self.last_timing_print >= 1.0:
+            # Windowed RTF (current capability) vs lifetime-average RTF.
+            # RTF(now) = sim advanced / wall elapsed over just the last window.
+            # RTF(avg) = same ratio since the first real frame.
+            # behind    = how far the sim clock trails the wall clock (grows if slow).
+            window_sim = self.sim_time - self._last_sim_time
+            window_wall = wall_now - self._last_wall_time
+            rtf_now = window_sim / window_wall if window_wall > 1.0e-9 else 0.0
+            rtf_avg = self.sim_time / wall_time if wall_time > 1.0e-9 else 0.0
+
+            self._last_sim_time = self.sim_time
+            self._last_wall_time = wall_now
+            self.last_timing_print = wall_now
+
+            behind = wall_time - self.sim_time
+
+            print(
+                f"[TIME] "
+                f"sim={self.sim_time:8.3f} s | "
+                f"real={wall_time:8.3f} s | "
+                f"behind={behind:+6.2f} s | "
+                f"RTF(now)={rtf_now:6.3f}x | "
+                f"RTF(avg)={rtf_avg:6.3f}x"
+            )
 
     # Frame + sphere logging (verbatim demo helpers)
     def _log_frame(self, name, pos, quat, length, colors):
@@ -1904,10 +1950,10 @@ class Example:
             self._last_dbg = now
             err = float(np.linalg.norm(self._target_pos - tip))
             latch = "ON" if self._grip_hold_fraction is not None else "off"
-            print(f"[track] target-tip error = {err*1000:6.1f} mm  "
-                  f"grip_req={self._grip_requested_fraction:0.2f} "
-                  f"grip_cmd={self._grip_fraction:0.2f} "
-                  f"grip_actual={self._grip_actual_fraction:0.2f} latch={latch}")
+            # print(f"[track] target-tip error = {err*1000:6.1f} mm  "
+            #       f"grip_req={self._grip_requested_fraction:0.2f} "
+            #       f"grip_cmd={self._grip_fraction:0.2f} "
+            #       f"grip_actual={self._grip_actual_fraction:0.2f} latch={latch}")
 
         if self.proxy_contacts is not None and self._proxy_contact_layer is not None:
             output_valid = getattr(self.solver, "entry_output_state_valid", None)
@@ -1923,12 +1969,12 @@ class Example:
                 and len(self.belt_bodies) > 0 and self.frame_id % self.debug_every_n_frames == 0):
             body_q = self.state_0.body_q.numpy()
             belt_xyz = body_q[np.asarray(self.belt_bodies, dtype=np.int32), :3]
-            print("[BELT DEBUG] min xyz =", belt_xyz.min(axis=0), "max xyz =", belt_xyz.max(axis=0))
+            # print("[BELT DEBUG] min xyz =", belt_xyz.min(axis=0), "max xyz =", belt_xyz.max(axis=0))
             if len(self.pulley_bodies) > 0 and self.state_0.joint_q is not None:
                 q_start = as_numpy(self.model.joint_q_start)
                 jq = self.state_0.joint_q.numpy()
                 angles = [float(jq[int(q_start[j])]) for j in self.pulley_joints]
-                print("[PULLEY DEBUG] axle angles [rad] =", angles)
+                # print("[PULLEY DEBUG] axle angles [rad] =", angles)
 
         self.viewer.end_frame()
 

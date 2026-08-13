@@ -116,7 +116,7 @@ GRIPPER_DOWN_QUAT = (
 GRIPPER_TCP_LOCAL_OFFSET = (0.0, 0.0, 0.145)
 
 IK_INIT_ITERS = 96
-IK_TRACK_ITERS = 24
+IK_TRACK_ITERS = 8
 IK_LAMBDA_INITIAL = 0.05
 
 # Contact material.
@@ -183,8 +183,8 @@ VBD_ITERATIONS = 20
 VBD_RIGID_AVBD_BETA = 1.0e2
 VBD_RIGID_CONTACT_K_START = 3.0e3
 VBD_RIGID_CONTACT_BUFFER_SIZE = 256
-MUJOCO_ITERATIONS = 50
-MUJOCO_LS_ITERATIONS = 20
+MUJOCO_ITERATIONS = 30
+MUJOCO_LS_ITERATIONS = 10
 
 # Shared memory target buffer (identical transport to the standalone demo).
 SHARED_PATH_DEFAULT = "/tmp/sm_teleop_target.bin"
@@ -964,6 +964,15 @@ class Example:
         self.last_timing_print = self.wall_start_time
         self._last_sim_time = self.sim_time
         self._last_wall_time = self.wall_start_time
+
+        # Optional synchronized step profiler. Profiling is opt-in because the
+        # required CUDA synchronization perturbs throughput.
+        self.profile_step = bool(getattr(args, "profile_step", False))
+        self._prof_frames = 0
+        self._prof_ik_s = 0.0
+        self._prof_phys_s = 0.0
+        self._prof_collide_s = 0.0
+        self._prof_solve_s = 0.0
         
         self.debug_belt_positions = True
         self.debug_every_n_frames = 60
@@ -1267,6 +1276,107 @@ class Example:
             self.episode_recorder = TeleopEpisodeRecorder(
                 Path(self.args.record_dir), self.model, self.state_0, self.control, self
             )
+
+        # CUDA graph: capture only the repeated coupled-physics work.
+        self.physics_graph = None
+        self.use_cuda_graph = bool(getattr(self.args, "cuda_graph", True)) and self.device.is_cuda
+        if self.profile_step and self.use_cuda_graph:
+            self.use_cuda_graph = False
+            print("[PROFILE] --profile-step enabled: detailed collide/solve timing uses "
+                  "the uncaptured physics loop; solver/contact settings are unchanged.")
+        if self.use_cuda_graph:
+            self._capture_physics_graph()
+        else:
+            print(f"[CUDA GRAPH] disabled (device={self.device})")
+
+    def _simulate_physics(self) -> None:
+        """One full rendered frame of the coupled physics.
+        """
+        for _ in range(self.sim_substeps):
+            self.state_0.clear_forces()
+            newton.examples.apply_coupled_viewer_forces(self, self.state_0)
+
+            # Keep the exact original collision call/path and filtered pair set.
+            self.model.collide(
+                self.state_0, self.contacts, collision_pipeline=self.collision_pipeline
+            )
+
+            self.solver.step(
+                self.state_0, self.state_1, self.control, self.contacts, self.sim_dt
+            )
+            newton.eval_ik(
+                self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd
+            )
+            self.state_0, self.state_1 = self.state_1, self.state_0
+
+    def _simulate_physics_profiled(self) -> tuple[float, float, float]:
+        """Run unchanged physics with synchronized timing for --profile-step."""
+        collide_s = 0.0
+        solve_s = 0.0
+        wp.synchronize_device(self.device)
+        phys_start = time.perf_counter()
+
+        for _ in range(self.sim_substeps):
+            self.state_0.clear_forces()
+            newton.examples.apply_coupled_viewer_forces(self, self.state_0)
+
+            wp.synchronize_device(self.device)
+            t0 = time.perf_counter()
+            self.model.collide(
+                self.state_0, self.contacts, collision_pipeline=self.collision_pipeline
+            )
+            wp.synchronize_device(self.device)
+            collide_s += time.perf_counter() - t0
+
+            t0 = time.perf_counter()
+            self.solver.step(
+                self.state_0, self.state_1, self.control, self.contacts, self.sim_dt
+            )
+            newton.eval_ik(
+                self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd
+            )
+            wp.synchronize_device(self.device)
+            solve_s += time.perf_counter() - t0
+
+            self.state_0, self.state_1 = self.state_1, self.state_0
+
+        phys_s = time.perf_counter() - phys_start
+        return phys_s, collide_s, solve_s
+
+    def _capture_physics_graph(self) -> None:
+        """Capture the fixed GPU physics launch sequence once, then replay it."""
+        saved_state_0 = self.state_0
+        saved_state_1 = self.state_1
+        try:
+            wp.synchronize_device(self.device)
+            with wp.ScopedDevice(self.device):
+                with wp.ScopedCapture() as capture:
+                    self._simulate_physics()
+            if capture.graph is None:
+                raise RuntimeError("Warp returned no CUDA graph")
+            self.physics_graph = capture.graph
+            print(
+                f"[CUDA GRAPH] captured coupled physics: "
+                f"{self.sim_substeps} substeps/frame, dt={self.sim_dt:.9f} s; "
+                "contact/solver settings unchanged"
+            )
+        except Exception as exc:
+            # Safe fallback: preserving the original simulation is more important
+            # than forcing graph mode on a driver/solver combination that cannot
+            # be captured.
+            self.physics_graph = None
+            self.use_cuda_graph = False
+            print(f"[CUDA GRAPH] capture failed; using original uncaptured loop: {exc}")
+        finally:
+            self.state_0 = saved_state_0
+            self.state_1 = saved_state_1
+
+    def _launch_physics(self) -> None:
+        if self.physics_graph is not None:
+            with wp.ScopedDevice(self.device):
+                wp.capture_launch(self.physics_graph)
+        else:
+            self._simulate_physics()
 
     def _load_replay_episode(self, episode_dir: Path) -> None:
         episode_dir = Path(episode_dir).expanduser()
@@ -1826,6 +1936,10 @@ class Example:
         self._update_gripper_antcrush()
 
         # 2) Solve the PRIMARY TCP objective.
+        if self.profile_step:
+            wp.synchronize_device(self.device)
+            _ik_t0 = time.perf_counter()
+
         self.pos_obj.set_target_position(0, _v3(self._target_pos))
         self.rot_obj.set_target_rotation(0, _v4(self._target_xyzw))
 
@@ -1852,14 +1966,19 @@ class Example:
             if np.isfinite(solved_2).all():
                 self._write_control_targets(solved_2)
 
+        if self.profile_step:
+            wp.synchronize_device(self.device)
+            self._prof_ik_s += time.perf_counter() - _ik_t0
+
         # 3) Coupled MuJoCo(robot) + VBD(belt) stepping (full-scene physics).
-        for _ in range(self.sim_substeps):
-            self.state_0.clear_forces()
-            newton.examples.apply_coupled_viewer_forces(self, self.state_0)
-            self.model.collide(self.state_0, self.contacts, collision_pipeline=self.collision_pipeline)
-            self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.sim_dt)
-            newton.eval_ik(self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd)
-            self.state_0, self.state_1 = self.state_1, self.state_0
+        if self.profile_step:
+            _phys_s, _collide_s, _solve_s = self._simulate_physics_profiled()
+            self._prof_phys_s += _phys_s
+            self._prof_collide_s += _collide_s
+            self._prof_solve_s += _solve_s
+            self._prof_frames += 1
+        else:
+            self._launch_physics()
 
         # Passive recording hook
         if self.episode_recorder is not None:
@@ -1896,6 +2015,19 @@ class Example:
 
             behind = wall_time - self.sim_time
 
+            if self.profile_step and self._prof_frames > 0:
+                _n = float(self._prof_frames)
+                ik_ms = 1000.0 * self._prof_ik_s / _n
+                phys_ms = 1000.0 * self._prof_phys_s / _n
+                collide_ms = 1000.0 * self._prof_collide_s / _n
+                solve_ms = 1000.0 * self._prof_solve_s / _n
+                profile_suffix = (
+                    f" | ik={ik_ms:5.1f} | phys={phys_ms:6.1f} "
+                    f"(collide={collide_ms:5.1f} solve={solve_ms:6.1f}) ms/frame"
+                )
+            else:
+                profile_suffix = ""
+
             print(
                 f"[TIME] "
                 f"sim={self.sim_time:8.3f} s | "
@@ -1903,7 +2035,15 @@ class Example:
                 f"behind={behind:+6.2f} s | "
                 f"RTF(now)={rtf_now:6.3f}x | "
                 f"RTF(avg)={rtf_avg:6.3f}x"
+                f"{profile_suffix}"
             )
+
+            if self.profile_step:
+                self._prof_frames = 0
+                self._prof_ik_s = 0.0
+                self._prof_phys_s = 0.0
+                self._prof_collide_s = 0.0
+                self._prof_solve_s = 0.0
 
     # Frame + sphere logging (verbatim demo helpers)
     def _log_frame(self, name, pos, quat, length, colors):
@@ -1975,6 +2115,15 @@ class Example:
                             help="directory in which recording episodes are created")
         parser.add_argument("--replay-episode", type=str, default=None,
                             help="replay an episode directory using initial_state.npz + actions.jsonl")
+
+        # Performance only: graph capture changes launch overhead, not physics.
+        parser.add_argument("--no-cuda-graph", action="store_false", dest="cuda_graph",
+                            default=True,
+                            help="disable CUDA graph capture and use the original per-substep launch loop")
+        parser.add_argument("--profile-step", action="store_true",
+                            help=("print synchronized per-frame IK / physics / collide / solve timing; "
+                                  "detailed profiling uses the uncaptured physics loop so collide and solve "
+                                  "can be measured separately"))
 
         # teleop target visuals
         parser.add_argument("--axis-len", type=float, default=0.08)

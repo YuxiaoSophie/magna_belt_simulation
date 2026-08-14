@@ -116,7 +116,7 @@ GRIPPER_DOWN_QUAT = (
 GRIPPER_TCP_LOCAL_OFFSET = (0.0, 0.0, 0.145)
 
 IK_INIT_ITERS = 96
-IK_TRACK_ITERS = 8
+IK_TRACK_ITERS = 24
 IK_LAMBDA_INITIAL = 0.05
 
 # Contact material.
@@ -170,7 +170,14 @@ GRIPPER_EFFORT_LIMIT = 1.0
 GRIPPER_STALL_MIN_FRACTION = 0.60
 GRIPPER_STALL_ERROR_FRACTION = 0.010
 GRIPPER_STALL_SPEED_FRACTION_PER_SEC = 0.15
-GRIPPER_STALL_FRAMES = 1
+# Require a real persistent stall instead of latching on one noisy frame.
+GRIPPER_STALL_FRAMES = 3
+
+# Contact-critical grasp transport settings.
+GRASP_CONTACT_SAFE_FRACTION = 0.45
+GRASP_CONTACT_SAFE_UNCAPTURED = True
+
+GRASPED_MAX_ARM_SPEED = 0.75
 GRIPPER_HOLD_PRELOAD_FRACTION = 0.004
 GRIPPER_RELEASE_HYSTERESIS = 0.020
 
@@ -183,8 +190,8 @@ VBD_ITERATIONS = 20
 VBD_RIGID_AVBD_BETA = 1.0e2
 VBD_RIGID_CONTACT_K_START = 3.0e3
 VBD_RIGID_CONTACT_BUFFER_SIZE = 256
-MUJOCO_ITERATIONS = 30
-MUJOCO_LS_ITERATIONS = 10
+MUJOCO_ITERATIONS = 50  # restored from stable pre-CUDA version; important for gripper/proxy convergence
+MUJOCO_LS_ITERATIONS = 20  # restored from stable pre-CUDA version
 
 # Shared memory target buffer (identical transport to the standalone demo).
 SHARED_PATH_DEFAULT = "/tmp/sm_teleop_target.bin"
@@ -1232,6 +1239,7 @@ class Example:
         self._grip_requested_fraction = 0.0
         self._grip_hold_fraction = None
         self._grip_stall_frames = 0
+        self._grasp_stabilize_frames_remaining = 0
         self._grip_actual_fraction = 0.0
         self._grip_actual_speed = 0.0
 
@@ -1371,7 +1379,33 @@ class Example:
             self.state_0 = saved_state_0
             self.state_1 = saved_state_1
 
+    def _grasp_contact_critical(self) -> bool:
+        """Use the stable uncaptured path only while the pinch is being formed.
+        """
+        forming_grasp = (
+            self._grip_hold_fraction is None
+            and (
+                self._grip_fraction >= GRASP_CONTACT_SAFE_FRACTION
+                or self._grip_requested_fraction >= GRASP_CONTACT_SAFE_FRACTION
+            )
+        )
+        settling_grasp = self._grasp_stabilize_frames_remaining > 0
+        return forming_grasp or settling_grasp
+
     def _launch_physics(self) -> None:
+        # Hybrid fast/stable execution:
+        #   1) free motion                      -> CUDA graph
+        #   2) fingers entering belt contact    -> uncaptured stable physics
+        #   3) first few frames after latch     -> uncaptured stable physics
+        #   4) established grasp / transport    -> CUDA graph again
+        if GRASP_CONTACT_SAFE_UNCAPTURED and self._grasp_contact_critical():
+            self._simulate_physics()
+            if self._grip_hold_fraction is not None and self._grasp_stabilize_frames_remaining > 0:
+                self._grasp_stabilize_frames_remaining -= 1
+                if self._grasp_stabilize_frames_remaining == 0:
+                    print("[GRASP] stabilized; resuming CUDA graph for fast transport.")
+            return
+
         if self.physics_graph is not None:
             with wp.ScopedDevice(self.device):
                 wp.capture_launch(self.physics_graph)
@@ -1427,6 +1461,7 @@ class Example:
         # Reset anti-crush latch internals to their normal t=0 values.
         self._grip_hold_fraction = None
         self._grip_stall_frames = 0
+        self._grasp_stabilize_frames_remaining = 0
         self._grip_actual_fraction = 0.0
         self._grip_actual_speed = 0.0
 
@@ -1730,6 +1765,7 @@ class Example:
                 print(f"[GRASP] release latch: requested={requested:.3f}, actual={actual:.3f}")
                 self._grip_hold_fraction = None
                 self._grip_stall_frames = 0
+                self._grasp_stabilize_frames_remaining = 0
                 self._grip_fraction = requested
             else:
                 self._grip_fraction = min(requested, self._grip_hold_fraction)
@@ -1754,6 +1790,7 @@ class Example:
             hold = min(requested, actual + GRIPPER_HOLD_PRELOAD_FRACTION)
             self._grip_hold_fraction = float(np.clip(hold, 0.0, 1.0))
             self._grip_fraction = self._grip_hold_fraction
+            self._grasp_stabilize_frames_remaining = GRASP_STABILIZE_FRAMES
             print(
                 f"[GRASP] anti-crush latch: requested={requested:.3f}, actual={actual:.3f}, "
                 f"hold={self._grip_hold_fraction:.3f}, speed={actual_speed:.3f}/s"
@@ -1773,7 +1810,12 @@ class Example:
         for j in range(len(desired)):
             desired[j] = self._nearest_equivalent_angle(desired[j], self._arm_cmd[j])
 
-        max_step = float(self.args.max_arm_speed) * self.frame_dt
+        # Once the belt is actually latched, avoid injecting a sudden tangential
+        # impulse/torque through one pad that can roll a round belt out of the pinch.
+        arm_speed_limit = float(self.args.max_arm_speed)
+        if self._grip_hold_fraction is not None:
+            arm_speed_limit = min(arm_speed_limit, GRASPED_MAX_ARM_SPEED)
+        max_step = arm_speed_limit * self.frame_dt
 
         delta = np.clip(desired - self._arm_cmd, -max_step, max_step)
 
@@ -2116,10 +2158,10 @@ class Example:
         parser.add_argument("--replay-episode", type=str, default=None,
                             help="replay an episode directory using initial_state.npz + actions.jsonl")
 
-        # Performance only: graph capture changes launch overhead, not physics.
+        # Performance only: keep the stable physics settings above; CUDA graph only reduces repeated GPU launch overhead.
         parser.add_argument("--no-cuda-graph", action="store_false", dest="cuda_graph",
                             default=True,
-                            help="disable CUDA graph capture and use the original per-substep launch loop")
+                            help="disable CUDA graph capture for A/B stability testing; physics parameters stay identical")
         parser.add_argument("--profile-step", action="store_true",
                             help=("print synchronized per-frame IK / physics / collide / solve timing; "
                                   "detailed profiling uses the uncaptured physics loop so collide and solve "

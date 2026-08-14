@@ -1353,7 +1353,7 @@ class Example:
         #   GRASP / transport    -> ADMM-coupled graph
         # This avoids falling back to Python/kernel-launch-heavy ADMM every frame.
         self.fast_physics_graph = None
-        self.admm_physics_graph = None.
+        self.admm_physics_graph = None
         self.physics_graph = None
         self.use_cuda_graph = bool(getattr(self.args, "cuda_graph", True)) and self.device.is_cuda
         if self.profile_step and self.use_cuda_graph:

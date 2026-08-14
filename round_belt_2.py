@@ -177,6 +177,11 @@ GRIPPER_STALL_FRAMES = 3
 GRASP_CONTACT_SAFE_FRACTION = 0.45
 GRASP_CONTACT_SAFE_UNCAPTURED = True
 
+# Solver handoff hysteresis.  Enter ADMM well before the fingers can physically
+# pinch the belt, then stay in ADMM until the gripper is clearly open again.
+ADMM_PRECONTACT_ENTER_FRACTION = 0.25
+ADMM_RELEASE_EXIT_FRACTION = 0.12
+
 GRASPED_MAX_ARM_SPEED = 0.75
 GRIPPER_HOLD_PRELOAD_FRACTION = 0.004
 GRIPPER_RELEASE_HYSTERESIS = 0.020
@@ -1301,6 +1306,10 @@ class Example:
         self._grip_fraction = 0.0 # applied 0=open, 1=closed
         self._grip_requested_fraction = 0.0
         self._grip_hold_fraction = None
+        # Runtime solver-mode latch.  This is deliberately independent of the
+        # anti-crush grasp latch: ADMM starts BEFORE contact and remains active
+        # through the full grasp/transport/release sequence.
+        self._admm_mode_active = False
         self._grip_stall_frames = 0
         self._grasp_stabilize_frames_remaining = 0
         self._grip_actual_fraction = 0.0
@@ -1354,6 +1363,8 @@ class Example:
         # This avoids falling back to Python/kernel-launch-heavy ADMM every frame.
         self.fast_physics_graph = None
         self.admm_physics_graph = None
+        # Backward-compatible alias used nowhere in the selector below, but useful for
+        # any external/debug code that still checks self.physics_graph.
         self.physics_graph = None
         self.use_cuda_graph = bool(getattr(self.args, "cuda_graph", True)) and self.device.is_cuda
         if self.profile_step and self.use_cuda_graph:
@@ -1460,7 +1471,7 @@ class Example:
             self.state_1 = saved_state_1
 
     def _capture_physics_graphs(self) -> None:
-        """Capture both runtime modes once: fast proxy and stable ADMM."""
+        """Capture BOTH runtime modes once: fast proxy and stable ADMM."""
         try:
             self.fast_physics_graph = self._capture_one_physics_graph(
                 self._simulate_fast_physics, "FAST free-motion proxy physics"
@@ -1496,17 +1507,44 @@ class Example:
         return forming_grasp or settling_grasp
 
     def _use_admm_physics(self) -> bool:
-        """Use ADMM only after the existing anti-crush logic confirms a grasp.
+        """Select the CUDA-captured ADMM path before first belt contact.
         """
-        return self._grip_hold_fraction is not None
+        requested = float(self._grip_requested_fraction)
+        applied = float(self._grip_fraction)
+
+        if self._admm_mode_active:
+            # Never leave ADMM while the anti-crush grasp latch is holding the belt.
+            if self._grip_hold_fraction is not None:
+                return True
+
+            # Hysteresis: switch back only after the fingers have opened well away
+            # from the belt.
+            if requested <= ADMM_RELEASE_EXIT_FRACTION and applied <= ADMM_RELEASE_EXIT_FRACTION:
+                self._admm_mode_active = False
+                print(
+                    f"[COUPLING] ADMM -> FAST CUDA proxy after release "
+                    f"(requested={requested:.3f}, applied={applied:.3f})"
+                )
+            return self._admm_mode_active
+
+        # Enter ADMM while there is still an air gap.
+        if (requested >= ADMM_PRECONTACT_ENTER_FRACTION or
+                applied >= ADMM_PRECONTACT_ENTER_FRACTION):
+            self._admm_mode_active = True
+            print(
+                f"[COUPLING] FAST CUDA proxy -> ADMM CUDA pre-contact "
+                f"(requested={requested:.3f}, applied={applied:.3f})"
+            )
+
+        return self._admm_mode_active
 
     def _launch_physics(self) -> None:
-        # SAME switching logic as before, but BOTH sides are now CUDA-captured:
-        #   not touching / released -> fast proxy graph
-        #   fingers closing         -> fast proxy graph
-        #   anti-crush grasp latch  -> ADMM graph
-        #   latched + moving belt   -> ADMM graph
-        #   released                -> fast proxy graph
+        # Dual CUDA-graph execution:
+        #   open / ordinary free motion          -> fast proxy graph
+        #   early closing, still before contact  -> switch to ADMM graph
+        #   touch + grasp + transport + placement-> remain on ADMM graph
+        #   clearly opened after release         -> fast proxy graph
+        # No uncaptured solver is used unless a graph failed to capture.
         if self._use_admm_physics():
             if self.admm_physics_graph is not None:
                 with wp.ScopedDevice(self.device):
@@ -1572,6 +1610,7 @@ class Example:
 
         # Reset anti-crush latch internals to their normal t=0 values.
         self._grip_hold_fraction = None
+        self._admm_mode_active = False
         self._grip_stall_frames = 0
         self._grasp_stabilize_frames_remaining = 0
         self._grip_actual_fraction = 0.0

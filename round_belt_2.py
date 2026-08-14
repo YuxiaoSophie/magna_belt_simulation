@@ -33,7 +33,7 @@ import newton.utils
 from newton import JointTargetMode
 from newton.viewer import ViewerFile
 from newton.solvers import SolverMuJoCo, SolverVBD
-from newton.solvers.experimental.coupled import SolverCoupled, SolverCoupledProxy
+from newton.solvers.experimental.coupled import SolverCoupled, SolverCoupledProxy, SolverCoupledADMM
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 TASK_BOARD_URDF_DIR = SCRIPT_DIR / "task_board_urdf"
@@ -181,11 +181,19 @@ GRASPED_MAX_ARM_SPEED = 0.75
 GRIPPER_HOLD_PRELOAD_FRACTION = 0.004
 GRIPPER_RELEASE_HYSTERESIS = 0.020
 
-# Proxy-coupling / solver settings.
+# Hybrid coupling settings.
+# Free motion uses the original lightweight proxy-coupled solver inside a CUDA graph.
+# Grasp formation + grasped transport use ADMM for stronger/stabler coupling.
 PROXY_ITERATIONS = 1
-# Make the robot pad proxies dynamically dominant over the 22 g belt.
 PROXY_MASS_SCALE = 10.0
 PROXY_COUPLING_MODE = "lagged"
+
+# ADMM settings follow Newton's official MuJoCo + VBD cable example.
+ADMM_ITERATIONS = 5
+ADMM_RHO = 200.0
+ADMM_GAMMA = 0.001
+ADMM_BAUMGARTE = 0.5
+ADMM_RIGID_CONTACT_MATCHING = "latest"
 VBD_ITERATIONS = 20
 VBD_RIGID_AVBD_BETA = 1.0e2
 VBD_RIGID_CONTACT_K_START = 3.0e3
@@ -1131,7 +1139,10 @@ class Example:
         self._build_ik()
         self._initialize_robot_at_approach()
 
-        self.solver = SolverCoupledProxy(
+        # HYBRID COUPLING:
+        #   - fast_solver: original proxy coupling; CUDA-graph captured for free motion
+        #   - admm_solver: shared-contact ADMM; used while grasping/holding/transporting
+        self.fast_solver = SolverCoupledProxy(
             model=self.model,
             entries=[
                 SolverCoupled.Entry(
@@ -1156,16 +1167,67 @@ class Example:
                     collision_pipeline=lambda model: newton.examples.create_collision_pipeline(
                         model, broad_phase="explicit"),
                     collide_interval=1)],
-                iterations=PROXY_ITERATIONS))
+                iterations=PROXY_ITERATIONS),
+        )
+
+        self.admm_solver = SolverCoupledADMM(
+            model=self.model,
+            entries=[
+                SolverCoupled.Entry(
+                    name="mjc",
+                    solver=lambda v: SolverMuJoCo(
+                        model=v, solver="newton", integrator="implicitfast", cone="elliptic",
+                        iterations=MUJOCO_ITERATIONS, ls_iterations=MUJOCO_LS_ITERATIONS,
+                        use_mujoco_contacts=False, njmax=256, nconmax=128),
+                    bodies=self.robot_bodies, joints=self.robot_joints, shapes=self.robot_shapes),
+                SolverCoupled.Entry(
+                    name="vbd",
+                    solver=lambda v: SolverVBD(
+                        model=v, iterations=VBD_ITERATIONS,
+                        rigid_compliant_alm=True,
+                        rigid_avbd_beta=VBD_RIGID_AVBD_BETA,
+                        rigid_contact_k_start=VBD_RIGID_CONTACT_K_START,
+                        rigid_contact_history=False,
+                        rigid_body_contact_buffer_size=VBD_RIGID_CONTACT_BUFFER_SIZE),
+                    bodies=self.vbd_bodies, joints=self.vbd_joints, shapes=self.vbd_shapes),
+            ],
+            coupling=SolverCoupledADMM.Config(
+                iterations=ADMM_ITERATIONS,
+                rho=ADMM_RHO,
+                gamma=ADMM_GAMMA,
+                baumgarte=ADMM_BAUMGARTE,
+                rigid_contact_matching=ADMM_RIGID_CONTACT_MATCHING,
+                contact_pairs=[
+                    SolverCoupledADMM.ContactPair(source="mjc", destination="vbd"),
+                ],
+            ),
+        )
+
+        # Keep self.solver as the fast/default solver for Newton's coupled-view helpers.
+        self.solver = self.fast_solver
 
         self.state_0 = self.model.state()
         self.state_1 = self.model.state()
 
-        self.collision_pipeline = newton.CollisionPipeline(
-            self.model, broad_phase="explicit", shape_pairs_filtered=self._belt_world_shape_pairs())
-        self.contacts = self.collision_pipeline.contacts()
-        if hasattr(self.solver, "prepare_contacts"):
-            self.solver.prepare_contacts(self.contacts)
+        # Fast/free-motion contact set is exactly the original belt<->world set.
+        self.fast_collision_pipeline = newton.CollisionPipeline(
+            self.model, broad_phase="explicit",
+            shape_pairs_filtered=self._belt_world_shape_pairs(include_gripper=False))
+        self.fast_contacts = self.fast_collision_pipeline.contacts()
+        if hasattr(self.fast_solver, "prepare_contacts"):
+            self.fast_solver.prepare_contacts(self.fast_contacts)
+
+        # ADMM additionally needs pad<->belt contacts in the shared contact buffer.
+        self.admm_collision_pipeline = newton.CollisionPipeline(
+            self.model, broad_phase="explicit",
+            shape_pairs_filtered=self._belt_world_shape_pairs(include_gripper=True))
+        self.admm_contacts = self.admm_collision_pipeline.contacts()
+        if hasattr(self.admm_solver, "prepare_contacts"):
+            self.admm_solver.prepare_contacts(self.admm_contacts)
+
+        # Backward-compatible aliases used by rendering/debug helpers.
+        self.collision_pipeline = self.fast_collision_pipeline
+        self.contacts = self.fast_contacts
 
         self._main_view_layer = None
         self._proxy_contact_layer = None
@@ -1178,8 +1240,9 @@ class Example:
         newton.examples.configure_coupled_view(self, self.args)
         self.viewer.show_contacts = False
 
-        self.proxy_contacts = (self.solver.get_proxy_contacts("mjc", "vbd")
-                               if hasattr(self.solver, "get_proxy_contacts") else None)
+        # Keep the original proxy-contact layer available for the fast/free-motion path.
+        self.proxy_contacts = (self.fast_solver.get_proxy_contacts("mjc", "vbd")
+                               if hasattr(self.fast_solver, "get_proxy_contacts") else None)
 
         newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_0)
         newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_1)
@@ -1285,7 +1348,12 @@ class Example:
                 Path(self.args.record_dir), self.model, self.state_0, self.control, self
             )
 
-        # CUDA graph: capture only the repeated coupled-physics work.
+        # Two CUDA graphs, matching the original hybrid execution logic:
+        #   FREE / not grasping  -> original lightweight proxy-coupled graph
+        #   GRASP / transport    -> ADMM-coupled graph
+        # This avoids falling back to Python/kernel-launch-heavy ADMM every frame.
+        self.fast_physics_graph = None
+        self.admm_physics_graph = None.
         self.physics_graph = None
         self.use_cuda_graph = bool(getattr(self.args, "cuda_graph", True)) and self.device.is_cuda
         if self.profile_step and self.use_cuda_graph:
@@ -1293,36 +1361,60 @@ class Example:
             print("[PROFILE] --profile-step enabled: detailed collide/solve timing uses "
                   "the uncaptured physics loop; solver/contact settings are unchanged.")
         if self.use_cuda_graph:
-            self._capture_physics_graph()
+            self._capture_physics_graphs()
         else:
             print(f"[CUDA GRAPH] disabled (device={self.device})")
 
-    def _simulate_physics(self) -> None:
-        """One full rendered frame of the coupled physics.
-        """
+    def _simulate_fast_physics(self) -> None:
+        """Original lightweight proxy-coupled physics used for free motion."""
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
             newton.examples.apply_coupled_viewer_forces(self, self.state_0)
-
-            # Keep the exact original collision call/path and filtered pair set.
             self.model.collide(
-                self.state_0, self.contacts, collision_pipeline=self.collision_pipeline
+                self.state_0, self.fast_contacts, collision_pipeline=self.fast_collision_pipeline
             )
-
-            self.solver.step(
-                self.state_0, self.state_1, self.control, self.contacts, self.sim_dt
+            self.fast_solver.step(
+                self.state_0, self.state_1, self.control, self.fast_contacts, self.sim_dt
             )
             newton.eval_ik(
                 self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd
             )
             self.state_0, self.state_1 = self.state_1, self.state_0
 
+    def _simulate_admm_physics(self) -> None:
+        """Stable ADMM-coupled physics used from grasp formation through transport."""
+        for _ in range(self.sim_substeps):
+            self.state_0.clear_forces()
+            newton.examples.apply_coupled_viewer_forces(self, self.state_0)
+            self.model.collide(
+                self.state_0, self.admm_contacts, collision_pipeline=self.admm_collision_pipeline
+            )
+            self.admm_solver.step(
+                self.state_0, self.state_1, self.control, self.admm_contacts, self.sim_dt
+            )
+            newton.eval_ik(
+                self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd
+            )
+            self.state_0, self.state_1 = self.state_1, self.state_0
+
+    def _simulate_physics(self) -> None:
+        """Compatibility wrapper: select the same hybrid path as normal stepping."""
+        if self._use_admm_physics():
+            self._simulate_admm_physics()
+        else:
+            self._simulate_fast_physics()
+
     def _simulate_physics_profiled(self) -> tuple[float, float, float]:
-        """Run unchanged physics with synchronized timing for --profile-step."""
-        collide_s = 0.0
-        solve_s = 0.0
+        """Profile whichever hybrid physics path is active."""
         wp.synchronize_device(self.device)
         phys_start = time.perf_counter()
+        collide_s = 0.0
+        solve_s = 0.0
+
+        use_admm = self._use_admm_physics()
+        solver = self.admm_solver if use_admm else self.fast_solver
+        contacts = self.admm_contacts if use_admm else self.fast_contacts
+        pipeline = self.admm_collision_pipeline if use_admm else self.fast_collision_pipeline
 
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
@@ -1330,58 +1422,69 @@ class Example:
 
             wp.synchronize_device(self.device)
             t0 = time.perf_counter()
-            self.model.collide(
-                self.state_0, self.contacts, collision_pipeline=self.collision_pipeline
-            )
+            self.model.collide(self.state_0, contacts, collision_pipeline=pipeline)
             wp.synchronize_device(self.device)
             collide_s += time.perf_counter() - t0
 
             t0 = time.perf_counter()
-            self.solver.step(
-                self.state_0, self.state_1, self.control, self.contacts, self.sim_dt
-            )
+            solver.step(self.state_0, self.state_1, self.control, contacts, self.sim_dt)
             newton.eval_ik(
                 self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd
             )
             wp.synchronize_device(self.device)
             solve_s += time.perf_counter() - t0
-
             self.state_0, self.state_1 = self.state_1, self.state_0
 
-        phys_s = time.perf_counter() - phys_start
-        return phys_s, collide_s, solve_s
+        return time.perf_counter() - phys_start, collide_s, solve_s
 
-    def _capture_physics_graph(self) -> None:
-        """Capture the fixed GPU physics launch sequence once, then replay it."""
+    def _capture_one_physics_graph(self, simulate_fn, label: str):
+        """Capture one fixed 10-substep coupled frame without changing runtime mode."""
         saved_state_0 = self.state_0
         saved_state_1 = self.state_1
         try:
             wp.synchronize_device(self.device)
             with wp.ScopedDevice(self.device):
                 with wp.ScopedCapture() as capture:
-                    self._simulate_physics()
+                    simulate_fn()
             if capture.graph is None:
                 raise RuntimeError("Warp returned no CUDA graph")
-            self.physics_graph = capture.graph
             print(
-                f"[CUDA GRAPH] captured coupled physics: "
-                f"{self.sim_substeps} substeps/frame, dt={self.sim_dt:.9f} s; "
-                "contact/solver settings unchanged"
+                f"[CUDA GRAPH] captured {label}: "
+                f"{self.sim_substeps} substeps/frame, dt={self.sim_dt:.9f} s"
             )
-        except Exception as exc:
-            # Safe fallback: preserving the original simulation is more important
-            # than forcing graph mode on a driver/solver combination that cannot
-            # be captured.
-            self.physics_graph = None
-            self.use_cuda_graph = False
-            print(f"[CUDA GRAPH] capture failed; using original uncaptured loop: {exc}")
+            return capture.graph
         finally:
+            # With 10 (even) substeps these references normally already return to the
+            # same ordering, but restore explicitly so capture cannot alter the selector.
             self.state_0 = saved_state_0
             self.state_1 = saved_state_1
 
+    def _capture_physics_graphs(self) -> None:
+        """Capture both runtime modes once: fast proxy and stable ADMM."""
+        try:
+            self.fast_physics_graph = self._capture_one_physics_graph(
+                self._simulate_fast_physics, "FAST free-motion proxy physics"
+            )
+            # Keep the old name as an alias for compatibility.
+            self.physics_graph = self.fast_physics_graph
+        except Exception as exc:
+            self.fast_physics_graph = None
+            self.physics_graph = None
+            print(f"[CUDA GRAPH] FAST capture failed; free motion will be uncaptured: {exc}")
+
+        try:
+            self.admm_physics_graph = self._capture_one_physics_graph(
+                self._simulate_admm_physics, "ADMM grasp/transport physics"
+            )
+        except Exception as exc:
+            self.admm_physics_graph = None
+            print(f"[CUDA GRAPH] ADMM capture failed; grasp/transport will be uncaptured: {exc}")
+
+        if self.fast_physics_graph is None and self.admm_physics_graph is None:
+            self.use_cuda_graph = False
+
     def _grasp_contact_critical(self) -> bool:
-        """Use the stable uncaptured path only while the pinch is being formed.
-        """
+        """True while the pinch is forming or settling."""
         forming_grasp = (
             self._grip_hold_fraction is None
             and (
@@ -1392,25 +1495,34 @@ class Example:
         settling_grasp = self._grasp_stabilize_frames_remaining > 0
         return forming_grasp or settling_grasp
 
+    def _use_admm_physics(self) -> bool:
+        """Use ADMM only after the existing anti-crush logic confirms a grasp.
+        """
+        return self._grip_hold_fraction is not None
+
     def _launch_physics(self) -> None:
-        # Hybrid fast/stable execution:
-        #   1) free motion                      -> CUDA graph
-        #   2) fingers entering belt contact    -> uncaptured stable physics
-        #   3) first few frames after latch     -> uncaptured stable physics
-        #   4) established grasp / transport    -> CUDA graph again
-        if GRASP_CONTACT_SAFE_UNCAPTURED and self._grasp_contact_critical():
-            self._simulate_physics()
+        # SAME switching logic as before, but BOTH sides are now CUDA-captured:
+        #   not touching / released -> fast proxy graph
+        #   fingers closing         -> fast proxy graph
+        #   anti-crush grasp latch  -> ADMM graph
+        #   latched + moving belt   -> ADMM graph
+        #   released                -> fast proxy graph
+        if self._use_admm_physics():
+            if self.admm_physics_graph is not None:
+                with wp.ScopedDevice(self.device):
+                    wp.capture_launch(self.admm_physics_graph)
+            else:
+                self._simulate_admm_physics()
+
             if self._grip_hold_fraction is not None and self._grasp_stabilize_frames_remaining > 0:
                 self._grasp_stabilize_frames_remaining -= 1
-                if self._grasp_stabilize_frames_remaining == 0:
-                    print("[GRASP] stabilized; resuming CUDA graph for fast transport.")
             return
 
-        if self.physics_graph is not None:
+        if self.fast_physics_graph is not None:
             with wp.ScopedDevice(self.device):
-                wp.capture_launch(self.physics_graph)
+                wp.capture_launch(self.fast_physics_graph)
         else:
-            self._simulate_physics()
+            self._simulate_fast_physics()
 
     def _load_replay_episode(self, episode_dir: Path) -> None:
         episode_dir = Path(episode_dir).expanduser()
@@ -1522,13 +1634,8 @@ class Example:
             np.asarray(row["joint_target_q"], dtype=np.float32)
         )
         
-        for _ in range(self.sim_substeps):
-            self.state_0.clear_forces()
-            newton.examples.apply_coupled_viewer_forces(self, self.state_0)
-            self.model.collide(self.state_0, self.contacts, collision_pipeline=self.collision_pipeline)
-            self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.sim_dt)
-            newton.eval_ik(self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd)
-            self.state_0, self.state_1 = self.state_1, self.state_0
+        # Replay uses the same hybrid physics selection as live teleoperation.
+        self._launch_physics()
 
         self._replay_index += 1
         self.sim_time += self.frame_dt
@@ -1930,25 +2037,53 @@ class Example:
                 "gripper_open_values": open_values, "gripper_closed_values": closed_values}
 
     # Collision pair filter
-    def _belt_world_shape_pairs(self) -> wp.array:
+    def _belt_world_shape_pairs(self, include_gripper: bool = False) -> wp.array:
+        """Build the original belt-world pairs; optionally add pad-belt pairs for ADMM."""
         belt_shapes = set(self.belt_shapes)
         vbd_shapes = set(self.vbd_shapes)
         static_vbd_shapes = vbd_shapes - belt_shapes
+        pad_shapes = set(self.gripper_pad_shapes)
         pairs = []
         n_pulley_pairs = 0
+        n_gripper_belt_pairs = 0
         pulley_shapes = set(self.pulley_shapes)
+
         for a, b in self.model.shape_contact_pairs.numpy():
             a = int(a); b = int(b)
-            a_belt = a in belt_shapes; b_belt = b in belt_shapes
-            if (a_belt ^ b_belt) and ((a in static_vbd_shapes) or (b in static_vbd_shapes)):
+            a_belt = a in belt_shapes
+            b_belt = b in belt_shapes
+
+            belt_world = (a_belt ^ b_belt) and (
+                (a in static_vbd_shapes) or (b in static_vbd_shapes)
+            )
+            gripper_belt = (
+                (a_belt and b in pad_shapes) or
+                (b_belt and a in pad_shapes)
+            )
+
+            if belt_world or (include_gripper and gripper_belt):
                 pairs.append((a, b))
                 if a in pulley_shapes or b in pulley_shapes:
                     n_pulley_pairs += 1
+                if gripper_belt:
+                    n_gripper_belt_pairs += 1
+
         if not pairs:
-            raise RuntimeError("No belt-world contact pairs were generated")
-        print(f"[INFO] Main collision pipeline: {len(pairs)} belt<->static-world shape pairs "
-              f"({n_pulley_pairs} of them belt<->pulley; belt self-contact disabled).")
-        return wp.array(np.asarray(pairs, dtype=np.int32), dtype=wp.vec2i, device=self.model.device)
+            raise RuntimeError("No belt contact pairs were generated")
+        if include_gripper and not n_gripper_belt_pairs:
+            raise RuntimeError(
+                "ADMM requires gripper-pad<->belt contact pairs, but none were generated"
+            )
+
+        mode = "ADMM" if include_gripper else "FAST"
+        print(
+            f"[INFO] {mode} collision pipeline: {len(pairs)} selected pairs "
+            f"({n_pulley_pairs} belt<->pulley, {n_gripper_belt_pairs} gripper-pad<->belt; "
+            "belt self-contact disabled)."
+        )
+        return wp.array(
+            np.asarray(pairs, dtype=np.int32), dtype=wp.vec2i, device=self.model.device
+        )
 
     # Sim loop: teleop control + coupled physics stepping
     def step(self):

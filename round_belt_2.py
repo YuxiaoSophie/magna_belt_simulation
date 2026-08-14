@@ -190,8 +190,8 @@ VBD_ITERATIONS = 20
 VBD_RIGID_AVBD_BETA = 1.0e2
 VBD_RIGID_CONTACT_K_START = 3.0e3
 VBD_RIGID_CONTACT_BUFFER_SIZE = 256
-MUJOCO_ITERATIONS = 50  # restored from stable pre-CUDA version; important for gripper/proxy convergence
-MUJOCO_LS_ITERATIONS = 20  # restored from stable pre-CUDA version
+MUJOCO_ITERATIONS = 50  
+MUJOCO_LS_ITERATIONS = 20
 
 # Shared memory target buffer (identical transport to the standalone demo).
 SHARED_PATH_DEFAULT = "/tmp/sm_teleop_target.bin"

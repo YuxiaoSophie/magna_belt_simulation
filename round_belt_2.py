@@ -87,7 +87,7 @@ UR10_EDGE_CLEARANCE = 0.15  # gap between the table edge and the robot stand
 UR10_BASE_X = BELT_CENTER_X
 UR10_BASE_Y = 0.5 * TABLE_WIDTH_Y + UR10_EDGE_CLEARANCE + UR10_STAND_RADIUS
 UR10_BASE_Z = UR10_STAND_HEIGHT
-UR10_BASE_YAW = -math.pi / 2.0  # face -Y, i.e. toward the belt/board
+UR10_BASE_YAW = -math.pi / 2.0 # face -Y, i.e. toward the belt/board
 
 UR10_ARM_HOME_POSE = [0.0, -1.35, 1.75, -1.95, -1.57, 0.0]
 UR10_GRIPPER_CLOSED_FALLBACK = 0.8
@@ -116,7 +116,7 @@ GRIPPER_DOWN_QUAT = (
 GRIPPER_TCP_LOCAL_OFFSET = (0.0, 0.0, 0.145)
 
 IK_INIT_ITERS = 96
-IK_TRACK_ITERS = 24
+IK_TRACK_ITERS = 8
 IK_LAMBDA_INITIAL = 0.05
 
 # Contact material.
@@ -190,8 +190,8 @@ VBD_ITERATIONS = 20
 VBD_RIGID_AVBD_BETA = 1.0e2
 VBD_RIGID_CONTACT_K_START = 3.0e3
 VBD_RIGID_CONTACT_BUFFER_SIZE = 256
-MUJOCO_ITERATIONS = 50  
-MUJOCO_LS_ITERATIONS = 20
+MUJOCO_ITERATIONS = 30  
+MUJOCO_LS_ITERATIONS = 10
 
 # Shared memory target buffer (identical transport to the standalone demo).
 SHARED_PATH_DEFAULT = "/tmp/sm_teleop_target.bin"

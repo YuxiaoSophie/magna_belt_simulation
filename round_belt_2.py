@@ -141,13 +141,7 @@ GRIPPER_SIMPLE_PAD_HALF_Z = 0.01875 # 37.5 mm tall
 # Keep the contact face at approximately the original inner pad surface.
 GRIPPER_SIMPLE_PAD_CENTER_Y = -0.0056
 GRIPPER_SIMPLE_PAD_CENTER_Z = 0.01875
-GRIPPER_SIMPLE_PAD_GAP = 0.0005
-
-# During an explicit open command, temporarily disable the two simple pad contacts.
-GRIPPER_RELEASE_KE = 0.0
-GRIPPER_RELEASE_KD = 0.0
-GRIPPER_RELEASE_MU = 0.0
-GRIPPER_RELEASE_FRACTION = 0.25
+GRIPPER_SIMPLE_PAD_GAP = 0.0001
 
 # Pulley parameters.
 PULLEY_DENSITY = 1000.0
@@ -1117,8 +1111,9 @@ class Example:
         robot_body_end = builder.body_count
         robot_joint_end = builder.joint_count
 
-        # Select the two real moving Robotiq pad bodies. Replace that geometry, 
-        # for collision purposes, with exactly two thin rectangular plates.
+        # Select the two real moving Robotiq pad bodies, but do not let the belt collide
+        # with their detailed imported geometry.  Replace that geometry, for collision
+        # purposes, with exactly two thin rectangular plates.
         self.gripper_proxy_bodies = _select_gripper_proxy_bodies(
             builder, asset_info["gripper_body_start"], asset_info["gripper_body_end"]
         )
@@ -1238,26 +1233,6 @@ class Example:
             kd_np[pulley_shape_idx] = PULLEY_CONTACT_KD
         self.model.shape_material_ke.assign(ke_np)
         self.model.shape_material_kd.assign(kd_np)
-
-        # Save the exact normal/grasp material for every collision shape carried by
-        # the proxy pad bodies.
-        self._gripper_release_shape_indices = np.asarray(
-            self.gripper_proxy_shapes, dtype=np.int32
-        )
-        if self._gripper_release_shape_indices.size:
-            self._gripper_release_restore_mu = (
-                self.model.shape_material_mu.numpy()[self._gripper_release_shape_indices].copy()
-            )
-            self._gripper_release_restore_ke = (
-                self.model.shape_material_ke.numpy()[self._gripper_release_shape_indices].copy()
-            )
-            self._gripper_release_restore_kd = (
-                self.model.shape_material_kd.numpy()[self._gripper_release_shape_indices].copy()
-            )
-        else:
-            self._gripper_release_restore_mu = np.empty((0,), dtype=np.float32)
-            self._gripper_release_restore_ke = np.empty((0,), dtype=np.float32)
-            self._gripper_release_restore_kd = np.empty((0,), dtype=np.float32)
 
         rinfo = self._configure_robot_joints()
         self.gripper_open_values = rinfo["gripper_open_values"]
@@ -1452,9 +1427,6 @@ class Example:
         self._grip_near_contact = False
         self._grip_actual_fraction = 0.0
         self._grip_actual_speed = 0.0
-        # Tracks whether release-only proxy contact ghosting is active.
-        self._release_friction_active = False
-
         # arm command we follow (used for slew limiting + posture bias).
         main_q = self.model.joint_q.numpy()
         self._arm_cmd = np.array(
@@ -2114,42 +2086,6 @@ class Example:
         else:
             self._grip_fraction = requested
 
-    def _update_gripper_release_material(self):
-        """Ghost the two simple belt-contact plates while explicitly open.
-        """
-        idx = self._gripper_release_shape_indices
-        if idx.size == 0:
-            return
-
-        releasing = self._grip_requested_fraction <= GRIPPER_RELEASE_FRACTION
-        if releasing == self._release_friction_active:
-            return
-
-        mu_np = self.model.shape_material_mu.numpy().copy()
-        ke_np = self.model.shape_material_ke.numpy().copy()
-        kd_np = self.model.shape_material_kd.numpy().copy()
-
-        if releasing:
-            mu_np[idx] = GRIPPER_RELEASE_MU
-            ke_np[idx] = GRIPPER_RELEASE_KE
-            kd_np[idx] = GRIPPER_RELEASE_KD
-            self._release_friction_active = True
-            print(
-                f"[GRASP] OPEN: ghosting {idx.size} simple pad shapes "
-                f"(ke={GRIPPER_RELEASE_KE:.1f}, kd={GRIPPER_RELEASE_KD:.1f}, "
-                f"mu={GRIPPER_RELEASE_MU:.1f})"
-            )
-        else:
-            mu_np[idx] = self._gripper_release_restore_mu
-            ke_np[idx] = self._gripper_release_restore_ke
-            kd_np[idx] = self._gripper_release_restore_kd
-            self._release_friction_active = False
-            print(f"[GRASP] CLOSE: restored {idx.size} proxy-pad shape contact materials")
-
-        self.model.shape_material_mu.assign(mu_np)
-        self.model.shape_material_ke.assign(ke_np)
-        self.model.shape_material_kd.assign(kd_np)
-
     def _write_control_targets(self, solved_q):
         """Write the final primary-task IK solution to the robot (slew-limited)."""
         targets = self.control.joint_target_q.numpy().copy()
@@ -2383,10 +2319,6 @@ class Example:
 
         # Convert the raw SpaceMouse command into an anti-crush applied command.
         self._update_gripper_antcrush()
-
-        # While explicitly OPEN, ghost only the two proxy-pad bodies' collision
-        # shapes so a belt wedged on the upper finger geometry can fall away.
-        self._update_gripper_release_material()
 
         # 2) Solve the PRIMARY TCP objective.
         if self.profile_step:
@@ -2630,4 +2562,4 @@ if __name__ == "__main__":
     parser = Example.create_parser()
     viewer, args = newton.examples.init(parser)
     viewer._pause = False
-    newton.examples.run(Example(viewer, args), args)
+    newton.examples.run(Example(viewer, args), args) 

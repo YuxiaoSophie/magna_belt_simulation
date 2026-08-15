@@ -877,9 +877,14 @@ def _add_ur10_and_gripper_assets(builder: newton.ModelBuilder, body_offset: int)
 class TeleopEpisodeRecorder:
     """Passively save the initial state, actions, and Newton state snapshots."""
 
-    def __init__(self, root_dir: Path, model, state, control, example):
+    def __init__(self, root_dir: Path, model, state, control, example, record_name=None):
         stamp = time.strftime("%Y%m%d_%H%M%S")
-        self.episode_dir = Path(root_dir).expanduser() / f"episode_{stamp}"
+        if record_name:
+            folder_name = str(record_name)
+        else:
+            folder_name = f"episode_{stamp}"
+        self.episode_dir = Path(root_dir).expanduser() / folder_name
+        
         suffix = 1
         while self.episode_dir.exists():
             self.episode_dir = Path(root_dir).expanduser() / f"episode_{stamp}_{suffix:02d}"
@@ -1357,7 +1362,12 @@ class Example:
             self._load_replay_episode(Path(self.args.replay_episode))
         elif getattr(self.args, "record_episode", False):
             self.episode_recorder = TeleopEpisodeRecorder(
-                Path(self.args.record_dir), self.model, self.state_0, self.control, self
+                Path(self.args.record_dir),
+                self.model,
+                self.state_0,
+                self.control,
+                self,
+                record_name=self.args.record_name,
             )
 
         # Two CUDA graphs, matching the original hybrid execution logic:
@@ -2357,6 +2367,8 @@ class Example:
                             help="record initial state, per-frame controls, and Newton states")
         parser.add_argument("--record-dir", type=str, default="recordings",
                             help="directory in which recording episodes are created")
+        parser.add_argument("--record-name", type=str, default=None,
+                            help="name of the recording dataset/episode folder",)
         parser.add_argument("--replay-episode", type=str, default=None,
                             help="replay an episode directory using initial_state.npz + actions.jsonl")
 

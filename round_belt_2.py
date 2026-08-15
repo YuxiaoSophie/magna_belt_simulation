@@ -177,10 +177,12 @@ GRIPPER_STALL_FRAMES = 3
 GRASP_CONTACT_SAFE_FRACTION = 0.45
 GRASP_CONTACT_SAFE_UNCAPTURED = True
 
-# Solver handoff hysteresis.  Enter ADMM well before the fingers can physically
-# pinch the belt, then stay in ADMM until the gripper is clearly open again.
-ADMM_PRECONTACT_ENTER_FRACTION = 0.25
-ADMM_RELEASE_EXIT_FRACTION = 0.12
+# Use ADMM only around the actual first-contact event.
+CONTACT_ADMM_PRECONTACT_MIN_FRACTION = max(0.0, GRIPPER_STALL_MIN_FRACTION - 0.05)
+CONTACT_ADMM_PRECONTACT_ERROR_FRACTION = 0.5 * GRIPPER_STALL_ERROR_FRACTION
+CONTACT_ADMM_PRECONTACT_SPEED_FRACTION_PER_SEC = 2.0 * GRIPPER_STALL_SPEED_FRACTION_PER_SEC
+CONTACT_ADMM_POST_STALL_FRAMES = 3
+CONTACT_ADMM_MAX_CONTACT_FRAMES = 8
 
 GRASPED_MAX_ARM_SPEED = 0.75
 GRIPPER_HOLD_PRELOAD_FRACTION = 0.004
@@ -1306,12 +1308,13 @@ class Example:
         self._grip_fraction = 0.0 # applied 0=open, 1=closed
         self._grip_requested_fraction = 0.0
         self._grip_hold_fraction = None
-        # Runtime solver-mode latch.  This is deliberately independent of the
-        # anti-crush grasp latch: ADMM starts BEFORE contact and remains active
-        # through the full grasp/transport/release sequence.
-        self._admm_mode_active = False
         self._grip_stall_frames = 0
         self._grasp_stabilize_frames_remaining = 0
+        self._contact_admm_frames_remaining = 0
+        self._contact_admm_armed = True
+        self._contact_admm_active = False
+        self._contact_admm_age = 0
+        self._grip_near_contact = False
         self._grip_actual_fraction = 0.0
         self._grip_actual_speed = 0.0
 
@@ -1507,55 +1510,69 @@ class Example:
         return forming_grasp or settling_grasp
 
     def _use_admm_physics(self) -> bool:
-        """Select the CUDA-captured ADMM path before first belt contact.
+        """ADMM is active only around the first loaded pad<->belt contact.
+
+        The transition is intentionally hysteretic:
+          * normal closing/free motion       -> FAST proxy CUDA graph
+          * fingers slow + load begins       -> ADMM CUDA graph (pre-contact)
+          * strict stall is confirmed        -> keep ADMM for a few settle frames
+          * established grasp / transport    -> FAST proxy CUDA graph again
         """
-        requested = float(self._grip_requested_fraction)
-        applied = float(self._grip_fraction)
-
-        if self._admm_mode_active:
-            # Never leave ADMM while the anti-crush grasp latch is holding the belt.
-            if self._grip_hold_fraction is not None:
-                return True
-
-            # Hysteresis: switch back only after the fingers have opened well away
-            # from the belt.
-            if requested <= ADMM_RELEASE_EXIT_FRACTION and applied <= ADMM_RELEASE_EXIT_FRACTION:
-                self._admm_mode_active = False
-                print(
-                    f"[COUPLING] ADMM -> FAST CUDA proxy after release "
-                    f"(requested={requested:.3f}, applied={applied:.3f})"
-                )
-            return self._admm_mode_active
-
-        # Enter ADMM while there is still an air gap.
-        if (requested >= ADMM_PRECONTACT_ENTER_FRACTION or
-                applied >= ADMM_PRECONTACT_ENTER_FRACTION):
-            self._admm_mode_active = True
-            print(
-                f"[COUPLING] FAST CUDA proxy -> ADMM CUDA pre-contact "
-                f"(requested={requested:.3f}, applied={applied:.3f})"
-            )
-
-        return self._admm_mode_active
+        return self._contact_admm_active
 
     def _launch_physics(self) -> None:
-        # Dual CUDA-graph execution:
-        #   open / ordinary free motion          -> fast proxy graph
-        #   early closing, still before contact  -> switch to ADMM graph
-        #   touch + grasp + transport + placement-> remain on ADMM graph
-        #   clearly opened after release         -> fast proxy graph
-        # No uncaptured solver is used unless a graph failed to capture.
-        if self._use_admm_physics():
+        # Fully opening re-arms the one-shot contact handoff for the next grasp.
+        if self._grip_requested_fraction < GRASP_CONTACT_SAFE_FRACTION:
+            self._contact_admm_armed = True
+            self._contact_admm_active = False
+            self._contact_admm_age = 0
+            self._contact_admm_frames_remaining = 0
+
+        # Start ADMM slightly before the strict stall detector.
+        if (
+            self._contact_admm_armed
+            and not self._contact_admm_active
+            and self._grip_near_contact
+        ):
+            self._contact_admm_active = True
+            self._contact_admm_age = 0
+            self._contact_admm_frames_remaining = 0
+            print("[COUPLING] near contact -> ADMM pre-contact handoff")
+
+        if self._contact_admm_active:
             if self.admm_physics_graph is not None:
                 with wp.ScopedDevice(self.device):
                     wp.capture_launch(self.admm_physics_graph)
             else:
                 self._simulate_admm_physics()
 
-            if self._grip_hold_fraction is not None and self._grasp_stabilize_frames_remaining > 0:
-                self._grasp_stabilize_frames_remaining -= 1
+            self._contact_admm_age += 1
+
+            # As soon as the existing strict stall detector sees load, hold ADMM
+            # for a small fixed number of additional frames.
+            if self._grip_stall_frames > 0:
+                self._contact_admm_frames_remaining = CONTACT_ADMM_POST_STALL_FRAMES
+                self._contact_admm_armed = False
+            elif self._contact_admm_frames_remaining > 0:
+                self._contact_admm_frames_remaining -= 1
+
+            # Leave ADMM only after the strict stall has disappeared AND its short
+            # post-contact settle countdown has expired.
+            contact_settled = (
+                self._grip_stall_frames == 0
+                and self._contact_admm_frames_remaining <= 0
+                and self._contact_admm_age >= 2
+            )
+            timed_out = self._contact_admm_age >= CONTACT_ADMM_MAX_CONTACT_FRAMES
+            if contact_settled or timed_out:
+                self._contact_admm_active = False
+                self._contact_admm_frames_remaining = 0
+                self._contact_admm_armed = False
+                print("[COUPLING] first contact settled -> FAST CUDA transport")
             return
 
+        # Established grasp/transport uses the original fast proxy graph, matching
+        # the ~0.4 RTF behavior that was working well.
         if self.fast_physics_graph is not None:
             with wp.ScopedDevice(self.device):
                 wp.capture_launch(self.fast_physics_graph)
@@ -1610,9 +1627,13 @@ class Example:
 
         # Reset anti-crush latch internals to their normal t=0 values.
         self._grip_hold_fraction = None
-        self._admm_mode_active = False
         self._grip_stall_frames = 0
         self._grasp_stabilize_frames_remaining = 0
+        self._contact_admm_frames_remaining = 0
+        self._contact_admm_armed = True
+        self._contact_admm_active = False
+        self._contact_admm_age = 0
+        self._grip_near_contact = False
         self._grip_actual_fraction = 0.0
         self._grip_actual_speed = 0.0
 
@@ -1907,6 +1928,7 @@ class Example:
         # If a grasp has already been latched, keep only the small preload.
         # The user must command OPEN below the latch point to release it.
         if self._grip_hold_fraction is not None:
+            self._grip_near_contact = False
             if requested < self._grip_hold_fraction - GRIPPER_RELEASE_HYSTERESIS:
                 print(f"[GRASP] release latch: requested={requested:.3f}, actual={actual:.3f}")
                 self._grip_hold_fraction = None
@@ -1917,9 +1939,15 @@ class Example:
                 self._grip_fraction = min(requested, self._grip_hold_fraction)
             return
 
-        # Detect a closing stall.
+        # Detect the approach to a loaded pinch and then the strict stall.
         error = requested - actual
         closing_request = requested > self._grip_fraction + 1.0e-5
+        self._grip_near_contact = (
+            closing_request
+            and actual >= CONTACT_ADMM_PRECONTACT_MIN_FRACTION
+            and error >= CONTACT_ADMM_PRECONTACT_ERROR_FRACTION
+            and actual_speed <= CONTACT_ADMM_PRECONTACT_SPEED_FRACTION_PER_SEC
+        )
         stalled = (
             closing_request
             and actual >= GRIPPER_STALL_MIN_FRACTION

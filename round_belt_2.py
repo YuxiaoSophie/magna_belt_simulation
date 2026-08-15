@@ -188,6 +188,13 @@ GRASPED_MAX_ARM_SPEED = 0.75
 GRIPPER_HOLD_PRELOAD_FRACTION = 0.004
 GRIPPER_RELEASE_HYSTERESIS = 0.020
 
+# SpaceMouse target-following safety.
+# Consume producer TRANSLATION DELTAS locally and keep the IK target close to the
+# real TCP so reversing the SpaceMouse reverses the robot immediately instead of
+# waiting for a far-ahead absolute target to come back.
+TELEOP_MAX_TARGET_DISTANCE = 0.030 # m, max IK target lead from actual TCP
+TELEOP_MAX_RAW_TARGET_JUMP = 0.050 # m, producer restart/resync guard
+
 # Hybrid coupling settings.
 # Free motion uses the original lightweight proxy-coupled solver inside a CUDA graph.
 # Grasp formation + grasped transport use ADMM for stronger/stabler coupling.
@@ -1310,6 +1317,11 @@ class Example:
 
         self._target_pos = tip0.copy()
         self._target_xyzw = base_quat.copy()
+
+        # Track the producer's absolute position only to recover its per-frame
+        # translation delta.
+        self._spacemouse_raw_pos_prev = tip0.copy()
+
         self._grip_fraction = 0.0 # applied 0=open, 1=closed
         self._grip_requested_fraction = 0.0
         self._grip_hold_fraction = None
@@ -2176,14 +2188,41 @@ class Example:
             self._last_sim_time = self.sim_time
             self._last_wall_time = self.wall_start_time
 
-        # 1) Read the SpaceMouse target. Neutral input leaves the pose unchanged.
-        pos, quat, grip, ready = self.shared.read()
+        # 1) Read the SpaceMouse target.
+        raw_pos, quat, grip, ready = self.shared.read()
         if ready >= 0.5:
-            pos = np.asarray(pos, dtype=np.float64)
+            raw_pos = np.asarray(raw_pos, dtype=np.float64)
             quat = _norm4(quat)
-            if np.isfinite(pos).all() and np.isfinite(quat).all():
-                self._target_pos = pos.copy()
+
+            if np.isfinite(raw_pos).all() and np.isfinite(quat).all():
+                raw_delta = raw_pos - self._spacemouse_raw_pos_prev
+                self._spacemouse_raw_pos_prev = raw_pos.copy()
+
+                # A producer restart/re-seed can create one artificial large jump.
+                # Treat that sample as a resynchronization instead of robot motion.
+                raw_delta_norm = float(np.linalg.norm(raw_delta))
+                if raw_delta_norm <= TELEOP_MAX_RAW_TARGET_JUMP:
+                    candidate = self._target_pos + raw_delta
+
+                    # Current *physical* TCP from the solved Newton state.
+                    bq = self.state_0.body_q.numpy()[self.link_index]
+                    base_pos = np.asarray(bq[0:3], dtype=np.float64)
+                    base_quat = _norm4(np.asarray(bq[3:7], dtype=np.float64))
+                    current_tcp = base_pos + _rotate_vec(base_quat, self.tip_offset)
+
+                    # Keep the Cartesian target close enough that changing the
+                    # SpaceMouse direction takes effect immediately.
+                    lead = candidate - current_tcp
+                    lead_norm = float(np.linalg.norm(lead))
+                    if lead_norm > TELEOP_MAX_TARGET_DISTANCE and lead_norm > 1.0e-12:
+                        candidate = (
+                            current_tcp
+                            + lead * (TELEOP_MAX_TARGET_DISTANCE / lead_norm)
+                        )
+                    self._target_pos = candidate
+.
                 self._target_xyzw = quat.copy()
+
             self._grip_requested_fraction = float(np.clip(grip, 0.0, 1.0))
 
         # Convert the raw SpaceMouse command into an anti-crush applied command.

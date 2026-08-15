@@ -132,7 +132,22 @@ PULLEY_CONTACT_KD = 1.0e-5 * PULLEY_CONTACT_KE
 # Gripper-pad contact used by the mjc -> vbd proxy coupling.
 GRIPPER_CONTACT_KE = 2.0e4
 GRIPPER_CONTACT_KD = 20.0
-GRIPPER_CONTACT_MU = 8.0
+GRIPPER_CONTACT_MU = 4.0
+
+# Belt<->gripper collision simplification.
+GRIPPER_SIMPLE_PAD_HALF_X = 0.0110 # 22 mm wide
+GRIPPER_SIMPLE_PAD_HALF_Y = 0.0010 # 2 mm total thickness (plane-like)
+GRIPPER_SIMPLE_PAD_HALF_Z = 0.01875 # 37.5 mm tall
+# Keep the contact face at approximately the original inner pad surface.
+GRIPPER_SIMPLE_PAD_CENTER_Y = -0.0056
+GRIPPER_SIMPLE_PAD_CENTER_Z = 0.01875
+GRIPPER_SIMPLE_PAD_GAP = 0.0005
+
+# During an explicit open command, temporarily disable the two simple pad contacts.
+GRIPPER_RELEASE_KE = 0.0
+GRIPPER_RELEASE_KD = 0.0
+GRIPPER_RELEASE_MU = 0.0
+GRIPPER_RELEASE_FRACTION = 0.25
 
 # Pulley parameters.
 PULLEY_DENSITY = 1000.0
@@ -787,6 +802,78 @@ def _select_gripper_proxy_bodies(builder, first_body_index, end_body_index) -> l
     return selected
 
 
+def _replace_proxy_pad_colliders_with_two_planes(builder, proxy_bodies: list[int]) -> list[int]:
+    """Make belt contact with the Robotiq gripper be exactly two simple flat pads.
+    """
+    disabled = 0
+
+    collide_shapes_flag = getattr(newton.ShapeFlags, "COLLIDE_SHAPES", None)
+    collide_particles_flag = getattr(newton.ShapeFlags, "COLLIDE_PARTICLES", None)
+    if collide_shapes_flag is None:
+        raise RuntimeError("Newton ShapeFlags.COLLIDE_SHAPES is required for simple gripper pads")
+
+    body_shapes = getattr(builder, "body_shapes", None)
+    shape_body = getattr(builder, "shape_body", None)
+
+    for body in proxy_bodies:
+        if body_shapes is not None and body < len(body_shapes):
+            original_shapes = list(body_shapes[body])
+        elif shape_body is not None:
+            original_shapes = [i for i, b in enumerate(shape_body) if int(b) == int(body)]
+        else:
+            raise RuntimeError("Cannot locate shapes attached to Robotiq pad bodies")
+
+        # Snapshot BEFORE adding the replacement plate, so we disable only the imported
+        # complex Robotiq geometry, never the new simple plate.
+        for shape_idx in original_shapes:
+            flags = builder.shape_flags[shape_idx]
+            flags = flags & ~collide_shapes_flag
+            if collide_particles_flag is not None:
+                flags = flags & ~collide_particles_flag
+            builder.shape_flags[shape_idx] = flags
+            disabled += 1
+
+    simple_cfg = newton.ModelBuilder.ShapeConfig(
+        density=0.0,
+        ke=GRIPPER_CONTACT_KE,
+        kd=GRIPPER_CONTACT_KD,
+        mu=GRIPPER_CONTACT_MU,
+        margin=0.0,
+        gap=GRIPPER_SIMPLE_PAD_GAP,
+        has_shape_collision=True,
+        has_particle_collision=True,
+        is_visible=False,
+    )
+
+    simple_shapes = []
+    for side, body in zip(("left", "right"), proxy_bodies):
+        shape = builder.add_shape_box(
+            body=body,
+            xform=wp.transform(
+                wp.vec3(0.0, GRIPPER_SIMPLE_PAD_CENTER_Y, GRIPPER_SIMPLE_PAD_CENTER_Z),
+                wp.quat_identity(),
+            ),
+            hx=GRIPPER_SIMPLE_PAD_HALF_X,
+            hy=GRIPPER_SIMPLE_PAD_HALF_Y,
+            hz=GRIPPER_SIMPLE_PAD_HALF_Z,
+            cfg=simple_cfg,
+            color=wp.vec3(0.2, 0.9, 0.2),
+            label=f"simple_belt_contact_{side}_pad",
+        )
+        simple_shapes.append(int(shape))
+
+    if len(simple_shapes) != 2:
+        raise RuntimeError(
+            f"Expected exactly two simple gripper pad colliders, created {len(simple_shapes)}"
+        )
+
+    print(
+        f"[INFO] Belt/gripper collision simplified: disabled {disabled} imported "
+        f"pad-body collision shapes; added exactly two flat pad colliders {simple_shapes}."
+    )
+    return simple_shapes
+
+
 def _find_gripper_tcp_body(builder, first_body_index, end_body_index) -> int:
     exact = []; fallback = []
     for b in range(first_body_index, end_body_index):
@@ -1012,7 +1099,7 @@ class Example:
         self.debug_every_n_frames = 60
 
         builder = newton.ModelBuilder(up_axis=newton.Axis.Z, gravity=-9.81)
-        builder.rigid_gap = 0.01
+        builder.rigid_gap = 0.001
         SolverMuJoCo.register_custom_attributes(builder)
         try:
             SolverVBD.register_custom_attributes(builder, dahl_defaults_enabled=False)
@@ -1029,28 +1116,39 @@ class Example:
         asset_info = _add_ur10_and_gripper_assets(builder, robot_body_start)
         robot_body_end = builder.body_count
         robot_joint_end = builder.joint_count
-        robot_shape_end = builder.shape_count
 
+        # Select the two real moving Robotiq pad bodies. Replace that geometry, 
+        # for collision purposes, with exactly two thin rectangular plates.
+        self.gripper_proxy_bodies = _select_gripper_proxy_bodies(
+            builder, asset_info["gripper_body_start"], asset_info["gripper_body_end"]
+        )
+        if len(self.gripper_proxy_bodies) != 2:
+            raise RuntimeError(
+                f"Two-plane gripper contact requires exactly 2 pad bodies; got "
+                f"{self.gripper_proxy_bodies}"
+            )
+        self.gripper_pad_shapes = _replace_proxy_pad_colliders_with_two_planes(
+            builder, self.gripper_proxy_bodies
+        )
+        # From now on, proxy shapes == the two synthetic flat pads only.
+        self.gripper_proxy_shapes = list(self.gripper_pad_shapes)
+
+        # Include the two newly-created pad plates in the robot solver shape range.
+        robot_shape_end = builder.shape_count
         self.robot_bodies = list(range(robot_body_start, robot_body_end))
         self.robot_joints = list(range(robot_joint_start, robot_joint_end))
         self.robot_shapes = list(range(robot_shape_start, robot_shape_end))
         self._robot_joint_count = robot_joint_end
         self._robot_tool_body_idx = asset_info["tool_body_idx"]
 
-        self.gripper_pad_shapes = [
-            i for i in range(asset_info["gripper_shape_start"], asset_info["gripper_shape_end"])
-            if any(kw in _shape_label_lower(builder, i) for kw in GRIPPER_PAD_KEYWORDS)
-        ]
-        n_pad = _apply_gripper_pad_contact_material(
-            builder, asset_info["gripper_shape_start"], asset_info["gripper_shape_end"])
-        print(f"[INFO] Applied gripper contact material to {n_pad} pad shapes.")
-
-        self.gripper_proxy_bodies = _select_gripper_proxy_bodies(
-            builder, asset_info["gripper_body_start"], asset_info["gripper_body_end"])
         self._robot_tcp_body_idx = _find_gripper_tcp_body(
-            builder, asset_info["gripper_body_start"], asset_info["gripper_body_end"])
+            builder, asset_info["gripper_body_start"], asset_info["gripper_body_end"]
+        )
         self.robot_proxy_bodies = list(self.gripper_proxy_bodies)
-        print(f"[INFO] Proxy coupling exposes {len(self.robot_proxy_bodies)} Robotiq gripper bodies only.")
+        print(
+            f"[INFO] Proxy coupling exposes only the 2 Robotiq pad bodies; "
+            f"belt contact shapes are {self.gripper_pad_shapes}."
+        )
 
         try:
             gravcomp = builder.custom_attributes["mujoco:gravcomp"]
@@ -1086,7 +1184,7 @@ class Example:
 
         belt_cfg = newton.ModelBuilder.ShapeConfig(
             density=_estimate_belt_density(), ke=CABLE_CONTACT_KE, kd=CABLE_CONTACT_KD,
-            mu=CABLE_CONTACT_MU, margin=0.0, gap=0.01)
+            mu=CABLE_CONTACT_MU, margin=0.0, gap=0.001)
         rod_bodies, _rod_joints = builder.add_rod(
             positions=cable_points, quaternions=cable_edge_q, radius=BELT_RADIUS, cfg=belt_cfg,
             stretch_stiffness=2.0e4, stretch_damping=1.0e-1,
@@ -1140,6 +1238,26 @@ class Example:
             kd_np[pulley_shape_idx] = PULLEY_CONTACT_KD
         self.model.shape_material_ke.assign(ke_np)
         self.model.shape_material_kd.assign(kd_np)
+
+        # Save the exact normal/grasp material for every collision shape carried by
+        # the proxy pad bodies.
+        self._gripper_release_shape_indices = np.asarray(
+            self.gripper_proxy_shapes, dtype=np.int32
+        )
+        if self._gripper_release_shape_indices.size:
+            self._gripper_release_restore_mu = (
+                self.model.shape_material_mu.numpy()[self._gripper_release_shape_indices].copy()
+            )
+            self._gripper_release_restore_ke = (
+                self.model.shape_material_ke.numpy()[self._gripper_release_shape_indices].copy()
+            )
+            self._gripper_release_restore_kd = (
+                self.model.shape_material_kd.numpy()[self._gripper_release_shape_indices].copy()
+            )
+        else:
+            self._gripper_release_restore_mu = np.empty((0,), dtype=np.float32)
+            self._gripper_release_restore_ke = np.empty((0,), dtype=np.float32)
+            self._gripper_release_restore_kd = np.empty((0,), dtype=np.float32)
 
         rinfo = self._configure_robot_joints()
         self.gripper_open_values = rinfo["gripper_open_values"]
@@ -1334,6 +1452,8 @@ class Example:
         self._grip_near_contact = False
         self._grip_actual_fraction = 0.0
         self._grip_actual_speed = 0.0
+        # Tracks whether release-only proxy contact ghosting is active.
+        self._release_friction_active = False
 
         # arm command we follow (used for slew limiting + posture bias).
         main_q = self.model.joint_q.numpy()
@@ -1994,6 +2114,42 @@ class Example:
         else:
             self._grip_fraction = requested
 
+    def _update_gripper_release_material(self):
+        """Ghost the two simple belt-contact plates while explicitly open.
+        """
+        idx = self._gripper_release_shape_indices
+        if idx.size == 0:
+            return
+
+        releasing = self._grip_requested_fraction <= GRIPPER_RELEASE_FRACTION
+        if releasing == self._release_friction_active:
+            return
+
+        mu_np = self.model.shape_material_mu.numpy().copy()
+        ke_np = self.model.shape_material_ke.numpy().copy()
+        kd_np = self.model.shape_material_kd.numpy().copy()
+
+        if releasing:
+            mu_np[idx] = GRIPPER_RELEASE_MU
+            ke_np[idx] = GRIPPER_RELEASE_KE
+            kd_np[idx] = GRIPPER_RELEASE_KD
+            self._release_friction_active = True
+            print(
+                f"[GRASP] OPEN: ghosting {idx.size} simple pad shapes "
+                f"(ke={GRIPPER_RELEASE_KE:.1f}, kd={GRIPPER_RELEASE_KD:.1f}, "
+                f"mu={GRIPPER_RELEASE_MU:.1f})"
+            )
+        else:
+            mu_np[idx] = self._gripper_release_restore_mu
+            ke_np[idx] = self._gripper_release_restore_ke
+            kd_np[idx] = self._gripper_release_restore_kd
+            self._release_friction_active = False
+            print(f"[GRASP] CLOSE: restored {idx.size} proxy-pad shape contact materials")
+
+        self.model.shape_material_mu.assign(mu_np)
+        self.model.shape_material_ke.assign(ke_np)
+        self.model.shape_material_kd.assign(kd_np)
+
     def _write_control_targets(self, solved_q):
         """Write the final primary-task IK solution to the robot (slew-limited)."""
         targets = self.control.joint_target_q.numpy().copy()
@@ -2227,6 +2383,10 @@ class Example:
 
         # Convert the raw SpaceMouse command into an anti-crush applied command.
         self._update_gripper_antcrush()
+
+        # While explicitly OPEN, ghost only the two proxy-pad bodies' collision
+        # shapes so a belt wedged on the upper finger geometry can fall away.
+        self._update_gripper_release_material()
 
         # 2) Solve the PRIMARY TCP objective.
         if self.profile_step:

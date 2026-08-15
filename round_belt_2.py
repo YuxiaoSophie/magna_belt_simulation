@@ -2220,7 +2220,7 @@ class Example:
                             + lead * (TELEOP_MAX_TARGET_DISTANCE / lead_norm)
                         )
                     self._target_pos = candidate
-.
+
                 self._target_xyzw = quat.copy()
 
             self._grip_requested_fraction = float(np.clip(grip, 0.0, 1.0))

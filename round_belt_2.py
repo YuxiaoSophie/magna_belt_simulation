@@ -424,7 +424,7 @@ BELT_PLACE_ABOVE = (_place_x, _place_y, LARGE_PULLEY_WORLD_CENTER[2] + BELT_APPR
 BELT_PLACE_DOWN = (_place_x, _place_y, LARGE_PULLEY_WORLD_CENTER[2] + BELT_RADIUS)
 
 # Small-pulley placement geometry (the pulley the belt seats on FIRST).
-SMALL_PULLEY_CENTER_LOCAL = (0.3504 - 0.01200845, 0.1964 - 0.0004, 0.0248)
+SMALL_PULLEY_CENTER_LOCAL = (0.3504 + 0.01200845, 0.1964 + 0.0004, 0.0248)
 SMALL_PULLEY_WORLD_CENTER = board_world(SMALL_PULLEY_CENTER_LOCAL)
 
 SMALL_PULLEY_PLACE_EDGE_OFFSET = (SMALL_PULLEY_SHEAVE_RADIUS + BELT_RADIUS, 0.0, 0.0)
@@ -648,7 +648,7 @@ def add_pulleys_from_xacro_poses(builder: newton.ModelBuilder) -> dict[str, Any]
             color=wp.vec3(0.10, 0.10, 0.10), label="small_bracket_fallback_visual",
         )
 
-    small_center_local = (0.3504 - 0.01200845, 0.1964 - 0.0004, 0.0248)
+    small_center_local = SMALL_PULLEY_CENTER_LOCAL
     small_center_xyz = board_world(small_center_local)
     add_visual_mesh(
         builder, SMALL_BEARING_MESH,

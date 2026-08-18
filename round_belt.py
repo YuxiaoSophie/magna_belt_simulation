@@ -1,35 +1,25 @@
 """
-Round-belt scene -- SolverCoupledProxy version.
+Round-belt FULL scene (UR10 + Robotiq 2F-85 + deformable belt + pulleys +
+board + table) driven by the SpaceMouse teleop pipeline as the standalone
+gripper demo.
 
-Coupled MuJoCo (robot) + VBD (deformable belt + free-spinning pulleys + static
-world).  
+Run it together with the producer:
+    # terminal A (this file): builds the scene, seeds the shared buffer at the
+    #                         live gripper TCP, then chases the target every frame
+    # terminal B: reads the SpaceMouse, integrates velocity -> target pose,
+    #             constantly overwrites the shared buffer
 
-TUNING SUMMARY (what changed vs. the original, and why)
-Goal 1 - grip the belt firmly so it never slips out of the gripper while it is
-         carried and dragged from one pulley to the other:
-   * GRIPPER_CONTACT_MU raised 2.0 -> 4.0
-   * GRIPPER_CONTACT_KE raised 1e4 -> 2e4 (and the pad ke/kd are now RE-APPLIED
-     after the global shape_material fill_, which previously reset them)
-   * ROBOTIQ_GRIPPER_SAFE_CLOSE_FRACTION raised 0.90 -> 0.93
-   * arm + gripper PD gains stiffened in _configure_robot_joints()
-
-Goal 2 - once the belt is on a sheave it must not slip through the groove / off
-         the bottom of the pulleys:
-   * PULLEY_SHEAVE_MU raised 1.0 -> 2.5
-   * PULLEY_CONTACT_KE raised 1e5 -> 3e5, PULLEY_CONTACT_KD added
-   * PULLEY_GROOVE_HALF_WIDTH narrowed (1.55 -> 1.35 * belt_r) and
-     PULLEY_FLANGE_EXTRA_RADIUS raised (3.2 -> 4.0 * belt_r): taller, snugger
-     flanges that physically retain the belt in Z
-   * VBD_RIGID_CONTACT_K_START raised 1e3 -> 3e3 (stiffer belt<->pulley contact)
-
-The place MOTION (small pulley first, then roll forward onto the large pulley)
-lives in the command script. The small-pulley target poses it needs are
-exported here as BELT_PLACE_SMALL_ABOVE / BELT_PLACE_SMALL_DOWN.
+The producer waits for this file to seed the buffer, so start this one first.
 """
 
 from __future__ import annotations
 
+import os
 import math
+import mmap
+import time
+import json
+import atexit
 from pathlib import Path
 from typing import Any
 
@@ -41,8 +31,9 @@ import newton.examples
 import newton.ik as ik
 import newton.utils
 from newton import JointTargetMode
+from newton.viewer import ViewerFile
 from newton.solvers import SolverMuJoCo, SolverVBD
-from newton.solvers.experimental.coupled import SolverCoupled, SolverCoupledProxy
+from newton.solvers.experimental.coupled import SolverCoupled, SolverCoupledProxy, SolverCoupledADMM
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 TASK_BOARD_URDF_DIR = SCRIPT_DIR / "task_board_urdf"
@@ -96,7 +87,7 @@ UR10_EDGE_CLEARANCE = 0.15  # gap between the table edge and the robot stand
 UR10_BASE_X = BELT_CENTER_X
 UR10_BASE_Y = 0.5 * TABLE_WIDTH_Y + UR10_EDGE_CLEARANCE + UR10_STAND_RADIUS
 UR10_BASE_Z = UR10_STAND_HEIGHT
-UR10_BASE_YAW = -math.pi / 2.0  # face -Y, i.e. toward the belt/board
+UR10_BASE_YAW = -math.pi / 2.0 # face -Y, i.e. toward the belt/board
 
 UR10_ARM_HOME_POSE = [0.0, -1.35, 1.75, -1.95, -1.57, 0.0]
 UR10_GRIPPER_CLOSED_FALLBACK = 0.8
@@ -125,7 +116,7 @@ GRIPPER_DOWN_QUAT = (
 GRIPPER_TCP_LOCAL_OFFSET = (0.0, 0.0, 0.145)
 
 IK_INIT_ITERS = 96
-IK_TRACK_ITERS = 24
+IK_TRACK_ITERS = 8
 IK_LAMBDA_INITIAL = 0.05
 
 # Contact material.
@@ -135,22 +126,36 @@ CABLE_CONTACT_MU = 1.0
 
 # Stiffer + damped pulley contact so the belt cannot penetrate the
 # sheave and squeeze out the bottom of the groove.
-PULLEY_CONTACT_KE = 3.0e5                        
-PULLEY_CONTACT_KD = 1.0e-5 * PULLEY_CONTACT_KE   
+PULLEY_CONTACT_KE = 3.0e5
+PULLEY_CONTACT_KD = 1.0e-5 * PULLEY_CONTACT_KE
 
-# Firmer, higher-friction finger pads so the belt does not slip out of
-# the gripper while it is carried and dragged over both pulleys.
-GRIPPER_CONTACT_KE = 2.0e4                        
-GRIPPER_CONTACT_KD = 1.0e-5 * GRIPPER_CONTACT_KE
-GRIPPER_CONTACT_MU = 4.0                        
+# Gripper-pad contact used by the mjc -> vbd proxy coupling.
+GRIPPER_CONTACT_KE = 2.0e4
+GRIPPER_CONTACT_KD = 20.0
+GRIPPER_CONTACT_MU = 4.0
+
+# Belt<->gripper collision simplification.
+GRIPPER_SIMPLE_PAD_HALF_X = 0.0110 # 22 mm wide
+GRIPPER_SIMPLE_PAD_HALF_Y = 0.0010 # 2 mm total thickness (plane-like)
+GRIPPER_SIMPLE_PAD_HALF_Z = 0.01875 # 37.5 mm tall
+# Keep the contact face at approximately the original inner pad surface.
+GRIPPER_SIMPLE_PAD_CENTER_Y = -0.0056
+GRIPPER_SIMPLE_PAD_CENTER_Z = 0.01875
+GRIPPER_SIMPLE_PAD_GAP = 0.0005
+
+# During an explicit open command, temporarily disable the two simple pad contacts.
+GRIPPER_RELEASE_KE = 0.0
+GRIPPER_RELEASE_KD = 0.0
+GRIPPER_RELEASE_MU = 0.0
+GRIPPER_RELEASE_FRACTION = 0.25
 
 # Pulley parameters.
 PULLEY_DENSITY = 1000.0
-PULLEY_SHEAVE_MU = 2.5           
-PULLEY_FLANGE_MU = 0.0           
+PULLEY_SHEAVE_MU = 2.5
+PULLEY_FLANGE_MU = 0.0
 PULLEY_ARMATURE = 1.0e-5
-PULLEY_JOINT_FRICTION = 2.0e-4   
-PULLEY_AXIS = (0.0, 0.0, 1.0)    
+PULLEY_JOINT_FRICTION = 2.0e-4
+PULLEY_AXIS = (0.0, 0.0, 1.0)
 
 SMALL_PULLEY_SHEAVE_RADIUS = 0.015
 LARGE_PULLEY_SHEAVE_RADIUS = 0.035
@@ -171,19 +176,212 @@ GRIPPER_PAD_KEYWORDS = ("pad",)
 
 ROBOTIQ_GRIPPER_SAFE_CLOSE_FRACTION = 0.93
 
-# Proxy-coupling / solver settings.
+# Gripper grasp-safety settings.
+GRIPPER_DRIVE_KE = 180.0
+GRIPPER_DRIVE_KD = 80.0
+GRIPPER_EFFORT_LIMIT = 1.0
+
+# Anti-crush grasp latch.
+GRIPPER_STALL_MIN_FRACTION = 0.60
+GRIPPER_STALL_ERROR_FRACTION = 0.010
+GRIPPER_STALL_SPEED_FRACTION_PER_SEC = 0.15
+# Require a real persistent stall instead of latching on one noisy frame.
+GRIPPER_STALL_FRAMES = 3
+
+# Contact-critical grasp transport settings.
+GRASP_CONTACT_SAFE_FRACTION = 0.45
+GRASP_CONTACT_SAFE_UNCAPTURED = True
+
+# Use ADMM only around the actual first-contact event.
+CONTACT_ADMM_PRECONTACT_MIN_FRACTION = max(0.0, GRIPPER_STALL_MIN_FRACTION - 0.05)
+CONTACT_ADMM_PRECONTACT_ERROR_FRACTION = 0.5 * GRIPPER_STALL_ERROR_FRACTION
+CONTACT_ADMM_PRECONTACT_SPEED_FRACTION_PER_SEC = 2.0 * GRIPPER_STALL_SPEED_FRACTION_PER_SEC
+CONTACT_ADMM_POST_STALL_FRAMES = 3
+CONTACT_ADMM_MAX_CONTACT_FRAMES = 8
+
+GRASPED_MAX_ARM_SPEED = 0.75
+GRIPPER_HOLD_PRELOAD_FRACTION = 0.004
+GRIPPER_RELEASE_HYSTERESIS = 0.020
+
+# SpaceMouse target-following safety.
+# Consume producer TRANSLATION DELTAS locally and keep the IK target close to the
+# real TCP so reversing the SpaceMouse reverses the robot immediately instead of
+# waiting for a far-ahead absolute target to come back.
+TELEOP_MAX_TARGET_DISTANCE = 0.030 # m, max IK target lead from actual TCP
+TELEOP_MAX_RAW_TARGET_JUMP = 0.050 # m, producer restart/resync guard
+
+# Hybrid coupling settings.
+# Free motion uses the original lightweight proxy-coupled solver inside a CUDA graph.
+# Grasp formation + grasped transport use ADMM for stronger/stabler coupling.
 PROXY_ITERATIONS = 1
-PROXY_MASS_SCALE = 1.0
+PROXY_MASS_SCALE = 10.0
 PROXY_COUPLING_MODE = "lagged"
+
+# ADMM settings follow Newton's official MuJoCo + VBD cable example.
+ADMM_ITERATIONS = 5
+ADMM_RHO = 200.0
+ADMM_GAMMA = 0.001
+ADMM_BAUMGARTE = 0.5
+ADMM_RIGID_CONTACT_MATCHING = "latest"
 VBD_ITERATIONS = 20
 VBD_RIGID_AVBD_BETA = 1.0e2
 VBD_RIGID_CONTACT_K_START = 3.0e3
 VBD_RIGID_CONTACT_BUFFER_SIZE = 256
-MUJOCO_ITERATIONS = 50
-MUJOCO_LS_ITERATIONS = 20
+MUJOCO_ITERATIONS = 30  
+MUJOCO_LS_ITERATIONS = 10
+
+# Shared memory target buffer (identical transport to the standalone demo).
+SHARED_PATH_DEFAULT = "/tmp/sm_teleop_target.bin"
 
 
-# Geometry
+# Shared-memory target buffer
+class SharedTarget:
+    N = 10
+    SIZE = N * 8
+
+    def __init__(self, path=SHARED_PATH_DEFAULT):
+        self.path = path
+        if (not os.path.exists(path)) or os.path.getsize(path) != self.SIZE:
+            with open(path, "wb") as f:
+                f.write(b"\x00" * self.SIZE)
+        self.f = open(path, "r+b")
+        self.mm = mmap.mmap(self.f.fileno(), self.SIZE)
+        self.arr = np.ndarray((self.N,), dtype=np.float64, buffer=self.mm)
+        self._last = None
+
+    def write(self, pos, quat, grip, ready=1.0):
+        seq = float(self.arr[0])
+        self.arr[0] = seq + 1.0
+        self.arr[1:4] = pos
+        self.arr[4:8] = quat
+        self.arr[8] = float(grip)
+        self.arr[9] = float(ready)
+        self.arr[0] = seq + 2.0
+
+    def read(self):
+        for _ in range(16):
+            s1 = float(self.arr[0])
+            if int(s1) & 1:
+                continue
+            pos = np.array(self.arr[1:4], dtype=np.float64)
+            quat = np.array(self.arr[4:8], dtype=np.float64)
+            grip = float(self.arr[8])
+            ready = float(self.arr[9])
+            if float(self.arr[0]) == s1:
+                self._last = (pos, quat, grip, ready)
+                return pos, quat, grip, ready
+        if self._last is not None:
+            return self._last
+        return (np.zeros(3), np.array([0.0, 0.0, 0.0, 1.0]), 0.0, 0.0)
+
+    def is_ready(self):
+        return float(self.arr[9]) >= 0.5
+
+    def close(self):
+        try:
+            self.mm.close()
+            self.f.close()
+        except Exception:
+            pass
+
+
+# quaternion / vector helpers
+def _norm4(q):
+    q = np.asarray(q, dtype=np.float64)
+    n = float(np.linalg.norm(q))
+    return q / n if n > 1e-12 else np.array([0.0, 0.0, 0.0, 1.0])
+
+
+def _quat_conj(q):
+    x, y, z, w = q
+    return np.array([-x, -y, -z, w], dtype=np.float64)
+
+
+def _quat_mul(a, b):
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b
+    return np.array([
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    ], dtype=np.float64)
+
+
+def _quat_to_rotvec(q):
+    """Shortest rotation vector for an xyzw quaternion."""
+    q = _norm4(q)
+    if q[3] < 0.0:
+        q = -q
+    v = q[:3]
+    s = float(np.linalg.norm(v))
+    if s < 1.0e-12:
+        return np.zeros(3, dtype=np.float64)
+    angle = 2.0 * math.atan2(s, float(q[3]))
+    return v * (angle / s)
+
+
+def _rotate_vec(q, v):
+    x, y, z, w = q
+    vx, vy, vz = v
+    tx = 2.0 * (y * vz - z * vy)
+    ty = 2.0 * (z * vx - x * vz)
+    tz = 2.0 * (x * vy - y * vx)
+    return np.array([
+        vx + w * tx + (y * tz - z * ty),
+        vy + w * ty + (z * tx - x * tz),
+        vz + w * tz + (x * ty - y * tx),
+    ], dtype=np.float64)
+
+
+def _v3(a):
+    return wp.vec3(float(a[0]), float(a[1]), float(a[2]))
+
+
+def _v4(a):
+    return wp.vec4(float(a[0]), float(a[1]), float(a[2]), float(a[3]))
+
+
+def parse_vec3(text, default=(0.0, 0.0, 0.0)):
+    if text is None or text.strip() == "":
+        return np.array(default, dtype=np.float64)
+    parts = [float(v.strip()) for v in text.split(",") if v.strip() != ""]
+    if len(parts) != 3:
+        raise ValueError(f"Expected 3 floats, got {text!r}")
+    return np.array(parts, dtype=np.float64)
+
+
+def _unit_sphere_wire(n_lat=2, seg=28):
+    """Unit-radius wireframe sphere as (starts, ends) numpy arrays (M,3)."""
+    starts, ends = [], []
+
+    def ring(pts):
+        for k in range(len(pts) - 1):
+            starts.append(pts[k])
+            ends.append(pts[k + 1])
+
+    for pl in ("xy", "yz", "xz"):
+        pts = []
+        for k in range(seg + 1):
+            a = 2.0 * math.pi * k / seg
+            if pl == "xy":
+                pts.append([math.cos(a), math.sin(a), 0.0])
+            elif pl == "yz":
+                pts.append([0.0, math.cos(a), math.sin(a)])
+            else:
+                pts.append([math.cos(a), 0.0, math.sin(a)])
+        ring(pts)
+    for i in range(1, n_lat + 1):
+        z = i / (n_lat + 1)
+        for zz in (z, -z):
+            r = math.sqrt(max(0.0, 1.0 - zz * zz))
+            pts = [[r * math.cos(2.0 * math.pi * k / seg),
+                    r * math.sin(2.0 * math.pi * k / seg), zz] for k in range(seg + 1)]
+            ring(pts)
+    return np.array(starts, dtype=np.float64), np.array(ends, dtype=np.float64)
+
+
+# Geometry helpers 
 def quat_from_rpy(roll: float, pitch: float, yaw: float) -> wp.quat:
     cr = math.cos(roll * 0.5); sr = math.sin(roll * 0.5)
     cp = math.cos(pitch * 0.5); sp = math.sin(pitch * 0.5)
@@ -223,11 +421,10 @@ _place_x = LARGE_PULLEY_WORLD_CENTER[0] + LARGE_PULLEY_PLACE_EDGE_OFFSET[0]
 _place_y = LARGE_PULLEY_WORLD_CENTER[1] + LARGE_PULLEY_PLACE_EDGE_OFFSET[1]
 
 BELT_PLACE_ABOVE = (_place_x, _place_y, LARGE_PULLEY_WORLD_CENTER[2] + BELT_APPROACH_CLEARANCE)
-BELT_PLACE_DOWN  = (_place_x, _place_y, LARGE_PULLEY_WORLD_CENTER[2] + BELT_RADIUS)
+BELT_PLACE_DOWN = (_place_x, _place_y, LARGE_PULLEY_WORLD_CENTER[2] + BELT_RADIUS)
 
 # Small-pulley placement geometry (the pulley the belt seats on FIRST).
-# SMALL_PULLEY_CENTER_LOCAL matches the pose used in add_pulleys_from_xacro_poses.
-SMALL_PULLEY_CENTER_LOCAL = (0.3504 - 0.01200845, 0.1964 - 0.0004, 0.0248)
+SMALL_PULLEY_CENTER_LOCAL = (0.3504 + 0.01200845, 0.1964 + 0.0004, 0.0248)
 SMALL_PULLEY_WORLD_CENTER = board_world(SMALL_PULLEY_CENTER_LOCAL)
 
 SMALL_PULLEY_PLACE_EDGE_OFFSET = (SMALL_PULLEY_SHEAVE_RADIUS + BELT_RADIUS, 0.0, 0.0)
@@ -235,7 +432,7 @@ _small_place_x = SMALL_PULLEY_WORLD_CENTER[0] + SMALL_PULLEY_PLACE_EDGE_OFFSET[0
 _small_place_y = SMALL_PULLEY_WORLD_CENTER[1] + SMALL_PULLEY_PLACE_EDGE_OFFSET[1]
 
 BELT_PLACE_SMALL_ABOVE = (_small_place_x, _small_place_y, SMALL_PULLEY_WORLD_CENTER[2] + BELT_APPROACH_CLEARANCE)
-BELT_PLACE_SMALL_DOWN  = (_small_place_x, _small_place_y, SMALL_PULLEY_WORLD_CENTER[2] + BELT_RADIUS)
+BELT_PLACE_SMALL_DOWN = (_small_place_x, _small_place_y, SMALL_PULLEY_WORLD_CENTER[2] + BELT_RADIUS)
 
 BELT_PLACE_LARGE_ABOVE = BELT_PLACE_ABOVE
 BELT_PLACE_LARGE_DOWN = BELT_PLACE_DOWN
@@ -411,11 +608,6 @@ def add_dynamic_pulley(builder, center, sheave_radius, color, label,
             color=wp.vec3(*[float(c) for c in flange_color]), label=f"{label}_{suffix}",
         ))
 
-    # The original collision model left a large empty space below the lower
-    # flange because the axle centre is about 24.8 mm above the board.  A belt
-    # segment could therefore pass under the pulley even though the visual mesh
-    # looked mounted to the board.  Fill that space with a rotationally symmetric
-    # pedestal attached to the same free-spinning body.
     lower_flange_bottom_local = -flange_z - PULLEY_FLANGE_HALF_THICKNESS
     board_top_local = BOARD_ROOT_Z - float(center[2]) + PULLEY_BOARD_GAP
     pedestal_half_height = 0.5 * max(lower_flange_bottom_local - board_top_local, 1.0e-4)
@@ -456,7 +648,7 @@ def add_pulleys_from_xacro_poses(builder: newton.ModelBuilder) -> dict[str, Any]
             color=wp.vec3(0.10, 0.10, 0.10), label="small_bracket_fallback_visual",
         )
 
-    small_center_local = (0.3504 - 0.01200845, 0.1964 - 0.0004, 0.0248)
+    small_center_local = SMALL_PULLEY_CENTER_LOCAL
     small_center_xyz = board_world(small_center_local)
     add_visual_mesh(
         builder, SMALL_BEARING_MESH,
@@ -549,20 +741,6 @@ def _set_single_task_target(target_positions: wp.array[wp.vec3], target_rotation
     target_rotations[0] = rot
 
 
-@wp.kernel
-def _scatter_ik_arm_targets(control_target_q: wp.array[float], ik_joint_q: wp.array2d[float],
-                            ik_coord_indices: wp.array[int], control_target_indices: wp.array[int]):
-    i = wp.tid()
-    control_target_q[control_target_indices[i]] = ik_joint_q[0, ik_coord_indices[i]]
-
-
-@wp.kernel
-def _scatter_gripper_targets(control_target_q: wp.array[float], control_target_indices: wp.array[int],
-                             desired_values: wp.array[float]):
-    i = wp.tid()
-    control_target_q[control_target_indices[i]] = desired_values[i]
-
-
 def _shape_label_lower(builder, shape_index: int) -> str:
     for attr in ("shape_label", "shape_key"):
         arr = getattr(builder, attr, None)
@@ -622,6 +800,78 @@ def _select_gripper_proxy_bodies(builder, first_body_index, end_body_index) -> l
     selected = list(range(first_body_index, end_body_index))
     print(f"[WARNING] Could not locate pad/follower bodies; exposing all gripper bodies ({len(selected)}).")
     return selected
+
+
+def _replace_proxy_pad_colliders_with_two_planes(builder, proxy_bodies: list[int]) -> list[int]:
+    """Make belt contact with the Robotiq gripper be exactly two simple flat pads.
+    """
+    disabled = 0
+
+    collide_shapes_flag = getattr(newton.ShapeFlags, "COLLIDE_SHAPES", None)
+    collide_particles_flag = getattr(newton.ShapeFlags, "COLLIDE_PARTICLES", None)
+    if collide_shapes_flag is None:
+        raise RuntimeError("Newton ShapeFlags.COLLIDE_SHAPES is required for simple gripper pads")
+
+    body_shapes = getattr(builder, "body_shapes", None)
+    shape_body = getattr(builder, "shape_body", None)
+
+    for body in proxy_bodies:
+        if body_shapes is not None and body < len(body_shapes):
+            original_shapes = list(body_shapes[body])
+        elif shape_body is not None:
+            original_shapes = [i for i, b in enumerate(shape_body) if int(b) == int(body)]
+        else:
+            raise RuntimeError("Cannot locate shapes attached to Robotiq pad bodies")
+
+        # Snapshot BEFORE adding the replacement plate, so we disable only the imported
+        # complex Robotiq geometry, never the new simple plate.
+        for shape_idx in original_shapes:
+            flags = builder.shape_flags[shape_idx]
+            flags = flags & ~collide_shapes_flag
+            if collide_particles_flag is not None:
+                flags = flags & ~collide_particles_flag
+            builder.shape_flags[shape_idx] = flags
+            disabled += 1
+
+    simple_cfg = newton.ModelBuilder.ShapeConfig(
+        density=0.0,
+        ke=GRIPPER_CONTACT_KE,
+        kd=GRIPPER_CONTACT_KD,
+        mu=GRIPPER_CONTACT_MU,
+        margin=0.0,
+        gap=GRIPPER_SIMPLE_PAD_GAP,
+        has_shape_collision=True,
+        has_particle_collision=True,
+        is_visible=False,
+    )
+
+    simple_shapes = []
+    for side, body in zip(("left", "right"), proxy_bodies):
+        shape = builder.add_shape_box(
+            body=body,
+            xform=wp.transform(
+                wp.vec3(0.0, GRIPPER_SIMPLE_PAD_CENTER_Y, GRIPPER_SIMPLE_PAD_CENTER_Z),
+                wp.quat_identity(),
+            ),
+            hx=GRIPPER_SIMPLE_PAD_HALF_X,
+            hy=GRIPPER_SIMPLE_PAD_HALF_Y,
+            hz=GRIPPER_SIMPLE_PAD_HALF_Z,
+            cfg=simple_cfg,
+            color=wp.vec3(0.2, 0.9, 0.2),
+            label=f"simple_belt_contact_{side}_pad",
+        )
+        simple_shapes.append(int(shape))
+
+    if len(simple_shapes) != 2:
+        raise RuntimeError(
+            f"Expected exactly two simple gripper pad colliders, created {len(simple_shapes)}"
+        )
+
+    print(
+        f"[INFO] Belt/gripper collision simplified: disabled {disabled} imported "
+        f"pad-body collision shapes; added exactly two flat pad colliders {simple_shapes}."
+    )
+    return simple_shapes
 
 
 def _find_gripper_tcp_body(builder, first_body_index, end_body_index) -> int:
@@ -717,8 +967,104 @@ def _add_ur10_and_gripper_assets(builder: newton.ModelBuilder, body_offset: int)
     }
 
 
+# Dataset recording / replay support only
+class TeleopEpisodeRecorder:
+    """Passively save the initial state, actions, and Newton state snapshots."""
+
+    def __init__(self, root_dir: Path, model, state, control, example, record_name=None):
+        stamp = time.strftime("%Y%m%d_%H%M%S")
+        if record_name:
+            folder_name = str(record_name)
+        else:
+            folder_name = f"episode_{stamp}"
+        self.episode_dir = Path(root_dir).expanduser() / folder_name
+        
+        suffix = 1
+        while self.episode_dir.exists():
+            self.episode_dir = Path(root_dir).expanduser() / f"episode_{stamp}_{suffix:02d}"
+            suffix += 1
+        self.episode_dir.mkdir(parents=True, exist_ok=False)
+
+        self.actions_file = (self.episode_dir / "actions.jsonl").open(
+            "w", encoding="utf-8", buffering=1
+        )
+        self.state_file = self.episode_dir / "newton_states.bin"
+        self.initial_file = self.episode_dir / "initial_state.npz"
+
+        # Save the exact initial simulation arrays plus the current control/teleop state.
+        initial = {}
+        for name in ("body_q", "body_qd", "joint_q", "joint_qd", "particle_q", "particle_qd"):
+            value = getattr(state, name, None)
+            if value is not None:
+                initial[name] = value.numpy().copy()
+        initial["control_joint_target_q"] = control.joint_target_q.numpy().copy()
+        initial["target_pos"] = np.asarray(example._target_pos, dtype=np.float64).copy()
+        initial["target_xyzw"] = np.asarray(example._target_xyzw, dtype=np.float64).copy()
+        initial["grip_fraction"] = np.asarray([example._grip_fraction], dtype=np.float64)
+        initial["grip_requested_fraction"] = np.asarray([example._grip_requested_fraction], dtype=np.float64)
+        initial["arm_cmd"] = np.asarray(example._arm_cmd, dtype=np.float64).copy()
+        np.savez_compressed(self.initial_file, **initial)
+
+        metadata = {
+            "fps": int(example.fps),
+            "frame_dt": float(example.frame_dt),
+            "sim_substeps": int(example.sim_substeps),
+            "sim_dt": float(example.sim_dt),
+            "targetq_layout": str(example.targetq_layout),
+            "arm_target_indices": [int(i) for i in example.arm_target_indices],
+            "gripper_target_indices": [int(i) for i in example.gripper_target_indices],
+        }
+        (self.episode_dir / "metadata.json").write_text(
+            json.dumps(metadata, indent=2), encoding="utf-8"
+        )
+
+        # Newton-native recording. 
+        self.viewer_file = ViewerFile(str(self.state_file), auto_save=True, save_interval=1)
+        self.viewer_file.set_model(model)
+        self.viewer_file.record(state)
+        self.viewer_file.save_recording(verbose=False)
+        self.closed = False
+        atexit.register(self.close)
+
+        print(f"[RECORD] recording episode to: {self.episode_dir}")
+        print(f"[RECORD] Newton state file: {self.state_file}")
+
+    def record_frame(self, frame_id, sim_time, target_pos, target_xyzw,
+                     grip_fraction, grip_requested_fraction, joint_target_q, state):
+        row = {
+            "frame": int(frame_id),
+            "sim_time": float(sim_time),
+            "target_pos": np.asarray(target_pos, dtype=np.float64).tolist(),
+            "target_xyzw": np.asarray(target_xyzw, dtype=np.float64).tolist(),
+            "grip_fraction": float(grip_fraction),
+            "grip_requested_fraction": float(grip_requested_fraction),
+            "joint_target_q": np.asarray(joint_target_q, dtype=np.float64).reshape(-1).tolist(),
+        }
+        self.actions_file.write(json.dumps(row, separators=(",", ":")) + "\n")
+        self.viewer_file.record(state)
+
+    def close(self):
+        if getattr(self, "closed", True):
+            return
+        self.closed = True
+        try:
+            self.actions_file.flush()
+            self.actions_file.close()
+        finally:
+            try:
+                self.viewer_file.save_recording(verbose=False)
+            finally:
+                self.viewer_file.close()
+        print(f"[RECORD] saved episode: {self.episode_dir}")
+
+
+
 class Example:
-    """Base scene. Arm starts directly above the belt grasp vertex, gripper OPEN."""
+    """Full round-belt scene, but the arm TCP now chases the SpaceMouse target
+    written into shared memory -- using the exact control/IK logic of the
+    standalone teleop demo. Arm starts directly above the belt grasp vertex,
+    gripper OPEN, and the shared buffer is seeded there so the target begins
+    exactly on the gripper tip."""
 
     def __init__(self, viewer, args):
         self.viewer = viewer
@@ -730,11 +1076,30 @@ class Example:
         self.sim_substeps = 10
         self.sim_dt = self.frame_dt / self.sim_substeps
         self.frame_id = 0
+        
+        # Real-time diagnostics
+        # NOTE: wall_start_time is only a placeholder here; it is re-stamped on the
+        # first real step() so construction cost (asset download + finalize + init
+        # IK) does not bias the real-time factor low.
+        self.wall_start_time = time.perf_counter()
+        self.last_timing_print = self.wall_start_time
+        self._last_sim_time = self.sim_time
+        self._last_wall_time = self.wall_start_time
+
+        # Optional synchronized step profiler. Profiling is opt-in because the
+        # required CUDA synchronization perturbs throughput.
+        self.profile_step = bool(getattr(args, "profile_step", False))
+        self._prof_frames = 0
+        self._prof_ik_s = 0.0
+        self._prof_phys_s = 0.0
+        self._prof_collide_s = 0.0
+        self._prof_solve_s = 0.0
+        
         self.debug_belt_positions = True
         self.debug_every_n_frames = 60
 
         builder = newton.ModelBuilder(up_axis=newton.Axis.Z, gravity=-9.81)
-        builder.rigid_gap = 0.01
+        builder.rigid_gap = 0.001
         SolverMuJoCo.register_custom_attributes(builder)
         try:
             SolverVBD.register_custom_attributes(builder, dahl_defaults_enabled=False)
@@ -751,28 +1116,39 @@ class Example:
         asset_info = _add_ur10_and_gripper_assets(builder, robot_body_start)
         robot_body_end = builder.body_count
         robot_joint_end = builder.joint_count
-        robot_shape_end = builder.shape_count
 
+        # Select the two real moving Robotiq pad bodies. Replace that geometry, 
+        # for collision purposes, with exactly two thin rectangular plates.
+        self.gripper_proxy_bodies = _select_gripper_proxy_bodies(
+            builder, asset_info["gripper_body_start"], asset_info["gripper_body_end"]
+        )
+        if len(self.gripper_proxy_bodies) != 2:
+            raise RuntimeError(
+                f"Two-plane gripper contact requires exactly 2 pad bodies; got "
+                f"{self.gripper_proxy_bodies}"
+            )
+        self.gripper_pad_shapes = _replace_proxy_pad_colliders_with_two_planes(
+            builder, self.gripper_proxy_bodies
+        )
+        # From now on, proxy shapes == the two synthetic flat pads only.
+        self.gripper_proxy_shapes = list(self.gripper_pad_shapes)
+
+        # Include the two newly-created pad plates in the robot solver shape range.
+        robot_shape_end = builder.shape_count
         self.robot_bodies = list(range(robot_body_start, robot_body_end))
         self.robot_joints = list(range(robot_joint_start, robot_joint_end))
         self.robot_shapes = list(range(robot_shape_start, robot_shape_end))
         self._robot_joint_count = robot_joint_end
         self._robot_tool_body_idx = asset_info["tool_body_idx"]
 
-        self.gripper_pad_shapes = [
-            i for i in range(asset_info["gripper_shape_start"], asset_info["gripper_shape_end"])
-            if any(kw in _shape_label_lower(builder, i) for kw in GRIPPER_PAD_KEYWORDS)
-        ]
-        n_pad = _apply_gripper_pad_contact_material(
-            builder, asset_info["gripper_shape_start"], asset_info["gripper_shape_end"])
-        print(f"[INFO] Applied gripper contact material to {n_pad} pad shapes.")
-
-        self.gripper_proxy_bodies = _select_gripper_proxy_bodies(
-            builder, asset_info["gripper_body_start"], asset_info["gripper_body_end"])
         self._robot_tcp_body_idx = _find_gripper_tcp_body(
-            builder, asset_info["gripper_body_start"], asset_info["gripper_body_end"])
+            builder, asset_info["gripper_body_start"], asset_info["gripper_body_end"]
+        )
         self.robot_proxy_bodies = list(self.gripper_proxy_bodies)
-        print(f"[INFO] Proxy coupling exposes {len(self.robot_proxy_bodies)} Robotiq gripper bodies only.")
+        print(
+            f"[INFO] Proxy coupling exposes only the 2 Robotiq pad bodies; "
+            f"belt contact shapes are {self.gripper_pad_shapes}."
+        )
 
         try:
             gravcomp = builder.custom_attributes["mujoco:gravcomp"]
@@ -808,7 +1184,7 @@ class Example:
 
         belt_cfg = newton.ModelBuilder.ShapeConfig(
             density=_estimate_belt_density(), ke=CABLE_CONTACT_KE, kd=CABLE_CONTACT_KD,
-            mu=CABLE_CONTACT_MU, margin=0.0, gap=0.01)
+            mu=CABLE_CONTACT_MU, margin=0.0, gap=0.001)
         rod_bodies, _rod_joints = builder.add_rod(
             positions=cable_points, quaternions=cable_edge_q, radius=BELT_RADIUS, cfg=belt_cfg,
             stretch_stiffness=2.0e4, stretch_damping=1.0e-1,
@@ -846,7 +1222,7 @@ class Example:
             mu_np[np.asarray(self.pulley_guard_shapes, dtype=np.int32)] = PULLEY_FLANGE_MU
         self.model.shape_material_mu.assign(mu_np)
 
-        # Re-apply per-shape STIFFNESS too.
+        # Re-apply per-shape stiffness too.
         ke_np = self.model.shape_material_ke.numpy().copy()
         kd_np = self.model.shape_material_kd.numpy().copy()
         if self.gripper_pad_shapes:
@@ -862,6 +1238,26 @@ class Example:
             kd_np[pulley_shape_idx] = PULLEY_CONTACT_KD
         self.model.shape_material_ke.assign(ke_np)
         self.model.shape_material_kd.assign(kd_np)
+
+        # Save the exact normal/grasp material for every collision shape carried by
+        # the proxy pad bodies.
+        self._gripper_release_shape_indices = np.asarray(
+            self.gripper_proxy_shapes, dtype=np.int32
+        )
+        if self._gripper_release_shape_indices.size:
+            self._gripper_release_restore_mu = (
+                self.model.shape_material_mu.numpy()[self._gripper_release_shape_indices].copy()
+            )
+            self._gripper_release_restore_ke = (
+                self.model.shape_material_ke.numpy()[self._gripper_release_shape_indices].copy()
+            )
+            self._gripper_release_restore_kd = (
+                self.model.shape_material_kd.numpy()[self._gripper_release_shape_indices].copy()
+            )
+        else:
+            self._gripper_release_restore_mu = np.empty((0,), dtype=np.float32)
+            self._gripper_release_restore_ke = np.empty((0,), dtype=np.float32)
+            self._gripper_release_restore_kd = np.empty((0,), dtype=np.float32)
 
         rinfo = self._configure_robot_joints()
         self.gripper_open_values = rinfo["gripper_open_values"]
@@ -880,7 +1276,10 @@ class Example:
         self._build_ik()
         self._initialize_robot_at_approach()
 
-        self.solver = SolverCoupledProxy(
+        # HYBRID COUPLING:
+        #   - fast_solver: original proxy coupling; CUDA-graph captured for free motion
+        #   - admm_solver: shared-contact ADMM; used while grasping/holding/transporting
+        self.fast_solver = SolverCoupledProxy(
             model=self.model,
             entries=[
                 SolverCoupled.Entry(
@@ -905,16 +1304,67 @@ class Example:
                     collision_pipeline=lambda model: newton.examples.create_collision_pipeline(
                         model, broad_phase="explicit"),
                     collide_interval=1)],
-                iterations=PROXY_ITERATIONS)) 
+                iterations=PROXY_ITERATIONS),
+        )
+
+        self.admm_solver = SolverCoupledADMM(
+            model=self.model,
+            entries=[
+                SolverCoupled.Entry(
+                    name="mjc",
+                    solver=lambda v: SolverMuJoCo(
+                        model=v, solver="newton", integrator="implicitfast", cone="elliptic",
+                        iterations=MUJOCO_ITERATIONS, ls_iterations=MUJOCO_LS_ITERATIONS,
+                        use_mujoco_contacts=False, njmax=256, nconmax=128),
+                    bodies=self.robot_bodies, joints=self.robot_joints, shapes=self.robot_shapes),
+                SolverCoupled.Entry(
+                    name="vbd",
+                    solver=lambda v: SolverVBD(
+                        model=v, iterations=VBD_ITERATIONS,
+                        rigid_compliant_alm=True,
+                        rigid_avbd_beta=VBD_RIGID_AVBD_BETA,
+                        rigid_contact_k_start=VBD_RIGID_CONTACT_K_START,
+                        rigid_contact_history=False,
+                        rigid_body_contact_buffer_size=VBD_RIGID_CONTACT_BUFFER_SIZE),
+                    bodies=self.vbd_bodies, joints=self.vbd_joints, shapes=self.vbd_shapes),
+            ],
+            coupling=SolverCoupledADMM.Config(
+                iterations=ADMM_ITERATIONS,
+                rho=ADMM_RHO,
+                gamma=ADMM_GAMMA,
+                baumgarte=ADMM_BAUMGARTE,
+                rigid_contact_matching=ADMM_RIGID_CONTACT_MATCHING,
+                contact_pairs=[
+                    SolverCoupledADMM.ContactPair(source="mjc", destination="vbd"),
+                ],
+            ),
+        )
+
+        # Keep self.solver as the fast/default solver for Newton's coupled-view helpers.
+        self.solver = self.fast_solver
 
         self.state_0 = self.model.state()
         self.state_1 = self.model.state()
 
-        self.collision_pipeline = newton.CollisionPipeline(
-            self.model, broad_phase="explicit", shape_pairs_filtered=self._belt_world_shape_pairs())
-        self.contacts = self.collision_pipeline.contacts()
-        if hasattr(self.solver, "prepare_contacts"):
-            self.solver.prepare_contacts(self.contacts)
+        # Fast/free-motion contact set is exactly the original belt<->world set.
+        self.fast_collision_pipeline = newton.CollisionPipeline(
+            self.model, broad_phase="explicit",
+            shape_pairs_filtered=self._belt_world_shape_pairs(include_gripper=False))
+        self.fast_contacts = self.fast_collision_pipeline.contacts()
+        if hasattr(self.fast_solver, "prepare_contacts"):
+            self.fast_solver.prepare_contacts(self.fast_contacts)
+
+        # ADMM additionally needs pad<->belt contacts in the shared contact buffer.
+        self.admm_collision_pipeline = newton.CollisionPipeline(
+            self.model, broad_phase="explicit",
+            shape_pairs_filtered=self._belt_world_shape_pairs(include_gripper=True))
+        self.admm_contacts = self.admm_collision_pipeline.contacts()
+        if hasattr(self.admm_solver, "prepare_contacts"):
+            self.admm_solver.prepare_contacts(self.admm_contacts)
+
+        # Backward-compatible aliases used by rendering/debug helpers.
+        self.collision_pipeline = self.fast_collision_pipeline
+        self.contacts = self.fast_contacts
 
         self._main_view_layer = None
         self._proxy_contact_layer = None
@@ -927,16 +1377,9 @@ class Example:
         newton.examples.configure_coupled_view(self, self.args)
         self.viewer.show_contacts = False
 
-        self.proxy_contacts = (self.solver.get_proxy_contacts("mjc", "vbd")
-                               if hasattr(self.solver, "get_proxy_contacts") else None)
-        if self.proxy_contacts is not None and self._proxy_contact_layer is not None:
-            self.viewer.activate(self._proxy_contact_layer)
-            self.viewer.set_model(self.solver.view("vbd"))
-            self.viewer.show_visual = False
-            self.viewer.show_collision = False
-            self.viewer.show_static = False
-            self.viewer.show_contacts = False
-            self.viewer.activate(self._main_view_layer)
+        # Keep the original proxy-contact layer available for the fast/free-motion path.
+        self.proxy_contacts = (self.fast_solver.get_proxy_contacts("mjc", "vbd")
+                               if hasattr(self.fast_solver, "get_proxy_contacts") else None)
 
         newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_0)
         newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.state_1)
@@ -975,24 +1418,432 @@ class Example:
         self.base_targets_np = base_targets
         self.joint_target_q_view.assign(self.base_targets_np.reshape(1, -1))
 
-        self._ik_arm_coord_indices_wp = wp.array(
-            np.asarray(self.ik_arm_coord_indices, dtype=np.int32), dtype=int, device=self.device)
-        self._arm_targetq_indices_wp = wp.array(
-            np.asarray(self.arm_targetq_indices, dtype=np.int32), dtype=int, device=self.device)
-        self._gripper_targetq_indices_wp = wp.array(
-            np.asarray(self.gripper_targetq_indices, dtype=np.int32), dtype=int, device=self.device)
-        self._desired_gripper_values_np = np.asarray(self.gripper_open_values, dtype=np.float32)
-        self._desired_gripper_values_wp = wp.array(
-            self._desired_gripper_values_np, dtype=float, device=self.device)
+        # TELEOP STATE 
+        self.tip_offset = np.asarray(GRIPPER_TCP_LOCAL_OFFSET, dtype=np.float64)
+        self.link_index = int(self._robot_tcp_body_idx)
+        self.g_open = list(self.gripper_open_values)
+        self.g_closed = list(self.gripper_closed_values)
+        self.arm_target_indices = list(self.arm_targetq_indices)
+        self.gripper_target_indices = list(self.gripper_targetq_indices)
 
-        self.set_task_target(BELT_APPROACH_POS, GRIPPER_DOWN_QUAT, self.gripper_open_values)
+        # Seed the shared target at the ACTUAL current TCP pose + OPEN gripper.
+        bq = self.state_0.body_q.numpy()
+        base = bq[self.link_index]
+        base_pos = np.array(base[0:3], dtype=np.float64)
+        base_quat = _norm4(np.array(base[3:7], dtype=np.float64))
+        tip0 = base_pos + _rotate_vec(base_quat, self.tip_offset)
+
+        self._target_pos = tip0.copy()
+        self._target_xyzw = base_quat.copy()
+
+        # Track the producer's absolute position only to recover its per-frame
+        # translation delta.
+        self._spacemouse_raw_pos_prev = tip0.copy()
+
+        self._grip_fraction = 0.0 # applied 0=open, 1=closed
+        self._grip_requested_fraction = 0.0
+        self._grip_hold_fraction = None
+        self._grip_stall_frames = 0
+        self._grasp_stabilize_frames_remaining = 0
+        self._contact_admm_frames_remaining = 0
+        self._contact_admm_armed = True
+        self._contact_admm_active = False
+        self._contact_admm_age = 0
+        self._grip_near_contact = False
+        self._grip_actual_fraction = 0.0
+        self._grip_actual_speed = 0.0
+        # Tracks whether release-only proxy contact ghosting is active.
+        self._release_friction_active = False
+
+        # arm command we follow (used for slew limiting + posture bias).
+        main_q = self.model.joint_q.numpy()
+        self._arm_cmd = np.array(
+            [float(main_q[ci]) for ci in self.arm_coord_indices], dtype=np.float64
+        )
+
+        self.shared = SharedTarget(self.args.buffer)
+        self.shared.write(self._target_pos, self._target_xyzw, 0.0, ready=1.0)
+        print(f"[INFO] seeded shared target buffer: {self.args.buffer}")
+
+        # Frame + sphere visuals (verbatim from the standalone demo).
+        self.axis_len = float(self.args.axis_len)
+        self.tip_radius = float(self.args.tip_radius)
+        self._axis_bright = wp.array(
+            [wp.vec3(1.0, 0.15, 0.15), wp.vec3(0.15, 1.0, 0.15), wp.vec3(0.2, 0.4, 1.0)],
+            dtype=wp.vec3, device=self.device)
+        self._axis_dim = wp.array(
+            [wp.vec3(0.55, 0.1, 0.1), wp.vec3(0.1, 0.55, 0.1), wp.vec3(0.12, 0.2, 0.6)],
+            dtype=wp.vec3, device=self.device)
+        self._sph_s, self._sph_e = _unit_sphere_wire(n_lat=2, seg=int(self.args.sphere_seg))
+        sc = parse_vec3(self.args.sphere_color, default=(0.3, 0.85, 0.95))
+        self._sph_colors = wp.array([_v3(sc)] * len(self._sph_s), dtype=wp.vec3, device=self.device)
+        self._last_dbg = 0.0
 
         if hasattr(self.viewer, "set_picking_linear_only_bodies"):
             self.viewer.set_picking_linear_only_bodies(self.belt_bodies)
         if hasattr(self.viewer, "set_camera"):
             self.viewer.set_camera(wp.vec3(0.30, -1.30, 1.30), -22.0, -38.0)
 
-    # IK
+        # Optional dataset I/O only. 
+        self.episode_recorder = None
+        self._replay_actions = None
+        self._replay_index = 0
+        self._replay_done = False
+
+        if getattr(self.args, "replay_episode", None):
+            self._load_replay_episode(Path(self.args.replay_episode))
+        elif getattr(self.args, "record_episode", False):
+            self.episode_recorder = TeleopEpisodeRecorder(
+                Path(self.args.record_dir),
+                self.model,
+                self.state_0,
+                self.control,
+                self,
+                record_name=self.args.record_name,
+            )
+
+        # Two CUDA graphs, matching the original hybrid execution logic:
+        #   FREE / not grasping  -> original lightweight proxy-coupled graph
+        #   GRASP / transport    -> ADMM-coupled graph
+        # This avoids falling back to Python/kernel-launch-heavy ADMM every frame.
+        self.fast_physics_graph = None
+        self.admm_physics_graph = None
+        # Backward-compatible alias used nowhere in the selector below, but useful for
+        # any external/debug code that still checks self.physics_graph.
+        self.physics_graph = None
+        self.use_cuda_graph = bool(getattr(self.args, "cuda_graph", True)) and self.device.is_cuda
+        if self.profile_step and self.use_cuda_graph:
+            self.use_cuda_graph = False
+            print("[PROFILE] --profile-step enabled: detailed collide/solve timing uses "
+                  "the uncaptured physics loop; solver/contact settings are unchanged.")
+        if self.use_cuda_graph:
+            self._capture_physics_graphs()
+        else:
+            print(f"[CUDA GRAPH] disabled (device={self.device})")
+
+    def _simulate_fast_physics(self) -> None:
+        """Original lightweight proxy-coupled physics used for free motion."""
+        for _ in range(self.sim_substeps):
+            self.state_0.clear_forces()
+            newton.examples.apply_coupled_viewer_forces(self, self.state_0)
+            self.model.collide(
+                self.state_0, self.fast_contacts, collision_pipeline=self.fast_collision_pipeline
+            )
+            self.fast_solver.step(
+                self.state_0, self.state_1, self.control, self.fast_contacts, self.sim_dt
+            )
+            newton.eval_ik(
+                self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd
+            )
+            self.state_0, self.state_1 = self.state_1, self.state_0
+
+    def _simulate_admm_physics(self) -> None:
+        """Stable ADMM-coupled physics used from grasp formation through transport."""
+        for _ in range(self.sim_substeps):
+            self.state_0.clear_forces()
+            newton.examples.apply_coupled_viewer_forces(self, self.state_0)
+            self.model.collide(
+                self.state_0, self.admm_contacts, collision_pipeline=self.admm_collision_pipeline
+            )
+            self.admm_solver.step(
+                self.state_0, self.state_1, self.control, self.admm_contacts, self.sim_dt
+            )
+            newton.eval_ik(
+                self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd
+            )
+            self.state_0, self.state_1 = self.state_1, self.state_0
+
+    def _simulate_physics(self) -> None:
+        """Compatibility wrapper: select the same hybrid path as normal stepping."""
+        if self._use_admm_physics():
+            self._simulate_admm_physics()
+        else:
+            self._simulate_fast_physics()
+
+    def _simulate_physics_profiled(self) -> tuple[float, float, float]:
+        """Profile whichever hybrid physics path is active."""
+        wp.synchronize_device(self.device)
+        phys_start = time.perf_counter()
+        collide_s = 0.0
+        solve_s = 0.0
+
+        use_admm = self._use_admm_physics()
+        solver = self.admm_solver if use_admm else self.fast_solver
+        contacts = self.admm_contacts if use_admm else self.fast_contacts
+        pipeline = self.admm_collision_pipeline if use_admm else self.fast_collision_pipeline
+
+        for _ in range(self.sim_substeps):
+            self.state_0.clear_forces()
+            newton.examples.apply_coupled_viewer_forces(self, self.state_0)
+
+            wp.synchronize_device(self.device)
+            t0 = time.perf_counter()
+            self.model.collide(self.state_0, contacts, collision_pipeline=pipeline)
+            wp.synchronize_device(self.device)
+            collide_s += time.perf_counter() - t0
+
+            t0 = time.perf_counter()
+            solver.step(self.state_0, self.state_1, self.control, contacts, self.sim_dt)
+            newton.eval_ik(
+                self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd
+            )
+            wp.synchronize_device(self.device)
+            solve_s += time.perf_counter() - t0
+            self.state_0, self.state_1 = self.state_1, self.state_0
+
+        return time.perf_counter() - phys_start, collide_s, solve_s
+
+    def _capture_one_physics_graph(self, simulate_fn, label: str):
+        """Capture one fixed 10-substep coupled frame without changing runtime mode."""
+        saved_state_0 = self.state_0
+        saved_state_1 = self.state_1
+        try:
+            wp.synchronize_device(self.device)
+            with wp.ScopedDevice(self.device):
+                with wp.ScopedCapture() as capture:
+                    simulate_fn()
+            if capture.graph is None:
+                raise RuntimeError("Warp returned no CUDA graph")
+            print(
+                f"[CUDA GRAPH] captured {label}: "
+                f"{self.sim_substeps} substeps/frame, dt={self.sim_dt:.9f} s"
+            )
+            return capture.graph
+        finally:
+            # With 10 (even) substeps these references normally already return to the
+            # same ordering, but restore explicitly so capture cannot alter the selector.
+            self.state_0 = saved_state_0
+            self.state_1 = saved_state_1
+
+    def _capture_physics_graphs(self) -> None:
+        """Capture BOTH runtime modes once: fast proxy and stable ADMM."""
+        try:
+            self.fast_physics_graph = self._capture_one_physics_graph(
+                self._simulate_fast_physics, "FAST free-motion proxy physics"
+            )
+            # Keep the old name as an alias for compatibility.
+            self.physics_graph = self.fast_physics_graph
+        except Exception as exc:
+            self.fast_physics_graph = None
+            self.physics_graph = None
+            print(f"[CUDA GRAPH] FAST capture failed; free motion will be uncaptured: {exc}")
+
+        try:
+            self.admm_physics_graph = self._capture_one_physics_graph(
+                self._simulate_admm_physics, "ADMM grasp/transport physics"
+            )
+        except Exception as exc:
+            self.admm_physics_graph = None
+            print(f"[CUDA GRAPH] ADMM capture failed; grasp/transport will be uncaptured: {exc}")
+
+        if self.fast_physics_graph is None and self.admm_physics_graph is None:
+            self.use_cuda_graph = False
+
+    def _grasp_contact_critical(self) -> bool:
+        """True while the pinch is forming or settling."""
+        forming_grasp = (
+            self._grip_hold_fraction is None
+            and (
+                self._grip_fraction >= GRASP_CONTACT_SAFE_FRACTION
+                or self._grip_requested_fraction >= GRASP_CONTACT_SAFE_FRACTION
+            )
+        )
+        settling_grasp = self._grasp_stabilize_frames_remaining > 0
+        return forming_grasp or settling_grasp
+
+    def _use_admm_physics(self) -> bool:
+        """ADMM is active only around the first loaded pad<->belt contact.
+
+        The transition is intentionally hysteretic:
+          * normal closing/free motion       -> FAST proxy CUDA graph
+          * fingers slow + load begins       -> ADMM CUDA graph (pre-contact)
+          * strict stall is confirmed        -> keep ADMM for a few settle frames
+          * established grasp / transport    -> FAST proxy CUDA graph again
+        """
+        return self._contact_admm_active
+
+    def _launch_physics(self) -> None:
+        # Fully opening re-arms the one-shot contact handoff for the next grasp.
+        if self._grip_requested_fraction < GRASP_CONTACT_SAFE_FRACTION:
+            self._contact_admm_armed = True
+            self._contact_admm_active = False
+            self._contact_admm_age = 0
+            self._contact_admm_frames_remaining = 0
+
+        # Start ADMM slightly before the strict stall detector.
+        if (
+            self._contact_admm_armed
+            and not self._contact_admm_active
+            and self._grip_near_contact
+        ):
+            self._contact_admm_active = True
+            self._contact_admm_age = 0
+            self._contact_admm_frames_remaining = 0
+            print("[COUPLING] near contact -> ADMM pre-contact handoff")
+
+        if self._contact_admm_active:
+            if self.admm_physics_graph is not None:
+                with wp.ScopedDevice(self.device):
+                    wp.capture_launch(self.admm_physics_graph)
+            else:
+                self._simulate_admm_physics()
+
+            self._contact_admm_age += 1
+
+            # As soon as the existing strict stall detector sees load, hold ADMM
+            # for a small fixed number of additional frames.
+            if self._grip_stall_frames > 0:
+                self._contact_admm_frames_remaining = CONTACT_ADMM_POST_STALL_FRAMES
+                self._contact_admm_armed = False
+            elif self._contact_admm_frames_remaining > 0:
+                self._contact_admm_frames_remaining -= 1
+
+            # Leave ADMM only after the strict stall has disappeared AND its short
+            # post-contact settle countdown has expired.
+            contact_settled = (
+                self._grip_stall_frames == 0
+                and self._contact_admm_frames_remaining <= 0
+                and self._contact_admm_age >= 2
+            )
+            timed_out = self._contact_admm_age >= CONTACT_ADMM_MAX_CONTACT_FRAMES
+            if contact_settled or timed_out:
+                self._contact_admm_active = False
+                self._contact_admm_frames_remaining = 0
+                self._contact_admm_armed = False
+                print("[COUPLING] first contact settled -> FAST CUDA transport")
+            return
+
+        # Established grasp/transport uses the original fast proxy graph, matching
+        # the ~0.4 RTF behavior that was working well.
+        if self.fast_physics_graph is not None:
+            with wp.ScopedDevice(self.device):
+                wp.capture_launch(self.fast_physics_graph)
+        else:
+            self._simulate_fast_physics()
+
+    def _load_replay_episode(self, episode_dir: Path) -> None:
+        episode_dir = Path(episode_dir).expanduser()
+        initial_path = episode_dir / "initial_state.npz"
+        actions_path = episode_dir / "actions.jsonl"
+        metadata_path = episode_dir / "metadata.json"
+
+        if not initial_path.exists():
+            raise FileNotFoundError(f"Replay episode missing {initial_path}")
+        if not actions_path.exists():
+            raise FileNotFoundError(f"Replay episode missing {actions_path}")
+
+        if metadata_path.exists():
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            for key, current in (("fps", self.fps), ("sim_substeps", self.sim_substeps)):
+                if key in metadata and int(metadata[key]) != int(current):
+                    raise RuntimeError(
+                        f"Replay metadata mismatch for {key}: recorded={metadata[key]}, current={current}"
+                    )
+            if "sim_dt" in metadata and not np.isclose(float(metadata["sim_dt"]), float(self.sim_dt)):
+                raise RuntimeError(
+                    f"Replay metadata mismatch for sim_dt: recorded={metadata['sim_dt']}, current={self.sim_dt}"
+                )
+
+        data = np.load(initial_path, allow_pickle=False)
+        for state in (self.state_0, self.state_1):
+            for name in ("body_q", "body_qd", "joint_q", "joint_qd", "particle_q", "particle_qd"):
+                if name in data.files:
+                    value = getattr(state, name, None)
+                    if value is not None:
+                        value.assign(data[name])
+
+        if "control_joint_target_q" in data.files:
+            self.control.joint_target_q.assign(data["control_joint_target_q"])
+        if "target_pos" in data.files:
+            self._target_pos = np.asarray(data["target_pos"], dtype=np.float64).copy()
+        if "target_xyzw" in data.files:
+            self._target_xyzw = _norm4(np.asarray(data["target_xyzw"], dtype=np.float64))
+        if "grip_fraction" in data.files:
+            self._grip_fraction = float(np.asarray(data["grip_fraction"]).reshape(-1)[0])
+        if "grip_requested_fraction" in data.files:
+            self._grip_requested_fraction = float(np.asarray(data["grip_requested_fraction"]).reshape(-1)[0])
+        else:
+            self._grip_requested_fraction = self._grip_fraction
+        if "arm_cmd" in data.files:
+            self._arm_cmd = np.asarray(data["arm_cmd"], dtype=np.float64).copy()
+
+        # Reset anti-crush latch internals to their normal t=0 values.
+        self._grip_hold_fraction = None
+        self._grip_stall_frames = 0
+        self._grasp_stabilize_frames_remaining = 0
+        self._contact_admm_frames_remaining = 0
+        self._contact_admm_armed = True
+        self._contact_admm_active = False
+        self._contact_admm_age = 0
+        self._grip_near_contact = False
+        self._grip_actual_fraction = 0.0
+        self._grip_actual_speed = 0.0
+
+        actions = []
+        with actions_path.open("r", encoding="utf-8") as f:
+            for lineno, line in enumerate(f, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                row = json.loads(line)
+                if "joint_target_q" not in row:
+                    raise RuntimeError(f"{actions_path}:{lineno} has no joint_target_q")
+                actions.append(row)
+        if not actions:
+            raise RuntimeError(f"Replay episode has no actions: {actions_path}")
+
+        expected = self.control.joint_target_q.numpy().size
+        got = len(actions[0]["joint_target_q"])
+        if got != expected:
+            raise RuntimeError(
+                f"Replay action size mismatch: recorded joint_target_q has {got}, current control has {expected}"
+            )
+
+        self._replay_actions = actions
+        self._replay_index = 0
+        self._replay_done = False
+        self.sim_time = 0.0
+        self.frame_id = 0
+        print(f"[REPLAY] loaded {len(actions)} actions from: {episode_dir}")
+        if not (episode_dir / "newton_states.bin").exists():
+            print("[REPLAY] newton_states.bin is absent; replaying from initial_state.npz + actions.jsonl.")
+
+    def _step_replay(self) -> None:
+        if self._replay_done:
+            return
+        if self._replay_index >= len(self._replay_actions):
+            self._replay_done = True
+            print(f"[REPLAY] finished {len(self._replay_actions)} frames.")
+            if hasattr(self.viewer, "_pause"):
+                self.viewer._pause = True
+            return
+
+        row = self._replay_actions[self._replay_index]
+
+        if "target_pos" in row:
+            self._target_pos = np.asarray(row["target_pos"], dtype=np.float64)
+        if "target_xyzw" in row:
+            self._target_xyzw = _norm4(np.asarray(row["target_xyzw"], dtype=np.float64))
+        if "grip_fraction" in row:
+            self._grip_fraction = float(row["grip_fraction"])
+        if "grip_requested_fraction" in row:
+            self._grip_requested_fraction = float(row["grip_requested_fraction"])
+        else:
+            self._grip_requested_fraction = self._grip_fraction
+
+        # Replay the exact robot action generated during recording.
+        self.control.joint_target_q.assign(
+            np.asarray(row["joint_target_q"], dtype=np.float32)
+        )
+        
+        # Replay uses the same hybrid physics selection as live teleoperation.
+        self._launch_physics()
+
+        self._replay_index += 1
+        self.sim_time += self.frame_dt
+        self.frame_id += 1
+
+    # IK model
     def _build_ik(self) -> None:
         ik_builder = newton.ModelBuilder(up_axis=newton.Axis.Z, gravity=-9.81)
         ik_info = _add_ur10_and_gripper_assets(ik_builder, body_offset=0)
@@ -1034,6 +1885,17 @@ class Example:
             objectives=[self.ik_pos_obj, self.ik_rot_obj, self.ik_limit_obj],
             lambda_initial=IK_LAMBDA_INITIAL, jacobian_mode=ik.IKJacobianType.ANALYTIC)
 
+        # teleop aliases + TCP body + null-space FK workspace
+        self.ik_tcp_body = int(ik_tcp_body)
+        self.pos_obj = self.ik_pos_obj
+        self.rot_obj = self.ik_rot_obj
+        self.lim_obj = self.ik_limit_obj
+
+        ns_seed = ik_q_seed.copy()
+        self._ns_joint_q = wp.array(ns_seed, dtype=float, device=self.device)
+        self._ns_joint_qd = wp.zeros(int(self.ik_model.joint_dof_count), dtype=float, device=self.device)
+        self._ns_state = self.ik_model.state()
+
     def _assign_ik_target_arrays(self, position, rotation) -> None:
         pos = np.asarray(position, dtype=np.float32).reshape(3)
         rot = np.asarray(rotation, dtype=np.float32).reshape(4)
@@ -1047,16 +1909,9 @@ class Example:
                           wp.vec4(float(rot[0]), float(rot[1]), float(rot[2]), float(rot[3]))],
                   device=self.device)
 
-    def set_task_target(self, position, rotation=GRIPPER_DOWN_QUAT, gripper_values=None) -> None:
-        self._assign_ik_target_arrays(position, rotation)
-        if gripper_values is not None:
-            values = np.asarray(gripper_values, dtype=np.float32).reshape(-1)
-            if values.size != len(self.gripper_targetq_indices):
-                raise ValueError(f"Expected {len(self.gripper_targetq_indices)} gripper values, got {values.size}")
-            self._desired_gripper_values_np = values.copy()
-            self._desired_gripper_values_wp.assign(values)
-
     def _initialize_robot_at_approach(self) -> None:
+        # One high-iteration solve at t=0 (same role as the demo's init solve):
+        # the arm settles above the belt vertex so the seeded target lands on it.
         self._assign_ik_target_arrays(BELT_APPROACH_POS, GRIPPER_DOWN_QUAT)
         self.ik_solver.step(self.ik_joint_q, self.ik_joint_q, iterations=IK_INIT_ITERS)
         solved = self.ik_joint_q.numpy().reshape(-1)
@@ -1076,18 +1931,264 @@ class Example:
         print("[INFO] t=0 TCP target above belt vertex: "
               f"approach={BELT_APPROACH_POS}, grasp={BELT_GRASP_POS}, open gripper={self.gripper_open_values}")
 
-    def _solve_and_write_robot_targets(self) -> None:
-        self.ik_solver.step(self.ik_joint_q, self.ik_joint_q, iterations=IK_TRACK_ITERS)
-        if len(self.arm_targetq_indices) > 0:
-            wp.launch(_scatter_ik_arm_targets, dim=len(self.arm_targetq_indices),
-                      inputs=[self.control.joint_target_q, self.ik_joint_q,
-                              self._ik_arm_coord_indices_wp, self._arm_targetq_indices_wp],
-                      device=self.device)
-        if len(self.gripper_targetq_indices) > 0:
-            wp.launch(_scatter_gripper_targets, dim=len(self.gripper_targetq_indices),
-                      inputs=[self.control.joint_target_q, self._gripper_targetq_indices_wp,
-                              self._desired_gripper_values_wp],
-                      device=self.device)
+    # Null-space posture bias + slew-limited target write 
+    @staticmethod
+    def _nearest_equivalent_angle(angle, reference):
+        """Return angle + 2*pi*k that is closest to reference."""
+        return reference + ((angle - reference + np.pi) % (2.0 * np.pi) - np.pi)
+
+    def _ik_tcp_pose_for_arm(self, arm_q):
+        """Evaluate the IK model TCP pose for one 6-joint arm configuration."""
+        q_all = self._ns_joint_q.numpy()
+
+        for ik_qi, qj in zip(self.ik_arm_coord_indices, arm_q):
+            q_all[ik_qi] = float(qj)
+
+        self._ns_joint_q.assign(q_all)
+        self._ns_joint_qd.zero_()
+
+        newton.eval_fk(
+            self.ik_model,
+            self._ns_joint_q,
+            self._ns_joint_qd,
+            self._ns_state,
+        )
+
+        body = self._ns_state.body_q.numpy()[self.ik_tcp_body]
+        base_pos = np.asarray(body[0:3], dtype=np.float64)
+        base_quat = _norm4(np.asarray(body[3:7], dtype=np.float64))
+
+        tcp_pos = base_pos + _rotate_vec(base_quat, self.tip_offset)
+        return tcp_pos, base_quat
+
+    def _numeric_task_jacobian(self, arm_q):
+        """
+        Numerical 6x6 TCP Jacobian around arm_q.
+        rows 0:3 -> TCP translation
+        rows 3:6 -> TCP world-frame rotation vector
+        Used only for the secondary null-space projector; Newton's own analytic
+        Jacobian still performs the primary IK solve.
+        """
+        arm_q = np.asarray(arm_q, dtype=np.float64)
+        eps = float(self.args.nullspace_eps)
+
+        p0, r0 = self._ik_tcp_pose_for_arm(arm_q)
+        J = np.zeros((6, len(arm_q)), dtype=np.float64)
+
+        for j in range(len(arm_q)):
+            q1 = arm_q.copy()
+            q1[j] += eps
+
+            p1, r1 = self._ik_tcp_pose_for_arm(q1)
+
+            J[0:3, j] = (p1 - p0) / eps
+
+            dq = _norm4(_quat_mul(r1, _quat_conj(r0)))
+            J[3:6, j] = _quat_to_rotvec(dq) / eps
+
+        return J
+
+    def _nullspace_posture_seed(self, solved_q):
+        """
+        Build a posture-biased IK seed without changing the final TCP command.
+            1. Newton IK solves the primary TCP task.
+            2. Compute the local TCP Jacobian J.
+            3. Find the TRUE numerical null space of J with SVD.
+            4. Project a "stay near previous posture" correction into it.
+            5. Use that corrected posture only as the seed for a second IK solve.
+            6. The second IK solve restores the exact TCP position/orientation.
+        """
+        q_ik = np.array(
+            [float(solved_q[i]) for i in self.ik_arm_coord_indices],
+            dtype=np.float64,
+        )
+
+        for j in range(len(q_ik)):
+            q_ik[j] = self._nearest_equivalent_angle(q_ik[j], self._arm_cmd[j])
+
+        J = self._numeric_task_jacobian(q_ik)
+
+        U, S, Vt = np.linalg.svd(J, full_matrices=True)
+
+        sigma_max = float(S[0]) if len(S) else 0.0
+        tol = max(
+            float(self.args.nullspace_svd_abs_tol),
+            float(self.args.nullspace_svd_rel_tol) * sigma_max,
+        )
+
+        rank = int(np.sum(S > tol))
+
+        if rank >= len(q_ik):
+            return q_ik
+
+        V = Vt.T
+        Z = V[:, rank:]
+        N = Z @ Z.T
+
+        posture_error = self._arm_cmd - q_ik
+
+        dq_null = float(self.args.nullspace_gain) * (N @ posture_error)
+
+        max_null_step = float(self.args.max_nullspace_step)
+        dq_null = np.clip(dq_null, -max_null_step, max_null_step)
+
+        return q_ik + dq_null
+
+    def _measure_actual_gripper(self):
+        """Return actual Robotiq closure fraction and closure speed from the solved state."""
+        if not self.gripper_coord_indices:
+            return 0.0, 0.0
+
+        jq = self.state_0.joint_q.numpy()
+        jqd = self.state_0.joint_qd.numpy()
+        fractions = []
+        speeds = []
+
+        for coord_idx, dof_idx, q_open, q_closed in zip(
+                self.gripper_coord_indices, self.gripper_dof_indices, self.g_open, self.g_closed):
+            span = float(q_closed) - float(q_open)
+            if abs(span) < 1.0e-9:
+                continue
+            fractions.append((float(jq[coord_idx]) - float(q_open)) / span)
+            speeds.append(float(jqd[dof_idx]) / span)
+
+        if not fractions:
+            return 0.0, 0.0
+
+        frac = float(np.clip(np.median(fractions), 0.0, 1.0))
+        speed = float(np.median(speeds)) if speeds else 0.0
+        return frac, speed
+
+    def _update_gripper_antcrush(self):
+        """Convert the raw SpaceMouse close request into a load-limited grasp command.
+        """
+        requested = float(np.clip(self._grip_requested_fraction, 0.0, 1.0))
+        actual, actual_speed = self._measure_actual_gripper()
+        self._grip_actual_fraction = actual
+        self._grip_actual_speed = actual_speed
+
+        # If a grasp has already been latched, keep only the small preload.
+        # The user must command OPEN below the latch point to release it.
+        if self._grip_hold_fraction is not None:
+            self._grip_near_contact = False
+            if requested < self._grip_hold_fraction - GRIPPER_RELEASE_HYSTERESIS:
+                print(f"[GRASP] release latch: requested={requested:.3f}, actual={actual:.3f}")
+                self._grip_hold_fraction = None
+                self._grip_stall_frames = 0
+                self._grasp_stabilize_frames_remaining = 0
+                self._grip_fraction = requested
+            else:
+                self._grip_fraction = min(requested, self._grip_hold_fraction)
+            return
+
+        # Detect the approach to a loaded pinch and then the strict stall.
+        error = requested - actual
+        closing_request = requested > self._grip_fraction + 1.0e-5
+        self._grip_near_contact = (
+            closing_request
+            and actual >= CONTACT_ADMM_PRECONTACT_MIN_FRACTION
+            and error >= CONTACT_ADMM_PRECONTACT_ERROR_FRACTION
+            and actual_speed <= CONTACT_ADMM_PRECONTACT_SPEED_FRACTION_PER_SEC
+        )
+        stalled = (
+            closing_request
+            and actual >= GRIPPER_STALL_MIN_FRACTION
+            and error >= GRIPPER_STALL_ERROR_FRACTION
+            and actual_speed <= GRIPPER_STALL_SPEED_FRACTION_PER_SEC
+        )
+
+        if stalled:
+            self._grip_stall_frames += 1
+        else:
+            self._grip_stall_frames = 0
+
+        if self._grip_stall_frames >= GRIPPER_STALL_FRAMES:
+            hold = min(requested, actual + GRIPPER_HOLD_PRELOAD_FRACTION)
+            self._grip_hold_fraction = float(np.clip(hold, 0.0, 1.0))
+            self._grip_fraction = self._grip_hold_fraction
+            self._grasp_stabilize_frames_remaining = GRASP_STABILIZE_FRAMES
+            print(
+                f"[GRASP] anti-crush latch: requested={requested:.3f}, actual={actual:.3f}, "
+                f"hold={self._grip_hold_fraction:.3f}, speed={actual_speed:.3f}/s"
+            )
+        else:
+            self._grip_fraction = requested
+
+    def _update_gripper_release_material(self):
+        """Ghost the two simple belt-contact plates while explicitly open.
+        """
+        idx = self._gripper_release_shape_indices
+        if idx.size == 0:
+            return
+
+        releasing = self._grip_requested_fraction <= GRIPPER_RELEASE_FRACTION
+        if releasing == self._release_friction_active:
+            return
+
+        mu_np = self.model.shape_material_mu.numpy().copy()
+        ke_np = self.model.shape_material_ke.numpy().copy()
+        kd_np = self.model.shape_material_kd.numpy().copy()
+
+        if releasing:
+            mu_np[idx] = GRIPPER_RELEASE_MU
+            ke_np[idx] = GRIPPER_RELEASE_KE
+            kd_np[idx] = GRIPPER_RELEASE_KD
+            self._release_friction_active = True
+            print(
+                f"[GRASP] OPEN: ghosting {idx.size} simple pad shapes "
+                f"(ke={GRIPPER_RELEASE_KE:.1f}, kd={GRIPPER_RELEASE_KD:.1f}, "
+                f"mu={GRIPPER_RELEASE_MU:.1f})"
+            )
+        else:
+            mu_np[idx] = self._gripper_release_restore_mu
+            ke_np[idx] = self._gripper_release_restore_ke
+            kd_np[idx] = self._gripper_release_restore_kd
+            self._release_friction_active = False
+            print(f"[GRASP] CLOSE: restored {idx.size} proxy-pad shape contact materials")
+
+        self.model.shape_material_mu.assign(mu_np)
+        self.model.shape_material_ke.assign(ke_np)
+        self.model.shape_material_kd.assign(kd_np)
+
+    def _write_control_targets(self, solved_q):
+        """Write the final primary-task IK solution to the robot (slew-limited)."""
+        targets = self.control.joint_target_q.numpy().copy()
+
+        desired = np.array(
+            [float(solved_q[i]) for i in self.ik_arm_coord_indices],
+            dtype=np.float64,
+        )
+
+        for j in range(len(desired)):
+            desired[j] = self._nearest_equivalent_angle(desired[j], self._arm_cmd[j])
+
+        # Once the belt is actually latched, avoid injecting a sudden tangential
+        # impulse/torque through one pad that can roll a round belt out of the pinch.
+        arm_speed_limit = float(self.args.max_arm_speed)
+        if self._grip_hold_fraction is not None:
+            arm_speed_limit = min(arm_speed_limit, GRASPED_MAX_ARM_SPEED)
+        max_step = arm_speed_limit * self.frame_dt
+
+        delta = np.clip(desired - self._arm_cmd, -max_step, max_step)
+
+        self._arm_cmd = self._arm_cmd + delta
+
+        for ti, cmd in zip(self.arm_target_indices, self._arm_cmd):
+            targets[ti] = float(cmd)
+
+        frac = float(np.clip(self._grip_fraction, 0.0, 1.0))
+        grip_vals = (
+            np.asarray(self.g_open, dtype=np.float64)
+            + frac * (
+                np.asarray(self.g_closed, dtype=np.float64)
+                - np.asarray(self.g_open, dtype=np.float64)
+            )
+        )
+
+        for ti, val in zip(self.gripper_target_indices, grip_vals):
+            targets[ti] = float(val)
+
+        self.control.joint_target_q.assign(targets)
 
     # Joint config
     def _configure_robot_joints(self) -> dict[str, Any]:
@@ -1152,22 +2253,28 @@ class Example:
         kd_np[:robot_end] = 0.0
         mode_np[:robot_end] = int(JointTargetMode.NONE)
 
-        # Stiffer arm gains so the TCP still tracks its target while the
-        # belt is dragged from the small pulley onto the large one.
         for idx in arm_t:
             ke_np[idx] = 700.0
-            kd_np[idx] = 110.0   
+            kd_np[idx] = 110.0
             mode_np[idx] = int(JointTargetMode.POSITION)
-        # Stiffer finger gains so the closed grip is held firmly and the
-        # belt cannot creep out of the pads under load.
         for idx in grip_t:
-            ke_np[idx] = 260.0 
-            kd_np[idx] = 45.0 
+            ke_np[idx] = GRIPPER_DRIVE_KE
+            kd_np[idx] = GRIPPER_DRIVE_KD
             mode_np[idx] = int(JointTargetMode.POSITION)
 
         model.joint_target_ke.assign(ke_np)
         model.joint_target_kd.assign(kd_np)
         model.joint_target_mode.assign(mode_np)
+
+        # Force/effort safety for grasping the deformable belt.
+        # The SpaceMouse may continue commanding frac=1.0, but the actuator is
+        # not allowed to build unbounded squeeze effort against the trapped belt.
+        effort_np = as_numpy(model.joint_effort_limit).copy()
+        for dof_idx in gripper_dof_indices:
+            effort_np[dof_idx] = GRIPPER_EFFORT_LIMIT
+        model.joint_effort_limit.assign(effort_np)
+        print(f"[INFO] Gripper compliant drive: ke={GRIPPER_DRIVE_KE}, kd={GRIPPER_DRIVE_KD}, "
+              f"effort_limit={GRIPPER_EFFORT_LIMIT}")
 
         return {"gains_layout": layout,
                 "arm_coord_indices": arm_coord_indices, "arm_dof_indices": arm_dof_indices,
@@ -1175,46 +2282,236 @@ class Example:
                 "gripper_open_values": open_values, "gripper_closed_values": closed_values}
 
     # Collision pair filter
-    def _belt_world_shape_pairs(self) -> wp.array:
+    def _belt_world_shape_pairs(self, include_gripper: bool = False) -> wp.array:
+        """Build the original belt-world pairs; optionally add pad-belt pairs for ADMM."""
         belt_shapes = set(self.belt_shapes)
         vbd_shapes = set(self.vbd_shapes)
         static_vbd_shapes = vbd_shapes - belt_shapes
+        pad_shapes = set(self.gripper_pad_shapes)
         pairs = []
         n_pulley_pairs = 0
+        n_gripper_belt_pairs = 0
         pulley_shapes = set(self.pulley_shapes)
+
         for a, b in self.model.shape_contact_pairs.numpy():
             a = int(a); b = int(b)
-            a_belt = a in belt_shapes; b_belt = b in belt_shapes
-            if (a_belt ^ b_belt) and ((a in static_vbd_shapes) or (b in static_vbd_shapes)):
+            a_belt = a in belt_shapes
+            b_belt = b in belt_shapes
+
+            belt_world = (a_belt ^ b_belt) and (
+                (a in static_vbd_shapes) or (b in static_vbd_shapes)
+            )
+            gripper_belt = (
+                (a_belt and b in pad_shapes) or
+                (b_belt and a in pad_shapes)
+            )
+
+            if belt_world or (include_gripper and gripper_belt):
                 pairs.append((a, b))
                 if a in pulley_shapes or b in pulley_shapes:
                     n_pulley_pairs += 1
+                if gripper_belt:
+                    n_gripper_belt_pairs += 1
+
         if not pairs:
-            raise RuntimeError("No belt-world contact pairs were generated")
-        print(f"[INFO] Main collision pipeline: {len(pairs)} belt<->static-world shape pairs "
-              f"({n_pulley_pairs} of them belt<->pulley; belt self-contact disabled).")
-        return wp.array(np.asarray(pairs, dtype=np.int32), dtype=wp.vec2i, device=self.model.device)
+            raise RuntimeError("No belt contact pairs were generated")
+        if include_gripper and not n_gripper_belt_pairs:
+            raise RuntimeError(
+                "ADMM requires gripper-pad<->belt contact pairs, but none were generated"
+            )
 
-    # Control hook
-    def solve_gripper_targets(self):
-        self.set_task_target(BELT_APPROACH_POS, GRIPPER_DOWN_QUAT, self.gripper_open_values)
+        mode = "ADMM" if include_gripper else "FAST"
+        print(
+            f"[INFO] {mode} collision pipeline: {len(pairs)} selected pairs "
+            f"({n_pulley_pairs} belt<->pulley, {n_gripper_belt_pairs} gripper-pad<->belt; "
+            "belt self-contact disabled)."
+        )
+        return wp.array(
+            np.asarray(pairs, dtype=np.int32), dtype=wp.vec2i, device=self.model.device
+        )
 
-    # Sim loop
-    def simulate(self):
-        self.solve_gripper_targets()
-        self._solve_and_write_robot_targets()
-        for _ in range(self.sim_substeps):
-            self.state_0.clear_forces()
-            newton.examples.apply_coupled_viewer_forces(self, self.state_0)
-            self.model.collide(self.state_0, self.contacts, collision_pipeline=self.collision_pipeline)
-            self.solver.step(self.state_0, self.state_1, self.control, self.contacts, self.sim_dt)
-            newton.eval_ik(self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd)
-            self.state_0, self.state_1 = self.state_1, self.state_0
-
+    # Sim loop: teleop control + coupled physics stepping
     def step(self):
-        self.simulate()
+        if self._replay_actions is not None:
+            self._step_replay()
+            return
+
+        # Charge the real-time clock from the first real frame, not from
+        # construction (asset download + finalize + init IK would bias RTF low).
+        if self.frame_id == 0:
+            self.wall_start_time = time.perf_counter()
+            self.last_timing_print = self.wall_start_time
+            self._last_sim_time = self.sim_time
+            self._last_wall_time = self.wall_start_time
+
+        # 1) Read the SpaceMouse target.
+        raw_pos, quat, grip, ready = self.shared.read()
+        if ready >= 0.5:
+            raw_pos = np.asarray(raw_pos, dtype=np.float64)
+            quat = _norm4(quat)
+
+            if np.isfinite(raw_pos).all() and np.isfinite(quat).all():
+                raw_delta = raw_pos - self._spacemouse_raw_pos_prev
+                self._spacemouse_raw_pos_prev = raw_pos.copy()
+
+                # A producer restart/re-seed can create one artificial large jump.
+                # Treat that sample as a resynchronization instead of robot motion.
+                raw_delta_norm = float(np.linalg.norm(raw_delta))
+                if raw_delta_norm <= TELEOP_MAX_RAW_TARGET_JUMP:
+                    candidate = self._target_pos + raw_delta
+
+                    # Current *physical* TCP from the solved Newton state.
+                    bq = self.state_0.body_q.numpy()[self.link_index]
+                    base_pos = np.asarray(bq[0:3], dtype=np.float64)
+                    base_quat = _norm4(np.asarray(bq[3:7], dtype=np.float64))
+                    current_tcp = base_pos + _rotate_vec(base_quat, self.tip_offset)
+
+                    # Keep the Cartesian target close enough that changing the
+                    # SpaceMouse direction takes effect immediately.
+                    lead = candidate - current_tcp
+                    lead_norm = float(np.linalg.norm(lead))
+                    if lead_norm > TELEOP_MAX_TARGET_DISTANCE and lead_norm > 1.0e-12:
+                        candidate = (
+                            current_tcp
+                            + lead * (TELEOP_MAX_TARGET_DISTANCE / lead_norm)
+                        )
+                    self._target_pos = candidate
+
+                self._target_xyzw = quat.copy()
+
+            self._grip_requested_fraction = float(np.clip(grip, 0.0, 1.0))
+
+        # Convert the raw SpaceMouse command into an anti-crush applied command.
+        self._update_gripper_antcrush()
+
+        # While explicitly OPEN, ghost only the two proxy-pad bodies' collision
+        # shapes so a belt wedged on the upper finger geometry can fall away.
+        self._update_gripper_release_material()
+
+        # 2) Solve the PRIMARY TCP objective.
+        if self.profile_step:
+            wp.synchronize_device(self.device)
+            _ik_t0 = time.perf_counter()
+
+        self.pos_obj.set_target_position(0, _v3(self._target_pos))
+        self.rot_obj.set_target_rotation(0, _v4(self._target_xyzw))
+
+        ik_seed = self.ik_joint_q.numpy()
+        for j, ik_qi in enumerate(self.ik_arm_coord_indices):
+            ik_seed[0, ik_qi] = float(self._arm_cmd[j])
+        self.ik_joint_q.assign(ik_seed)
+
+        self.ik_solver.step(self.ik_joint_q, self.ik_joint_q, iterations=IK_TRACK_ITERS)
+
+        solved_1 = self.ik_joint_q.numpy().reshape(-1)
+
+        if np.isfinite(solved_1).all():
+            q_posture_seed = self._nullspace_posture_seed(solved_1)
+
+            ik_seed_2 = self.ik_joint_q.numpy()
+            for j, ik_qi in enumerate(self.ik_arm_coord_indices):
+                ik_seed_2[0, ik_qi] = float(q_posture_seed[j])
+            self.ik_joint_q.assign(ik_seed_2)
+
+            self.ik_solver.step(self.ik_joint_q, self.ik_joint_q, iterations=IK_TRACK_ITERS)
+
+            solved_2 = self.ik_joint_q.numpy().reshape(-1)
+            if np.isfinite(solved_2).all():
+                self._write_control_targets(solved_2)
+
+        if self.profile_step:
+            wp.synchronize_device(self.device)
+            self._prof_ik_s += time.perf_counter() - _ik_t0
+
+        # 3) Coupled MuJoCo(robot) + VBD(belt) stepping (full-scene physics).
+        if self.profile_step:
+            _phys_s, _collide_s, _solve_s = self._simulate_physics_profiled()
+            self._prof_phys_s += _phys_s
+            self._prof_collide_s += _collide_s
+            self._prof_solve_s += _solve_s
+            self._prof_frames += 1
+        else:
+            self._launch_physics()
+
+        # Passive recording hook
+        if self.episode_recorder is not None:
+            self.episode_recorder.record_frame(
+                self.frame_id,
+                self.sim_time,
+                self._target_pos,
+                self._target_xyzw,
+                self._grip_fraction,
+                self._grip_requested_fraction,
+                self.control.joint_target_q.numpy().copy(),
+                self.state_0,
+            )
+
         self.sim_time += self.frame_dt
         self.frame_id += 1
+        
+        wall_now = time.perf_counter()
+        wall_time = wall_now - self.wall_start_time
+
+        if wall_now - self.last_timing_print >= 1.0:
+            # Windowed RTF (current capability) vs lifetime-average RTF.
+            # RTF(now) = sim advanced / wall elapsed over just the last window.
+            # RTF(avg) = same ratio since the first real frame.
+            # behind    = how far the sim clock trails the wall clock (grows if slow).
+            window_sim = self.sim_time - self._last_sim_time
+            window_wall = wall_now - self._last_wall_time
+            rtf_now = window_sim / window_wall if window_wall > 1.0e-9 else 0.0
+            rtf_avg = self.sim_time / wall_time if wall_time > 1.0e-9 else 0.0
+
+            self._last_sim_time = self.sim_time
+            self._last_wall_time = wall_now
+            self.last_timing_print = wall_now
+
+            behind = wall_time - self.sim_time
+
+            if self.profile_step and self._prof_frames > 0:
+                _n = float(self._prof_frames)
+                ik_ms = 1000.0 * self._prof_ik_s / _n
+                phys_ms = 1000.0 * self._prof_phys_s / _n
+                collide_ms = 1000.0 * self._prof_collide_s / _n
+                solve_ms = 1000.0 * self._prof_solve_s / _n
+                profile_suffix = (
+                    f" | ik={ik_ms:5.1f} | phys={phys_ms:6.1f} "
+                    f"(collide={collide_ms:5.1f} solve={solve_ms:6.1f}) ms/frame"
+                )
+            else:
+                profile_suffix = ""
+
+            print(
+                f"[TIME] "
+                f"sim={self.sim_time:8.3f} s | "
+                f"real={wall_time:8.3f} s | "
+                f"behind={behind:+6.2f} s | "
+                f"RTF(now)={rtf_now:6.3f}x | "
+                f"RTF(avg)={rtf_avg:6.3f}x"
+                f"{profile_suffix}"
+            )
+
+            if self.profile_step:
+                self._prof_frames = 0
+                self._prof_ik_s = 0.0
+                self._prof_phys_s = 0.0
+                self._prof_collide_s = 0.0
+                self._prof_solve_s = 0.0
+
+    # Frame + sphere logging (verbatim demo helpers)
+    def _log_frame(self, name, pos, quat, length, colors):
+        ex = _rotate_vec(quat, np.array([1.0, 0.0, 0.0]))
+        ey = _rotate_vec(quat, np.array([0.0, 1.0, 0.0]))
+        ez = _rotate_vec(quat, np.array([0.0, 0.0, 1.0]))
+        starts = wp.array([_v3(pos), _v3(pos), _v3(pos)], dtype=wp.vec3, device=self.device)
+        ends = wp.array([_v3(pos + ex * length), _v3(pos + ey * length), _v3(pos + ez * length)],
+                        dtype=wp.vec3, device=self.device)
+        self.viewer.log_lines(name, starts, ends, colors)
+
+    def _log_sphere(self, name, center, radius):
+        s = wp.array(center + radius * self._sph_s, dtype=wp.vec3, device=self.device)
+        e = wp.array(center + radius * self._sph_e, dtype=wp.vec3, device=self.device)
+        self.viewer.log_lines(name, s, e, self._sph_colors)
 
     def render(self):
         self.viewer.begin_frame(self.sim_time)
@@ -1223,26 +2520,36 @@ class Example:
         show_contacts = self.viewer.show_contacts
         newton.examples.log_coupled_view(self, self.contacts)
 
-        if self.proxy_contacts is not None and self._proxy_contact_layer is not None:
-            output_valid = getattr(self.solver, "entry_output_state_valid", None)
-            sync_entry_states = getattr(self.solver, "sync_entry_states", None)
-            if callable(output_valid) and callable(sync_entry_states) and not output_valid():
-                sync_entry_states(self.state_0)
-            self.viewer.activate(self._proxy_contact_layer)
-            self.viewer.show_contacts = show_contacts
-            self.viewer.log_contacts(self.proxy_contacts, self.solver.entry_state("vbd"))
-            self.viewer.activate(self._main_view_layer)
+        # teleop visuals: live gripper TIP frame + commanded target frame/sphere
+        bq = self.state_0.body_q.numpy()[self.link_index]
+        base_pos = np.array(bq[0:3], dtype=np.float64)
+        base_quat = _norm4(np.array(bq[3:7], dtype=np.float64))
+        tip = base_pos + _rotate_vec(base_quat, self.tip_offset)
+        self._log_frame("/tip_current", tip, base_quat, self.axis_len, self._axis_bright)
+        self._log_frame("/tip_target_axes", self._target_pos, self._target_xyzw,
+                        self.axis_len, self._axis_dim)
+        self._log_sphere("/tip_target_sphere", self._target_pos, self.tip_radius)
+
+        now = time.perf_counter()
+        if now - self._last_dbg >= 0.5:
+            self._last_dbg = now
+            err = float(np.linalg.norm(self._target_pos - tip))
+            latch = "ON" if self._grip_hold_fraction is not None else "off"
+            # print(f"[track] target-tip error = {err*1000:6.1f} mm  "
+            #       f"grip_req={self._grip_requested_fraction:0.2f} "
+            #       f"grip_cmd={self._grip_fraction:0.2f} "
+            #       f"grip_actual={self._grip_actual_fraction:0.2f} latch={latch}")
 
         if (self.debug_belt_positions and self.state_0.body_q is not None
                 and len(self.belt_bodies) > 0 and self.frame_id % self.debug_every_n_frames == 0):
             body_q = self.state_0.body_q.numpy()
             belt_xyz = body_q[np.asarray(self.belt_bodies, dtype=np.int32), :3]
-            print("[BELT DEBUG] min xyz =", belt_xyz.min(axis=0), "max xyz =", belt_xyz.max(axis=0))
+            # print("[BELT DEBUG] min xyz =", belt_xyz.min(axis=0), "max xyz =", belt_xyz.max(axis=0))
             if len(self.pulley_bodies) > 0 and self.state_0.joint_q is not None:
                 q_start = as_numpy(self.model.joint_q_start)
                 jq = self.state_0.joint_q.numpy()
                 angles = [float(jq[int(q_start[j])]) for j in self.pulley_joints]
-                print("[PULLEY DEBUG] axle angles [rad] =", angles)
+                # print("[PULLEY DEBUG] axle angles [rad] =", angles)
 
         self.viewer.end_frame()
 
@@ -1250,6 +2557,48 @@ class Example:
     def create_parser():
         parser = newton.examples.create_parser()
         newton.examples.add_coupled_view_args(parser)
+
+        # shared-memory target buffer
+        parser.add_argument("--buffer", type=str, default=SHARED_PATH_DEFAULT)
+
+        # Dataset recording/replay only; these do not change normal simulation settings.
+        parser.add_argument("--record-episode", action="store_true",
+                            help="record initial state, per-frame controls, and Newton states")
+        parser.add_argument("--record-dir", type=str, default="recordings",
+                            help="directory in which recording episodes are created")
+        parser.add_argument("--record-name", type=str, default=None,
+                            help="name of the recording dataset/episode folder",)
+        parser.add_argument("--replay-episode", type=str, default=None,
+                            help="replay an episode directory using initial_state.npz + actions.jsonl")
+
+        # Performance only: keep the stable physics settings above; CUDA graph only reduces repeated GPU launch overhead.
+        parser.add_argument("--no-cuda-graph", action="store_false", dest="cuda_graph",
+                            default=True,
+                            help="disable CUDA graph capture for A/B stability testing; physics parameters stay identical")
+        parser.add_argument("--profile-step", action="store_true",
+                            help=("print synchronized per-frame IK / physics / collide / solve timing; "
+                                  "detailed profiling uses the uncaptured physics loop so collide and solve "
+                                  "can be measured separately"))
+
+        # teleop target visuals
+        parser.add_argument("--axis-len", type=float, default=0.08)
+        parser.add_argument("--tip-radius", type=float, default=0.06)
+        parser.add_argument("--sphere-seg", type=int, default=28)
+        parser.add_argument("--sphere-color", type=str, default="0.3,0.85,0.95")
+
+        # IK slew limit + null-space posture bias
+        parser.add_argument("--max-arm-speed", type=float, default=1.5,
+                            help="maximum commanded UR10 joint speed in rad/s")
+        parser.add_argument("--nullspace-gain", type=float, default=0.35,
+                            help="strength of previous-posture preference in the task null space")
+        parser.add_argument("--nullspace-svd-rel-tol", type=float, default=1.0e-3,
+                            help="relative SVD threshold for detecting a true null-space direction")
+        parser.add_argument("--nullspace-svd-abs-tol", type=float, default=1.0e-5,
+                            help="absolute SVD threshold for detecting a true null-space direction")
+        parser.add_argument("--max-nullspace-step", type=float, default=0.02,
+                            help="maximum null-space seed correction per joint in rad")
+        parser.add_argument("--nullspace-eps", type=float, default=1.0e-4,
+                            help="joint perturbation in rad used for numerical TCP Jacobian")
         return parser
 
     def test_final(self):
@@ -1264,6 +2613,17 @@ class Example:
                 pulley_xyz = body_q[np.asarray(self.pulley_bodies, dtype=np.int32), :3]
                 assert np.all(pulley_xyz[:, 2] > TABLE_TOP_Z - 0.01), (
                     f"A pulley fell off its axle: min_z={float(pulley_xyz[:, 2].min()):.4f}")
+
+    def __del__(self):
+        try:
+            if getattr(self, "episode_recorder", None) is not None:
+                self.episode_recorder.close()
+        except Exception:
+            pass
+        try:
+            self.shared.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

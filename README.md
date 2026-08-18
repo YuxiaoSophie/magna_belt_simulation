@@ -30,16 +30,15 @@ my_projects/
 ├── test/
 │   ├── README.md
 │   ├── test.py
-│   ├── only_belt.py
-│   └── only_ur10.py
+│   └── ...
 │
 ├── 2f85.xml
 │   └── MuJoCo MJCF model for the Robotiq 2F-85 gripper
 │
 ├── README.md
 ├── round_belt.py
-├── round_belt_command.py
-└── round_belt.urdf.xacro
+├── round_belt.urdf.xacro
+└── ...
 ```
 
 ## Run
@@ -53,7 +52,7 @@ my_projects/
 ### Terminal 2: Run the full simulation
 
 ```bash
-vglrun -d :1 uv run python round_belt_command.py
+vglrun -d :1 uv run python code.py
 ```
 
 ---
@@ -62,7 +61,7 @@ vglrun -d :1 uv run python round_belt_command.py
 
 ### 1. Main files
 
-#### `round_belt.py`
+#### `round_belt_old.py`
 
 ##### Current setup
 

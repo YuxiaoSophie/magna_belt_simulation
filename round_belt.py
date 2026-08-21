@@ -153,8 +153,10 @@ GRIPPER_RELEASE_FRACTION = 0.25
 PULLEY_DENSITY = 1000.0
 PULLEY_SHEAVE_MU = 2.5
 PULLEY_FLANGE_MU = 0.0
-PULLEY_ARMATURE = 1.0e-5
-PULLEY_JOINT_FRICTION = 2.0e-4
+# Pulley rotational dynamics.
+PULLEY_ARMATURE = 5.0e-4
+PULLEY_JOINT_FRICTION = 2.0e-3
+PULLEY_JOINT_DAMPING = 2.0e-3
 PULLEY_AXIS = (0.0, 0.0, 1.0)
 
 SMALL_PULLEY_SHEAVE_RADIUS = 0.015
@@ -187,6 +189,8 @@ GRIPPER_STALL_ERROR_FRACTION = 0.010
 GRIPPER_STALL_SPEED_FRACTION_PER_SEC = 0.15
 # Require a real persistent stall instead of latching on one noisy frame.
 GRIPPER_STALL_FRAMES = 3
+# Frames to keep the post-latch settle assist active right after a fresh latch.
+GRASP_STABILIZE_FRAMES = 6
 
 # Contact-critical grasp transport settings.
 GRASP_CONTACT_SAFE_FRACTION = 0.45
@@ -584,7 +588,8 @@ def add_dynamic_pulley(builder, center, sheave_radius, color, label,
         parent=-1, child=body, axis=wp.vec3(*PULLEY_AXIS),
         parent_xform=tf(center),
         child_xform=wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat_identity()),
-        armature=PULLEY_ARMATURE, friction=PULLEY_JOINT_FRICTION,
+        armature=PULLEY_ARMATURE,
+        friction=PULLEY_JOINT_FRICTION,
         label=f"{label}_free_axle",
     )
     builder.add_articulation([joint], label=f"{label}_articulation")
@@ -1260,6 +1265,9 @@ class Example:
             self._gripper_release_restore_kd = np.empty((0,), dtype=np.float32)
 
         rinfo = self._configure_robot_joints()
+        # Give each free pulley axle real bearing behavior (viscous decay + Coulomb
+        # stop) so it does not coast forever once the belt stops driving it. 
+        self._configure_pulley_bearings()
         self.gripper_open_values = rinfo["gripper_open_values"]
         self.gripper_closed_values = rinfo["gripper_closed_values"]
         print(f"[INFO] Robot arm coord indices:      {rinfo['arm_coord_indices']}")
@@ -2281,6 +2289,64 @@ class Example:
                 "gripper_coord_indices": gripper_coord_indices, "gripper_dof_indices": gripper_dof_indices,
                 "gripper_open_values": open_values, "gripper_closed_values": closed_values}
 
+    # Pulley bearing config
+    def _configure_pulley_bearings(self) -> None:
+        """Give each free pulley axle real bearing behavior so it does not coast forever.
+        """
+        model = self.model
+        if not self.pulley_joints:
+            return
+
+        q_start = as_numpy(model.joint_q_start)
+        qd_start = as_numpy(model.joint_qd_start)
+        dof_dim = as_numpy(model.joint_dof_dim)
+
+        mode_np = as_numpy(model.joint_target_mode).copy()
+        ke_np = as_numpy(model.joint_target_ke).copy()
+        kd_np = as_numpy(model.joint_target_kd).copy()
+        layout_is_coord = (len(mode_np) == int(model.joint_coord_count))
+
+        # Optional passive-property arrays (names vary across Newton versions).
+        friction_arr = getattr(model, "joint_friction", None)
+        friction_np = as_numpy(friction_arr).copy() if friction_arr is not None else None
+        armature_arr = getattr(model, "joint_armature", None)
+        armature_np = as_numpy(armature_arr).copy() if armature_arr is not None else None
+
+        n_dofs_set = 0
+        for j in self.pulley_joints:
+            dofs = int(dof_dim[j, 0] + dof_dim[j, 1])
+            if dofs <= 0:
+                continue
+            target_base = int(q_start[j]) if layout_is_coord else int(qd_start[j])
+            dof_base = int(qd_start[j])
+            for k in range(dofs):
+                t_idx = target_base + k
+                d_idx = dof_base + k
+                # Pure viscous drag: POSITION mode, ke=0 -> force = -kd * qd.
+                if t_idx < len(mode_np):
+                    mode_np[t_idx] = int(JointTargetMode.POSITION)
+                    ke_np[t_idx] = 0.0
+                    kd_np[t_idx] = PULLEY_JOINT_DAMPING
+                if friction_np is not None and d_idx < len(friction_np):
+                    friction_np[d_idx] = PULLEY_JOINT_FRICTION
+                if armature_np is not None and d_idx < len(armature_np):
+                    armature_np[d_idx] = PULLEY_ARMATURE
+                n_dofs_set += 1
+
+        model.joint_target_mode.assign(mode_np)
+        model.joint_target_ke.assign(ke_np)
+        model.joint_target_kd.assign(kd_np)
+        if friction_np is not None:
+            model.joint_friction.assign(friction_np)
+        if armature_np is not None:
+            model.joint_armature.assign(armature_np)
+
+        print(
+            f"[INFO] Pulley bearings on {n_dofs_set} axle DOF(s): "
+            f"viscous kd={PULLEY_JOINT_DAMPING}, Coulomb friction={PULLEY_JOINT_FRICTION}, "
+            f"armature={PULLEY_ARMATURE}"
+        )
+
     # Collision pair filter
     def _belt_world_shape_pairs(self, include_gripper: bool = False) -> wp.array:
         """Build the original belt-world pairs; optionally add pad-belt pairs for ADMM."""
@@ -2547,9 +2613,14 @@ class Example:
             # print("[BELT DEBUG] min xyz =", belt_xyz.min(axis=0), "max xyz =", belt_xyz.max(axis=0))
             if len(self.pulley_bodies) > 0 and self.state_0.joint_q is not None:
                 q_start = as_numpy(self.model.joint_q_start)
+                qd_start = as_numpy(self.model.joint_qd_start)
                 jq = self.state_0.joint_q.numpy()
+                jqd = self.state_0.joint_qd.numpy()
                 angles = [float(jq[int(q_start[j])]) for j in self.pulley_joints]
-                # print("[PULLEY DEBUG] axle angles [rad] =", angles)
+                omegas = [float(jqd[int(qd_start[j])]) for j in self.pulley_joints]
+                # print("[PULLEY DEBUG] axle omega [rad/s] =",
+                #       [f"{w:+.3f}" for w in omegas],
+                #       " angle [rad] =", [f"{a:+.3f}" for a in angles])
 
         self.viewer.end_frame()
 

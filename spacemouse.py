@@ -49,7 +49,7 @@ LOOP_HZ = 200.0 # producer update rate.
 BOX_HALF = np.array([0.6, 0.6, 0.5], dtype=np.float64)
 
 # Shared memory target buffer
-SHARED_PATH_DEFAULT = "/tmp/sm_teleop_target.bin"
+SHARED_PATH_DEFAULT = "/tmp/sm_teleop_target_1.bin"
 
 
 class SharedTarget:
@@ -295,6 +295,10 @@ class SpaceMouse:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--buffer", type=str, default=SHARED_PATH_DEFAULT)
+    ap.add_argument("--device", type=str, default=None,
+                    help="exact SpaceMouse evdev path, e.g. /dev/input/event12")
+    ap.add_argument("--list-devices", action="store_true",
+                    help="print candidate 3Dconnexion/SpaceMouse event devices and exit")
     ap.add_argument("--host", type=str, default=MAC_HOST)
     ap.add_argument("--port", type=int, default=MAC_PORT)
     ap.add_argument("--use-box", action="store_true",
@@ -303,10 +307,31 @@ def main():
                     help="seconds to wait for the sim to seed (0 = forever)")
     args = ap.parse_args()
 
+    if args.list_devices:
+        print("SpaceMouse / 3Dconnexion input devices:")
+        found = 0
+        for path in list_devices():
+            try:
+                dev = InputDevice(path)
+                name = dev.name or ""
+                if "3dconnexion" in name.lower() or "spacemouse" in name.lower():
+                    caps = dev.capabilities()
+                    has_rel = ecodes.EV_REL in caps
+                    has_key = ecodes.EV_KEY in caps
+                    print(f"  {path:20s}  name={name!r}  EV_REL={has_rel} EV_KEY={has_key}")
+                    found += 1
+                dev.close()
+            except Exception:
+                pass
+        if not found:
+            print("  (none found)")
+        return
+
     shared = SharedTarget(args.buffer)
 
-    # Direct Linux SpaceMouse method.
-    mouse = SpaceMouse(SPACEMOUSE_DEVICE)
+    # IMPORTANT for two SpaceMice: each producer must receive a different --device.
+    device_path = args.device if args.device else SPACEMOUSE_DEVICE
+    mouse = SpaceMouse(device_path)
 
     # Wait for the sim to seed the buffer, then adopt its pose so the
     # target starts exactly on the gripper tip.

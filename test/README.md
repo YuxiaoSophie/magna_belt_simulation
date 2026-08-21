@@ -1,6 +1,6 @@
 # Test Simulation Notes
 
-This folder contains isolated simulation tests used to validate individual parts of the full round-belt project.
+This folder contains isolated simulation tests used to validate individual parts of the full belt project.
 
 ---
 
@@ -39,6 +39,21 @@ This is the isolated belt-only test. Goal is to match the real belt size: **248 
 
 ### Setup
 
+The setup includes everything in `only_ur10_old.py`, along with additional features:
+
+* UR10 and Robotiq 2F-85
+
+* SpaceMouse control
+
+  * enables Cartesian teleoperation of the UR10 end effector using the SpaceMouse
+  * reads the target position, orientation, and gripper command from the shared-memory target buffer
+
+---
+
+## `only_ur10_old.py`
+
+### Setup
+
 This is the isolated UR10 robot test.
 
 * Loads the UR10 robot.
@@ -47,3 +62,19 @@ This is the isolated UR10 robot test.
 * Tests robot and gripper model construction.
 
 This test is mainly used to validate the UR10 and gripper setup before coupling the robot with the VBD belt simulation.
+
+---
+
+## `spacemouse.py`
+
+### Setup
+
+This is the SpaceMouse input translator used for robot teleoperation.
+
+---
+
+## `spacemouse_via_socket_sender.py`
+
+### Setup
+
+This is the optional SpaceMouse socket sender for running the SpaceMouse on our own computer while the Newton simulation runs on another computer.

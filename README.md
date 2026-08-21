@@ -1,6 +1,6 @@
-# Round Belt Simulation Notes
+# Belt Simulation Notes
 
-This project develops a Newton/Warp round belt simulation.
+This project develops a Newton/Warp belt simulation.
 
 ## Expected folder structure
 
@@ -61,11 +61,65 @@ vglrun -d :1 uv run python code.py
 
 ### 1. Main files
 
-#### `round_belt_old.py`
+#### `round_belt.py`
 
 ##### Current setup
 
 This is the main full-scene simulation.
+
+The setup includes everything in `round_belt_old.py`, along with additional features:
+
+* Round belt and task environment
+
+* UR10 and Robotiq 2F-85
+
+* SpaceMouse control
+
+  * enables Cartesian teleoperation of the UR10 end effector using the SpaceMouse
+  * reads the target position, orientation, and gripper command from the shared-memory target buffer
+
+* Recording and replay
+
+  * supports recording teleoperation episodes with `--record-episode`
+  * supports selecting the recording directory with `--record-dir`
+  * supports naming an episode with `--record-name`
+  * saves the initial simulation state, per-frame control commands, and Newton state snapshots
+  * supports replaying a recorded episode with `--replay-episode`
+
+##### Previous issues
+
+* The IK solver could select different valid robot configurations while following the same end-effector target, which could cause inconsistent or unnecessary joint motion during SpaceMouse teleoperation.
+
+  * A null-space posture preference is used to bias the IK solution toward the previous robot posture while still satisfying the end-effector position and orientation target.
+
+* The full coupled simulation was too slow when using the more expensive coupling solver for every frame.
+
+  * CUDA graph capture is used for the fast simulation path to reduce repeated GPU launch overhead.
+  * ADMM coupling is used during contact-critical stages to provide stronger and more stable robot-belt coupling.
+
+---
+
+#### `spacemouse.py`
+
+##### Current setup
+
+This is the SpaceMouse input translator used for robot teleoperation.
+
+---
+
+#### `spacemouse_via_socket_sender.py`
+
+##### Current setup
+
+This is the optional SpaceMouse socket sender for running the SpaceMouse on our own computer while the Newton simulation runs on another computer.
+
+---
+
+#### `round_belt_old.py`
+
+##### Current setup
+
+This is the previous full-scene simulation.
 
 The setup includes, in this order:
 
@@ -119,10 +173,9 @@ The setup includes, in this order:
 
   This places each rod segment’s body frame at its center of mass instead of at the segment start point.
 
-##### Updates
+* The interaction is two-way: the cable feels the robot through the VBD proxy bodies that carry the gripper’s motion and inertia, while the robot feels the cable because the cable’s contact reaction forces are fed back to the corresponding MuJoCo gripper bodies.
 
-* Currently, the interaction is two-way: the cable feels the robot through the VBD proxy bodies that carry the gripper’s motion and inertia, while the robot feels the cable because the cable’s contact reaction forces are fed back to the corresponding MuJoCo gripper bodies.
-* Currently, I am using standard Newton contact (since the belt remains stable and does not slip away in the simulation, so I have not switched to hydroelastic contact).
+* I am also using standard Newton contact (since the belt remains stable and does not slip away in the simulation, so I have not switched to hydroelastic contact).
 
 ---
 

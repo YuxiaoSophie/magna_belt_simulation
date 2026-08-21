@@ -213,9 +213,19 @@ GRIPPER_EFFORT_LIMIT = 1.0
 # Once a grasp is latched, switch to a much stronger position servo.
 # This prevents belt tension from back-driving/opening the Robotiq pads while still
 # allowing the contact solver to report/transmit reaction forces through the robot.
-GRIPPER_HOLD_KE = 5.0e3
-GRIPPER_HOLD_KD = 2.5e2
-GRIPPER_HOLD_EFFORT_LIMIT = 100.0
+GRIPPER_HOLD_KE = 5.0e4
+GRIPPER_HOLD_KD = 2.0e3
+GRIPPER_HOLD_EFFORT_LIMIT = 1.0e4
+
+# HARD GRIPPER-MECHANISM LOCK.
+# The Robotiq 2F-85 has several passive/follower linkage joints in addition to the
+# driver joint.  Driving only driver_joint strongly still lets belt tension bend those
+# follower joints.  After a grasp latches we therefore position-lock EVERY 1-DOF
+# gripper linkage joint at its instantaneous grasp pose.  The belt can still generate
+# contact forces, but it cannot back-drive/open/bend the finger mechanism.
+GRIPPER_HARD_LOCK_KE = 2.0e5
+GRIPPER_HARD_LOCK_KD = 5.0e3
+GRIPPER_HARD_LOCK_EFFORT_LIMIT = 1.0e5
 
 # Anti-crush grasp latch.
 GRIPPER_STALL_MIN_FRACTION = 0.60
@@ -779,39 +789,6 @@ def _set_single_task_target(target_positions: wp.array[wp.vec3], target_rotation
                             pos: wp.vec3, rot: wp.vec4):
     target_positions[0] = pos
     target_rotations[0] = rot
-
-
-@wp.kernel
-def _capture_indexed_joint_values(
-    joint_q: wp.array(dtype=float),
-    indices: wp.array(dtype=int),
-    locked_values: wp.array(dtype=float),
-):
-    i = wp.tid()
-    locked_values[i] = joint_q[indices[i]]
-
-
-@wp.kernel
-def _apply_indexed_joint_lock(
-    joint_q: wp.array(dtype=float),
-    indices: wp.array(dtype=int),
-    locked_values: wp.array(dtype=float),
-    active: wp.array(dtype=int),
-):
-    i = wp.tid()
-    if active[0] != 0:
-        joint_q[indices[i]] = locked_values[i]
-
-
-@wp.kernel
-def _zero_indexed_joint_velocity(
-    joint_qd: wp.array(dtype=float),
-    indices: wp.array(dtype=int),
-    active: wp.array(dtype=int),
-):
-    i = wp.tid()
-    if active[0] != 0:
-        joint_qd[indices[i]] = 0.0
 
 
 def _shape_label_lower(builder, shape_index: int) -> str:
@@ -1399,46 +1376,32 @@ class Example:
         self.gripper_coord_indices = list(rinfo["gripper_coord_indices"])
         self.gripper_dof_indices = list(rinfo["gripper_dof_indices"])
         self.gripper_gain_indices = list(rinfo["gripper_gain_indices"])
+        # All scalar Robotiq linkage joints (driver + passive followers).
+        self.gripper_lock_coord_indices = list(rinfo["gripper_lock_coord_indices"])
+        self.gripper_lock_dof_indices = list(rinfo["gripper_lock_dof_indices"])
+        self.gripper_lock_gain_indices = list(rinfo["gripper_lock_gain_indices"])
+        self.gripper_lock_target_indices = list(rinfo["gripper_lock_target_indices"])
         self.arm2_coord_indices = list(rinfo2["arm_coord_indices"])
         self.arm2_dof_indices = list(rinfo2["arm_dof_indices"])
         self.gripper2_coord_indices = list(rinfo2["gripper_coord_indices"])
         self.gripper2_dof_indices = list(rinfo2["gripper_dof_indices"])
         self.gripper2_gain_indices = list(rinfo2["gripper_gain_indices"])
+        self.gripper2_lock_coord_indices = list(rinfo2["gripper_lock_coord_indices"])
+        self.gripper2_lock_dof_indices = list(rinfo2["gripper_lock_dof_indices"])
+        self.gripper2_lock_gain_indices = list(rinfo2["gripper_lock_gain_indices"])
+        self.gripper2_lock_target_indices = list(rinfo2["gripper_lock_target_indices"])
+
         self._gripper1_strong_hold_active = False
         self._gripper2_strong_hold_active = False
+        self._gripper1_lock_q = None
+        self._gripper2_lock_q = None
+        self._gripper1_lock_target_values = None
+        self._gripper2_lock_target_values = None
+        self._gripper1_lock_saved = None
+        self._gripper2_lock_saved = None
 
-        # HARD FINGER LOCK.  The driver joint alone is not enough: the Robotiq
-        # linkage contains passive/follower joints that can visibly fold backward
-        # under cable tension.  Collect every movable non-arm joint belonging to
-        # each robot so the complete finger mechanism can be frozen after grasp.
-        (self.gripper_lock_coord_indices,
-         self.gripper_lock_dof_indices) = self._collect_gripper_linkage_indices(
-            self._robot_joint_start, self._robot_joint_count,
-            self.arm_coord_indices, self.arm_dof_indices)
-        (self.gripper2_lock_coord_indices,
-         self.gripper2_lock_dof_indices) = self._collect_gripper_linkage_indices(
-            self._robot2_joint_start, self._robot2_joint_end,
-            self.arm2_coord_indices, self.arm2_dof_indices)
-
-        self._gripper1_lock_coord_wp = wp.array(
-            self.gripper_lock_coord_indices, dtype=int, device=self.device)
-        self._gripper1_lock_dof_wp = wp.array(
-            self.gripper_lock_dof_indices, dtype=int, device=self.device)
-        self._gripper2_lock_coord_wp = wp.array(
-            self.gripper2_lock_coord_indices, dtype=int, device=self.device)
-        self._gripper2_lock_dof_wp = wp.array(
-            self.gripper2_lock_dof_indices, dtype=int, device=self.device)
-        self._gripper1_lock_values_wp = wp.zeros(
-            len(self.gripper_lock_coord_indices), dtype=float, device=self.device)
-        self._gripper2_lock_values_wp = wp.zeros(
-            len(self.gripper2_lock_coord_indices), dtype=float, device=self.device)
-        self._gripper1_lock_active_wp = wp.zeros(1, dtype=int, device=self.device)
-        self._gripper2_lock_active_wp = wp.zeros(1, dtype=int, device=self.device)
-
-        print(f"[INFO] Robot 1 hard-lock linkage: {len(self.gripper_lock_coord_indices)} coords / "
-              f"{len(self.gripper_lock_dof_indices)} dofs")
-        print(f"[INFO] Robot 2 hard-lock linkage: {len(self.gripper2_lock_coord_indices)} coords / "
-              f"{len(self.gripper2_lock_dof_indices)} dofs")
+        print(f"[INFO] Robot 1 hard-lock linkage coords: {self.gripper_lock_coord_indices}")
+        print(f"[INFO] Robot 2 hard-lock linkage coords: {self.gripper2_lock_coord_indices}")
 
         print(f"[INFO] Robot 1 arm coords: {self.arm_coord_indices}")
         print(f"[INFO] Robot 2 arm coords: {self.arm2_coord_indices}")
@@ -1589,6 +1552,15 @@ class Example:
                 f"joint_coord_count ({n_coords}) nor joint_dof_count ({n_dofs}).")
 
         self.targetq_layout = targetq_layout
+        # Control-target layout can in principle differ from the gain-array layout,
+        # so resolve the hard-lock target indices from the actual control array here.
+        if targetq_layout == "coord":
+            self.gripper_lock_target_indices = list(self.gripper_lock_coord_indices)
+            self.gripper2_lock_target_indices = list(self.gripper2_lock_coord_indices)
+        else:
+            self.gripper_lock_target_indices = list(self.gripper_lock_dof_indices)
+            self.gripper2_lock_target_indices = list(self.gripper2_lock_dof_indices)
+
         print(f"[INFO] control.joint_target_q layout: {targetq_layout}-space "
               f"(len={ctrl_len}, n_coords={n_coords}, n_dofs={n_dofs}; "
               f"gain arrays are {rinfo['gains_layout']}-space)")
@@ -1732,7 +1704,6 @@ class Example:
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
             newton.examples.apply_coupled_viewer_forces(self, self.state_0)
-            self._apply_gripper_hard_locks(self.state_0)
             self.model.collide(
                 self.state_0, self.fast_contacts, collision_pipeline=self.fast_collision_pipeline
             )
@@ -1742,7 +1713,6 @@ class Example:
             newton.eval_ik(
                 self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd
             )
-            self._apply_gripper_hard_locks(self.state_1)
             self.state_0, self.state_1 = self.state_1, self.state_0
 
     def _simulate_admm_physics(self) -> None:
@@ -1750,7 +1720,6 @@ class Example:
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
             newton.examples.apply_coupled_viewer_forces(self, self.state_0)
-            self._apply_gripper_hard_locks(self.state_0)
             self.model.collide(
                 self.state_0, self.admm_contacts, collision_pipeline=self.admm_collision_pipeline
             )
@@ -1760,7 +1729,6 @@ class Example:
             newton.eval_ik(
                 self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd
             )
-            self._apply_gripper_hard_locks(self.state_1)
             self.state_0, self.state_1 = self.state_1, self.state_0
 
     def _simulate_physics(self) -> None:
@@ -1785,7 +1753,6 @@ class Example:
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
             newton.examples.apply_coupled_viewer_forces(self, self.state_0)
-            self._apply_gripper_hard_locks(self.state_0)
 
             wp.synchronize_device(self.device)
             t0 = time.perf_counter()
@@ -1798,7 +1765,6 @@ class Example:
             newton.eval_ik(
                 self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd
             )
-            self._apply_gripper_hard_locks(self.state_1)
             wp.synchronize_device(self.device)
             solve_s += time.perf_counter() - t0
             self.state_0, self.state_1 = self.state_1, self.state_0
@@ -2341,122 +2307,135 @@ class Example:
 
         return q_ik + dq_null
 
-    def _collect_gripper_linkage_indices(self, start_joint_index, end_joint_index,
-                                        arm_coord_indices, arm_dof_indices):
-        """Collect ALL movable Robotiq linkage coordinates/DOFs, not only driver_joint."""
-        q_start = as_numpy(self.model.joint_q_start)
-        qd_start = as_numpy(self.model.joint_qd_start)
-        dof_dim = as_numpy(self.model.joint_dof_dim)
-        arm_coords = set(int(i) for i in arm_coord_indices)
-        arm_dofs = set(int(i) for i in arm_dof_indices)
-        coords, dofs = [], []
-        ncoords = int(self.model.joint_coord_count)
-        ndofs = int(self.model.joint_dof_count)
-        for j in range(int(start_joint_index), int(end_joint_index)):
-            dof_count = int(dof_dim[j, 0] + dof_dim[j, 1])
-            if dof_count <= 0:
-                continue
-            q0 = int(q_start[j])
-            qd0 = int(qd_start[j])
-            # Robotiq movable joints are 1-DOF revolutes.  Using dof_count here
-            # deliberately avoids touching fixed joints.
-            for k in range(dof_count):
-                qi = q0 + k
-                qdi = qd0 + k
-                if 0 <= qi < ncoords and qi not in arm_coords:
-                    coords.append(qi)
-                if 0 <= qdi < ndofs and qdi not in arm_dofs:
-                    dofs.append(qdi)
-        return sorted(set(coords)), sorted(set(dofs))
-
-    def _capture_gripper_hard_lock(self, robot: int) -> None:
-        """Freeze the complete finger linkage at the CURRENT grasp configuration."""
-        if robot == 1:
-            qidx = self._gripper1_lock_coord_wp
-            vals = self._gripper1_lock_values_wp
-            active = self._gripper1_lock_active_wp
-            label = "Robot 1"
-        else:
-            qidx = self._gripper2_lock_coord_wp
-            vals = self._gripper2_lock_values_wp
-            active = self._gripper2_lock_active_wp
-            label = "Robot 2"
-        if len(qidx) > 0:
-            wp.launch(_capture_indexed_joint_values, dim=len(qidx),
-                      inputs=[self.state_0.joint_q, qidx, vals], device=self.device)
-        active.assign(np.asarray([1], dtype=np.int32))
-        print(f"[GRASP] {label}: HARD LINKAGE LOCK engaged")
-
-    def _release_gripper_hard_lock(self, robot: int) -> None:
-        active = self._gripper1_lock_active_wp if robot == 1 else self._gripper2_lock_active_wp
-        active.assign(np.asarray([0], dtype=np.int32))
-        print(f"[GRASP] Robot {robot}: hard linkage lock released")
-
-    def _apply_gripper_hard_locks(self, state) -> None:
-        """Graph-capturable exact position lock for every finger/follower joint."""
-        if len(self._gripper1_lock_coord_wp) > 0:
-            wp.launch(_apply_indexed_joint_lock, dim=len(self._gripper1_lock_coord_wp),
-                      inputs=[state.joint_q, self._gripper1_lock_coord_wp,
-                              self._gripper1_lock_values_wp, self._gripper1_lock_active_wp],
-                      device=self.device)
-        if len(self._gripper1_lock_dof_wp) > 0:
-            wp.launch(_zero_indexed_joint_velocity, dim=len(self._gripper1_lock_dof_wp),
-                      inputs=[state.joint_qd, self._gripper1_lock_dof_wp,
-                              self._gripper1_lock_active_wp], device=self.device)
-        if len(self._gripper2_lock_coord_wp) > 0:
-            wp.launch(_apply_indexed_joint_lock, dim=len(self._gripper2_lock_coord_wp),
-                      inputs=[state.joint_q, self._gripper2_lock_coord_wp,
-                              self._gripper2_lock_values_wp, self._gripper2_lock_active_wp],
-                      device=self.device)
-        if len(self._gripper2_lock_dof_wp) > 0:
-            wp.launch(_zero_indexed_joint_velocity, dim=len(self._gripper2_lock_dof_wp),
-                      inputs=[state.joint_qd, self._gripper2_lock_dof_wp,
-                              self._gripper2_lock_active_wp], device=self.device)
-
-        # joint_q was changed directly; rebuild body poses so collision sees the exact
-        # locked finger geometry, rather than the previously bent body_q.
-        newton.eval_fk(self.model, state.joint_q, state.joint_qd, state)
-
     def _set_gripper_drive_strength(self, robot: int, strong_hold: bool) -> None:
-        """Switch one Robotiq between compliant closing and a stiff latched hold.
+        """Lock/unlock the COMPLETE Robotiq linkage after a grasp.
 
-        This changes actuator authority, not the commanded opening.  Therefore cable
-        tension can create reaction force, but it should not visibly back-drive the pads.
+        Important: the visible finger/pad bending was not just a weak driver_joint.
+        The 2F-85 contains passive/follower revolute joints.  Cable tension can move
+        those joints even when driver_joint has a strong servo.  On latch we snapshot
+        every scalar gripper linkage joint and put every one in POSITION mode at that
+        exact grasp pose.  On explicit release we restore their pre-lock modes/gains.
+
+        This changes gripper-joint behavior only; the coupled solver, belt, contacts,
+        arm control, and pulley settings are untouched.
         """
         if robot == 1:
-            gain_indices = self.gripper_gain_indices
-            dof_indices = self.gripper_dof_indices
+            driver_gain_indices = self.gripper_gain_indices
+            lock_coord_indices = self.gripper_lock_coord_indices
+            lock_dof_indices = self.gripper_lock_dof_indices
+            lock_gain_indices = self.gripper_lock_gain_indices
+            lock_target_indices = self.gripper_lock_target_indices
             flag_name = "_gripper1_strong_hold_active"
+            q_name = "_gripper1_lock_q"
+            target_name = "_gripper1_lock_target_values"
+            saved_name = "_gripper1_lock_saved"
             label = "Robot 1"
         elif robot == 2:
-            gain_indices = self.gripper2_gain_indices
-            dof_indices = self.gripper2_dof_indices
+            driver_gain_indices = self.gripper2_gain_indices
+            lock_coord_indices = self.gripper2_lock_coord_indices
+            lock_dof_indices = self.gripper2_lock_dof_indices
+            lock_gain_indices = self.gripper2_lock_gain_indices
+            lock_target_indices = self.gripper2_lock_target_indices
             flag_name = "_gripper2_strong_hold_active"
+            q_name = "_gripper2_lock_q"
+            target_name = "_gripper2_lock_target_values"
+            saved_name = "_gripper2_lock_saved"
             label = "Robot 2"
         else:
             raise ValueError(f"robot must be 1 or 2, got {robot}")
 
-        if bool(getattr(self, flag_name, False)) == bool(strong_hold):
+        active = bool(getattr(self, flag_name, False))
+        if active == bool(strong_hold):
             return
 
-        ke = GRIPPER_HOLD_KE if strong_hold else GRIPPER_DRIVE_KE
-        kd = GRIPPER_HOLD_KD if strong_hold else GRIPPER_DRIVE_KD
-        effort = GRIPPER_HOLD_EFFORT_LIMIT if strong_hold else GRIPPER_EFFORT_LIMIT
-
+        mode_np = as_numpy(self.model.joint_target_mode).copy()
         ke_np = as_numpy(self.model.joint_target_ke).copy()
         kd_np = as_numpy(self.model.joint_target_kd).copy()
         effort_np = as_numpy(self.model.joint_effort_limit).copy()
-        for idx in gain_indices:
-            ke_np[idx] = ke
-            kd_np[idx] = kd
-        for idx in dof_indices:
-            effort_np[idx] = effort
-        self.model.joint_target_ke.assign(ke_np)
-        self.model.joint_target_kd.assign(kd_np)
-        self.model.joint_effort_limit.assign(effort_np)
-        setattr(self, flag_name, bool(strong_hold))
-        mode = "STRONG HOLD" if strong_hold else "compliant close"
-        print(f"[GRASP] {label}: {mode} ke={ke:g}, kd={kd:g}, effort_limit={effort:g}")
+
+        if strong_hold:
+            # Save the exact original actuator configuration so release is clean.
+            saved = {
+                "mode": mode_np[np.asarray(lock_gain_indices, dtype=np.int32)].copy(),
+                "ke": ke_np[np.asarray(lock_gain_indices, dtype=np.int32)].copy(),
+                "kd": kd_np[np.asarray(lock_gain_indices, dtype=np.int32)].copy(),
+                "effort": effort_np[np.asarray(lock_dof_indices, dtype=np.int32)].copy(),
+            }
+            setattr(self, saved_name, saved)
+
+            # Freeze at the *actual solved grasp pose*, not at a guessed closed pose.
+            jq = self.state_0.joint_q.numpy()
+            lock_q = np.asarray([float(jq[i]) for i in lock_coord_indices], dtype=np.float64)
+            setattr(self, q_name, lock_q.copy())
+            setattr(self, target_name, lock_q.copy())
+
+            # Position-control every linkage DOF.  Passive follower joints are the
+            # critical addition compared with the old driver-only strong servo.
+            for idx in lock_gain_indices:
+                mode_np[idx] = int(JointTargetMode.POSITION)
+                ke_np[idx] = GRIPPER_HARD_LOCK_KE
+                kd_np[idx] = GRIPPER_HARD_LOCK_KD
+            for idx in lock_dof_indices:
+                effort_np[idx] = GRIPPER_HARD_LOCK_EFFORT_LIMIT
+
+            # Keep driver authority at least as strong as the normal hold settings.
+            for idx in driver_gain_indices:
+                ke_np[idx] = max(float(ke_np[idx]), GRIPPER_HOLD_KE)
+                kd_np[idx] = max(float(kd_np[idx]), GRIPPER_HOLD_KD)
+
+            self.model.joint_target_mode.assign(mode_np)
+            self.model.joint_target_ke.assign(ke_np)
+            self.model.joint_target_kd.assign(kd_np)
+            self.model.joint_effort_limit.assign(effort_np)
+            setattr(self, flag_name, True)
+            print(
+                f"[GRASP] {label}: HARD LINKAGE LOCK ON; "
+                f"locked {len(lock_coord_indices)} gripper joints at actual grasp pose; "
+                f"ke={GRIPPER_HARD_LOCK_KE:g}, kd={GRIPPER_HARD_LOCK_KD:g}, "
+                f"effort={GRIPPER_HARD_LOCK_EFFORT_LIMIT:g}"
+            )
+        else:
+            saved = getattr(self, saved_name, None)
+            if saved is not None:
+                idxg = np.asarray(lock_gain_indices, dtype=np.int32)
+                idxd = np.asarray(lock_dof_indices, dtype=np.int32)
+                mode_np[idxg] = saved["mode"]
+                ke_np[idxg] = saved["ke"]
+                kd_np[idxg] = saved["kd"]
+                effort_np[idxd] = saved["effort"]
+
+            # Explicitly restore the driver to the original compliant close drive.
+            for idx in driver_gain_indices:
+                mode_np[idx] = int(JointTargetMode.POSITION)
+                ke_np[idx] = GRIPPER_DRIVE_KE
+                kd_np[idx] = GRIPPER_DRIVE_KD
+            driver_dofs = self.gripper_dof_indices if robot == 1 else self.gripper2_dof_indices
+            for idx in driver_dofs:
+                effort_np[idx] = GRIPPER_EFFORT_LIMIT
+
+            self.model.joint_target_mode.assign(mode_np)
+            self.model.joint_target_ke.assign(ke_np)
+            self.model.joint_target_kd.assign(kd_np)
+            self.model.joint_effort_limit.assign(effort_np)
+
+            setattr(self, q_name, None)
+            setattr(self, target_name, None)
+            setattr(self, saved_name, None)
+            setattr(self, flag_name, False)
+            print(f"[GRASP] {label}: HARD LINKAGE LOCK OFF; compliant gripper restored")
+
+    def _overwrite_hard_locked_gripper_targets(self, targets: np.ndarray, robot: int) -> None:
+        """Keep every locked Robotiq linkage target exactly at the latch snapshot."""
+        if robot == 1:
+            vals = self._gripper1_lock_target_values
+            indices = self.gripper_lock_target_indices
+        else:
+            vals = self._gripper2_lock_target_values
+            indices = self.gripper2_lock_target_indices
+        if vals is None:
+            return
+        for ti, val in zip(indices, vals):
+            targets[int(ti)] = float(val)
 
     def _measure_actual_gripper2(self):
         """Return Robot 2 actual Robotiq closure fraction and closure speed."""
@@ -2520,7 +2499,6 @@ class Example:
                 self._grip_hold_fraction = None
                 self._grip_stall_frames = 0
                 self._grasp_stabilize_frames_remaining = 0
-                self._release_gripper_hard_lock(1)
                 self._set_gripper_drive_strength(1, False)
                 self._grip_fraction = requested
             else:
@@ -2553,7 +2531,6 @@ class Example:
             self._grip_hold_fraction = float(np.clip(hold, 0.0, 1.0))
             self._grip_fraction = self._grip_hold_fraction
             self._set_gripper_drive_strength(1, True)
-            self._capture_gripper_hard_lock(1)
             self._grasp_stabilize_frames_remaining = GRASP_STABILIZE_FRAMES
             print(
                 f"[GRASP] anti-crush latch: requested={requested:.3f}, actual={actual:.3f}, "
@@ -2574,7 +2551,6 @@ class Example:
                 print(f"[GRASP2] release latch: requested={requested:.3f}, actual={actual:.3f}")
                 self._grip2_hold_fraction = None
                 self._grip2_stall_frames = 0
-                self._release_gripper_hard_lock(2)
                 self._set_gripper_drive_strength(2, False)
                 self._grip2_fraction = requested
             else:
@@ -2596,7 +2572,6 @@ class Example:
             self._grip2_hold_fraction = float(np.clip(hold, 0.0, 1.0))
             self._grip2_fraction = self._grip2_hold_fraction
             self._set_gripper_drive_strength(2, True)
-            self._capture_gripper_hard_lock(2)
             print(
                 f"[GRASP2] latch: requested={requested:.3f}, actual={actual:.3f}, "
                 f"hold={self._grip2_hold_fraction:.3f}, speed={actual_speed:.3f}/s"
@@ -2678,6 +2653,9 @@ class Example:
         for ti, val in zip(self.gripper_target_indices, grip_vals):
             targets[ti] = float(val)
 
+        # When latched, driver + all passive/follower linkage joints stay exactly
+        # where they were at grasp time.  This is what prevents pad bending/opening.
+        self._overwrite_hard_locked_gripper_targets(targets, robot=1)
         self.control.joint_target_q.assign(targets)
 
     def _write_control_targets2(self, solved_q):
@@ -2704,6 +2682,7 @@ class Example:
         )
         for ti, val in zip(self.gripper2_target_indices, grip_vals):
             targets[ti] = float(val)
+        self._overwrite_hard_locked_gripper_targets(targets, robot=2)
         self.control.joint_target_q.assign(targets)
 
     # Joint config
@@ -2713,6 +2692,31 @@ class Example:
             model, start_joint_index, UR10_ARM_DOFS, end_joint_index=end_joint_index)
         gripper_coord_indices, gripper_dof_indices = find_gripper_driver_indices(
             model, start_joint_index, end_joint_index=end_joint_index)
+
+        # Find EVERY scalar movable joint in the Robotiq portion of this robot, not
+        # merely driver_joint.  The passive/follower joints are exactly what can bend
+        # backward under belt tension if they remain JointTargetMode.NONE.
+        q_start_all = as_numpy(model.joint_q_start)
+        qd_start_all = as_numpy(model.joint_qd_start)
+        dof_dim_all = as_numpy(model.joint_dof_dim)
+        arm_coord_set = set(int(i) for i in arm_coord_indices)
+        arm_dof_set = set(int(i) for i in arm_dof_indices)
+        gripper_lock_coord_indices = []
+        gripper_lock_dof_indices = []
+        for j in range(start_joint_index, min(end_joint_index, len(getattr(model, "joint_label", [])))):
+            dofs = int(dof_dim_all[j, 0] + dof_dim_all[j, 1])
+            if dofs != 1:
+                continue
+            qi = int(q_start_all[j])
+            qdi = int(qd_start_all[j])
+            if qi in arm_coord_set or qdi in arm_dof_set:
+                continue
+            gripper_lock_coord_indices.append(qi)
+            gripper_lock_dof_indices.append(qdi)
+
+        # Deduplicate while preserving model order.
+        gripper_lock_coord_indices = list(dict.fromkeys(gripper_lock_coord_indices))
+        gripper_lock_dof_indices = list(dict.fromkeys(gripper_lock_dof_indices))
 
         if len(arm_coord_indices) < UR10_ARM_DOFS:
             print(f"[WARNING] Could not find all 6 UR10 arm joints (found {len(arm_coord_indices)}).")
@@ -2756,9 +2760,11 @@ class Example:
         target_len = len(mode_np)
         if target_len == n_coords:
             arm_t, grip_t = arm_coord_indices, gripper_coord_indices
+            lock_t = gripper_lock_coord_indices
             robot_start, robot_end = robot_coord_start, robot_coord_end; layout = "coord"
         elif target_len == n_dofs:
             arm_t, grip_t = arm_dof_indices, gripper_dof_indices
+            lock_t = gripper_lock_dof_indices
             robot_start, robot_end = robot_dof_start, robot_dof_end; layout = "dof"
         else:
             raise RuntimeError(f"joint_target_mode length {target_len} matches neither "
@@ -2794,10 +2800,19 @@ class Example:
         print(f"[INFO] {label} gripper compliant drive: ke={GRIPPER_DRIVE_KE}, kd={GRIPPER_DRIVE_KD}, "
               f"effort_limit={GRIPPER_EFFORT_LIMIT}")
 
+        print(
+            f"[INFO] {label} Robotiq hard-lock set: {len(gripper_lock_coord_indices)} "
+            f"scalar linkage joints (driver + followers)."
+        )
+
         return {"gains_layout": layout,
                 "arm_coord_indices": arm_coord_indices, "arm_dof_indices": arm_dof_indices,
                 "gripper_coord_indices": gripper_coord_indices, "gripper_dof_indices": gripper_dof_indices,
                 "gripper_gain_indices": list(grip_t),
+                "gripper_lock_coord_indices": list(gripper_lock_coord_indices),
+                "gripper_lock_dof_indices": list(gripper_lock_dof_indices),
+                "gripper_lock_gain_indices": list(lock_t),
+                "gripper_lock_target_indices": list(lock_t),
                 "gripper_open_values": open_values, "gripper_closed_values": closed_values}
 
     # Pulley bearing config

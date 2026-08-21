@@ -99,6 +99,14 @@ The setup includes everything in `round_belt_old.py`, along with additional feat
 
 ---
 
+#### `round_belt_two_arms.py`
+
+##### Current setup
+
+Building on `round_belt.py`, this setup adds another UR10 and Robotiq 2F-85.
+
+---
+
 #### `spacemouse.py`
 
 ##### Current setup

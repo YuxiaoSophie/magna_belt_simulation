@@ -6,7 +6,10 @@ requires-python = ">=3.10,<3.11"
 
 dependencies = [
     "evdev>=1.9.3",
+    "loguru>=0.7.3",
     "newton[examples]",
+    "trimesh>=4.12.2",
+    "viser>=1.0.26",
 ]
 
 [tool.uv]

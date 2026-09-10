@@ -11,11 +11,9 @@ import warp as wp
 
 import newton
 
-# ``round_belt`` is imported purely for its helpers/constants; it has a
-# ``__main__`` guard so importing it does not start a simulation.
-import round_belt
 
 from utils.meshes import load_meshes, mesh_world_aabb
+from utils.transforms import quat_from_rpy
 
 Color = tuple[float, float, float]
 ColorFn = Callable[[newton.Mesh], Color | None]
@@ -39,7 +37,7 @@ def _origin_xform(elem: ET.Element | None) -> wp.transform:
         return wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat_identity())
     xyz = _parse_vec(origin.get("xyz"), (0.0, 0.0, 0.0))
     rpy = _parse_vec(origin.get("rpy"), (0.0, 0.0, 0.0))
-    return wp.transform(wp.vec3(*xyz), round_belt.quat_from_rpy(*rpy))
+    return wp.transform(wp.vec3(*xyz), quat_from_rpy(*rpy))
 
 
 def _material_color(elem: ET.Element, fallback: Color) -> Color:

@@ -7,6 +7,14 @@ nothing here may import a scene module.
 
 from __future__ import annotations
 
+from utils.directives import (
+    DirectiveContext,
+    DirectiveFn,
+    LoadedScene,
+    Pose,
+    load_directives,
+    parse_directives,
+)
 from utils.labels import (
     body_index,
     body_label_endswith,
@@ -28,15 +36,21 @@ __all__ = [
     "add_urdf_as_static_shapes",
     "body_index",
     "body_label_endswith",
+    "DirectiveContext",
+    "DirectiveFn",
     "drake_xform",
     "fix_inverted_mesh_winding",
     "hide_shapes",
     "joint_index",
     "label_shapes_by_body",
+    "load_directives",
     "load_meshes",
+    "LoadedScene",
     "mesh_world_aabb",
     "neutralize_textured_shape_colors",
+    "parse_directives",
     "patch_viewer_shape_names",
     "patch_viser_texture_material",
+    "Pose",
     "rpy_deg_from_quat",
 ]

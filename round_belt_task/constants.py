@@ -1,184 +1,50 @@
-"""Drake-transcribed constants for the round-belt scene: asset paths, welds, joint
-defaults, colours.
+"""Round-belt scene constants: a typed view over the scene directives YAML.
 
-Poses and joint defaults come from, and only from, ``round-belt-scene.dmd.yaml``
-(welds), ``ur.dmd.yaml`` (UR10 + Robotiq), ``round_belt.sdf`` (belt) and
-``round_belt_simulation_params.yaml`` (Franka start pose), all under ``magna/``.
-World frame == the Drake world frame verbatim: origin at ``panda_link0``, Z up, table
-top z = -0.02858, floor z = -0.81852 (the table visual's own AABB min z).  This is
-deliberately NOT ``round_belt.py``'s ``TABLE_TOP_Z = 0.72``; do not "fix" it.
+Every scene number -- welds, frames, joint defaults, colours, belt geometry -- is authored
+once, next to its Drake provenance comment, in ``assets/round_belt_task/round_belt_scene.yaml``
+(+ ``assets/common/directives/ur10_2f85.yaml``); that file also documents the world frame.
+This module parses it with :func:`utils.directives.parse_directives` -- pure: no builder, no
+asset download -- and re-exports the values under the names ``scene.py``, ``joint_state.py``,
+``simulation.py`` and ``scripts/check_round_belt_task_poses.py`` read.  What stays Python is
+not scene data: path roots, joint-label conventions, controller gains, the URDF kinematic
+reference, and ``UR10_WRIST3_D6`` (documentation, asserted against the YAML below).
 """
 
 from __future__ import annotations
 
-import math
 from pathlib import Path
 
 import warp as wp
 
-# Helpers/constants only; round_belt has a ``__main__`` guard, so this starts nothing.
-import round_belt
-
-# Importing ``utils.transforms`` runs its import-time RPY-convention proof once.
-from utils.transforms import drake_xform
+from utils.directives import Directive, parse_directives
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-
 ASSETS_DIR = REPO_ROOT / "assets"
 COMMON_ASSETS_DIR = ASSETS_DIR / "common"
 ROUND_BELT_ASSETS_DIR = ASSETS_DIR / "round_belt_task"
-TABLE_URDF = COMMON_ASSETS_DIR / "scene.urdf"
-BOARD_URDF = ROUND_BELT_ASSETS_DIR / "round_belt_task_board.urdf"
-HOLDER_URDF = COMMON_ASSETS_DIR / "belt_chain_holder" / "belt_chain_holder.urdf"
-PANDA_ARM_URDF = COMMON_ASSETS_DIR / "franka" / "urdf" / "panda_arm.urdf"
-PANDA_HAND_URDF = COMMON_ASSETS_DIR / "franka" / "urdf" / "panda_hand_with_long_fingers.urdf"
-# The scene builds the NVIDIA USD UR10, not this URDF: the Drake glTFs carry no images,
-# so that arm renders flat.  The URDF stays the *kinematic* source of truth --
-# scripts/check_round_belt_task_poses.py walks it with an independent numpy FK and asserts
-# the USD arm lands in the same place.  Measured USD-vs-URDF frame differences: see
-# assets/README.md "UR10" and X_USDWRIST3_URDFWRIST3 below.
-UR10_URDF = COMMON_ASSETS_DIR / "ur10" / "ur10.urdf"
-UR10_USD_ASSET = "universal_robots_ur10"
-UR10_USD_RELPATH = ("usd", "ur10_instanceable.usda")
-# MJCF; Newton has no SDF importer, so this substitutes for the Drake Robotiq SDF.
-ROBOTIQ_MJCF = REPO_ROOT / "2f85.xml"
+SCENE_DIRECTIVES = ROUND_BELT_ASSETS_DIR / "round_belt_scene.yaml"
 
-# The scene.urdf visual whose AABB defines the floor height.  Looked up by exact
-# label so dict ordering can never pick another one.
+_D = parse_directives(SCENE_DIRECTIVES)
+
+
+def _source(directive: Directive) -> Path:
+    """The yaml that authored ``directive``; its relative paths resolve against it."""
+    return next(source for entry, source in _D.entries if entry is directive)
+
+
+def _model_file(name: str) -> Path:
+    model = _D.model(name)
+    return _D.resolve_path(model.file, _source(model))
+
+
+# ---- label conventions (Python-only) ----------------------------------------------------
+# The scene.urdf visual whose AABB defines the floor height.  Looked up by exact label so
+# dict ordering can never pick another one.
 TABLE_VISUAL_LABEL = "table/scene/visual0"
-
-# add_weld: world -> table::scene   (no X_PC => identity)
-X_W_TABLE = wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat_identity())
-
-# add_weld: world -> nist_board::board
-X_W_BOARD = drake_xform(
-    (0.64483928, -0.19718233, 0.01076393),
-    (-3.32822058e-01, -6.87450103e-02, 8.95207485e01),
-)
-
-# add_weld: world -> belt_holder::belt_chain_holder_first_half
-X_W_HOLDER = drake_xform((0.4736603358808432, 0.3520562100563749, -0.02858), (0.0, 0.0, 90.0))
-
-# add_weld: world -> panda::panda_link0   (no X_PC => identity; this IS the world origin)
-X_W_PANDA = wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat_identity())
-
-# add_weld: panda::panda_link8 -> panda_hand::panda_hand
-X_LINK8_HAND = drake_xform((0.0, 0.0, 0.0), (0.0, 0.0, -45.0))
-
-# add_weld: world -> ur10::base_link  (base_link is the URDF root, so this IS the
-# root xform)
-X_W_UR10 = drake_xform(
-    (1.33235648, -0.15491427, 0.03076191),
-    (-0.35720724, 0.72781324, 179.78723941),
-)
-
-# ur.dmd.yaml welds robotiq_85::robotiq_85_base_link to ur10::wrist_3_link with yaw
-# +90 deg.  2f85.xml is substituted for the Drake Robotiq SDF, so the weld is re-derived
-# for the MJCF root frame:
-#   * Drake SDF: the fingers translate along +/-X of robotiq_85_base_link and the
-#     fingertips lie along +Z of wrist_3_link (ur.dmd's finger_tip_frame is
-#     wrist_3_link + (0, 0, 0.194)), so the +90 deg yaw closes the pads on +/-Y.
-#   * 2f85.xml: the root child body ``base`` carries quat="1 0 0 -1" = Rz(-90 deg)
-#     w.r.t. the MJCF root and the pads are offset along ``base`` +/-Y, so in MJCF-root
-#     coordinates they sit along +/-X and the gripper extends along the root's +Z.
-#   => MJCF root = wrist_3_link . Rz(+90 deg), zero translation, putting the pads back
-#      on +/-Y of wrist_3_link, matching Drake.
-# NOT round_belt.py's Ry(90 deg): that compensates the Newton USD UR10's tool frame,
-# which this scene does not use.
-X_WRIST3_GRIPPER = wp.transform(
-    wp.vec3(0.0, 0.0, 0.0), round_belt.quat_from_rpy(0.0, 0.0, 0.5 * math.pi)
-)
-
-# The NVIDIA USD UR10's ``wrist_3_link`` body frame is not the ROS/Drake URDF's frame
-# for the same link.  Measured (USD at identity, both at UR10_DEFAULT_Q):
-#     inv(X_usd_wrist3) . X_urdf_wrist3 = T(0, d6, 0) . Rx(-90 deg)
-# with d6 = 0.0922 m, exactly the ``wrist_3_joint`` origin translation in
-# assets/ur10/ur10.urdf:259: the USD keeps its wrist_3 frame at the joint axis while the
-# URDF pushes it out by the link length, and the two differ by a quarter turn about X.
-# Every other UR10 link differs by a similar constant; base_link is the one link where
-# they agree exactly, which is why X_W_UR10 needs no correction.
-UR10_WRIST3_D6 = 0.0922
-X_USDWRIST3_URDFWRIST3 = wp.transform(
-    wp.vec3(0.0, UR10_WRIST3_D6, 0.0), round_belt.quat_from_rpy(-0.5 * math.pi, 0.0, 0.0)
-)
-
-# Gripper weld expressed on the USD wrist_3 body, so the MJCF root lands at
-# exactly the same world pose it had on the Drake URDF's wrist_3_link:
-#     X(usd_wrist3) . X_USDWRIST3_GRIPPER == X(urdf_wrist3) . Rz(+90 deg)
-X_USDWRIST3_GRIPPER = X_USDWRIST3_URDFWRIST3 * X_WRIST3_GRIPPER
-
-# round_belt.sdf pose "x y 0  0 0 1.57079" applied to the X-major reference ellipse
-# (major 0.248 along X, minor 0.168 along Y): the +90 deg yaw turns the major axis onto
-# world +Y, hence semi-axis X = 0.168/2, semi-axis Y = 0.248/2.
-BELT_CENTER = (0.4736603358808432, 0.3520562100563749, 0.0)
-BELT_SEMI_AXIS_X = 0.084
-BELT_SEMI_AXIS_Y = 0.124
-BELT_RADIUS = round_belt.BELT_RADIUS  # 0.0033
-BELT_NUM_ELEMENTS = round_belt.BELT_NUM_ELEMENTS  # 48
-# Drake's belt orange (round_belt.sdf: <diffuse>1.0 0.5 0.0 1</diffuse>).
-BELT_COLOR = (1.0, 0.5, 0.0)
-
-# Colours for parts whose assets author none of their own: the pulley OBJs carry no MTL
-# data and the board URDF paints every pulley sub-mesh one flat colour, so the small
-# pulley and its mounting plate came out identically white.
-#
-# These follow round_belt.py:640-695, NOT round_belt_task_board.sdf: that SDF paints
-# every pulley half black (<diffuse>0 0 0 1</diffuse>) and leaves the board -- which the
-# mounting plate is part of -- light grey, i.e. the inverse of the real hardware.
-# round_belt.py has it right: white pulley (small halves 0.80) on a black mount
-# (bracket/bearing/bolt 0.10, large pulley 0.10).
-SMALL_PULLEY_COLOR = (0.80, 0.80, 0.80)
-LARGE_PULLEY_COLOR = (0.10, 0.10, 0.10)
-PULLEY_MOUNT_COLOR = (0.10, 0.10, 0.10)
-BOARD_COLOR = (0.80, 0.80, 0.80)
-# The small pulley's mounting plate is not its own file here: it is baked into
-# round_belt_task_board.obj, one material spanning 18 disconnected solids.  The plate and
-# its four corner bolts sit at this board-local XY (where round_belt.py places its
-# separate bracket mesh); splitting the mesh lets just those parts go black.
-SMALL_PULLEY_MOUNT_LOCAL_XY = (0.3504, 0.1964)
-SMALL_PULLEY_MOUNT_RADIUS = 0.05
-BOARD_PANEL_MIN_SPAN = 0.2  # the 384 x 384 mm panel: never recolour it as if it were the plate
-
-# Drake's Robotiq fingers (external/robotiq-driver+/models/robotiq_arg85_parallel_grippers.sdf):
-# left/right_finger links at (+/-0.047285310862444, 0, 0.1148045193817614) in the gripper
-# base frame; 2f85.xml's root body carries a 7 mm +Z offset to be undone to reach it
-# (``<body name="base_mount" pos="0 0 0.007">``).
-ROBOTIQ_FINGER_DIR = COMMON_ASSETS_DIR / "robotiq_2f85" / "fingers"
-ALOHA_FINGER_OFFSET_X = 0.047285310862444
-ALOHA_FINGER_OFFSET_Z = 0.1148045193817614
-MJCF_BASE_MOUNT_OFFSET_Z = 0.007
-# Drake's SDF paints these fingers orange (<diffuse>1 0.5 0 1</diffuse>); black is a
-# deliberate deviation, matching the 2f85 body they mount on and the SDF's own
-# robotiq_85_base_link (<diffuse>0.1 0.1 0.1 1</diffuse>).
-ALOHA_FINGER_COLOR = (0.10, 0.10, 0.10)
-
-# The belt-holder weld height; also the Drake table-top height.
-TABLE_TOP_Z = -0.02858
-
-# Safety collision box under the belt; not part of the Drake scene.
-TABLETOP_COLLISION_THICKNESS = 0.04
-
-# Franka start pose == what the Drake round-belt SIM actually seeds, not the "ready"
-# pose from franka.dmd.yaml:
-#   magna/systems/parameters/round_belt_simulation_params.yaml:9-10
-#       q_init_franka      = [1.71717, 1.20002, -1.4548, -2.25837, 1.259265, 1.94719, 0.331838]
-#       q_init_franka_hand = [-0.004, 0.004]
-#   magna/systems/simulation/magna_simulation.cc:187-189 -- plant.SetPositions(...,
-#       franka_index, sim_params.q_init_franka) and the hand equivalent.
-# round-belt-scene.dmd.yaml adds panda_arm.urdf with NO ``default_joint_positions`` and
-# never loads franka.dmd.yaml, so that file's ready pose is not what this scene starts
-# in.  The finger values are asymmetric because panda_hand_with_long_fingers.urdf limits
-# panda_finger_joint1 to [-0.045, 0.0] and panda_finger_joint2 to [0.0, 0.045];
-# -0.004/+0.004 is a 4 mm-per-jaw opening inside both limits (no clamping needed).
-PANDA_DEFAULT_Q = [1.71717, 1.20002, -1.4548, -2.25837, 1.259265, 1.94719, 0.331838]
 PANDA_JOINT_LABELS = [f"panda_arm/panda_joint{i}" for i in range(1, 8)]
 PANDA_FINGER_LABELS = ["panda_hand/panda_finger_joint1", "panda_hand/panda_finger_joint2"]
-PANDA_FINGER_DEFAULT_Q = [-0.004, 0.004]
-
-# ur.dmd.yaml default_joint_positions
-UR10_DEFAULT_Q = [0.0, -1.57079632679, 1.57079632679, -1.57079632679, -1.57079632679, 0.0]
 # USD joint labels are full prim paths ("/ur10/<parent link>/<joint>"); the six names and
-# their order are identical to the Drake URDF's, hence UR10_DEFAULT_Q applies.
+# their order are identical to the Drake URDF's, hence ur.dmd.yaml's defaults apply.
 UR10_JOINT_LABELS = [
     "/ur10/base_link/shoulder_pan_joint",
     "/ur10/shoulder_link/shoulder_lift_joint",
@@ -190,6 +56,102 @@ UR10_JOINT_LABELS = [
 UR10_BASE_LABEL = "/ur10/base_link"
 UR10_WRIST3_LABEL = "/ur10/wrist_3_link"
 
+# ---- asset paths ------------------------------------------------------------------------
+TABLE_URDF = _model_file("table")
+BOARD_URDF = _model_file("board")
+HOLDER_URDF = _model_file("belt_chain_holder")
+PANDA_ARM_URDF = _model_file("panda_arm")
+PANDA_HAND_URDF = _model_file("panda_hand")
+# MJCF; Newton has no SDF importer, so this substitutes for the Drake Robotiq SDF.
+ROBOTIQ_MJCF = _model_file("robotiq_2f85")
+# The scene builds the NVIDIA USD UR10 (see ur10_2f85.yaml), not this URDF.  The URDF stays
+# the *kinematic* source of truth -- scripts/check_round_belt_task_poses.py walks it with an
+# independent numpy FK and asserts the USD arm lands in the same place.  Measured USD-vs-URDF
+# frame differences: see assets/README.md "UR10" and the ur10_wrist_3_link_drake frame.
+UR10_URDF = COMMON_ASSETS_DIR / "ur10" / "ur10.urdf"
+
+# ---- welds and frames -------------------------------------------------------------------
+X_W_TABLE = _D.weld("table::scene").X_PC.to_transform()
+X_W_BOARD = _D.weld("board::board").X_PC.to_transform()
+X_W_HOLDER = _D.weld("belt_chain_holder::belt_chain_holder_first_half").X_PC.to_transform()
+X_W_PANDA = _D.weld("panda_arm::panda_link0").X_PC.to_transform()
+X_LINK8_HAND = _D.weld("panda_hand::panda_hand").X_PC.to_transform()
+X_W_UR10 = _D.weld("ur10::base_link").X_PC.to_transform()
+# USD wrist_3_link -> Drake/URDF wrist_3_link, i.e. T(0, d6, 0) . Rx(-90 deg).
+X_USDWRIST3_URDFWRIST3 = _D.frame("ur10_wrist_3_link_drake").X_PF.to_transform()
+# Drake/URDF wrist_3_link -> MJCF gripper root: Rz(+90 deg), as ur.dmd.yaml.
+X_WRIST3_GRIPPER = _D.weld("robotiq_2f85").X_PC.to_transform()
+# Gripper weld expressed on the USD wrist_3 body, so the MJCF root lands at exactly the
+# same world pose it had on the Drake URDF's wrist_3_link:
+#     X(usd_wrist3) . X_USDWRIST3_GRIPPER == X(urdf_wrist3) . Rz(+90 deg)
+X_USDWRIST3_GRIPPER = X_USDWRIST3_URDFWRIST3 * X_WRIST3_GRIPPER
+
+# Documentation constant, and the one scene number deliberately duplicated in Python: the
+# ``wrist_3_joint`` origin offset d6 that the ur10_wrist_3_link_drake frame encodes.
+UR10_WRIST3_D6 = 0.0922
+if abs(float(wp.transform_get_translation(X_USDWRIST3_URDFWRIST3)[1]) - UR10_WRIST3_D6) >= 1e-6:
+    raise AssertionError(
+        f"ur10_wrist_3_link_drake translation {X_USDWRIST3_URDFWRIST3} does not carry "
+        f"d6 = UR10_WRIST3_D6 = {UR10_WRIST3_D6} on +Y"
+    )
+
+
+# ---- joint defaults ---------------------------------------------------------------------
+def _joint_defaults(model: str, labels: list[str]) -> list[float]:
+    """``model``'s ``default_joint_positions``, ordered by the leaf names of ``labels``."""
+    positions = _D.model(model).default_joint_positions
+    leaves = [label.rsplit("/", 1)[-1] for label in labels]
+    if sorted(positions) != sorted(leaves) or any(len(v) != 1 for v in positions.values()):
+        raise ValueError(
+            f"{SCENE_DIRECTIVES}: {model} default_joint_positions {positions} must give "
+            f"exactly one value for each of {leaves}"
+        )
+    return [positions[leaf][0] for leaf in leaves]
+
+
+PANDA_DEFAULT_Q = _joint_defaults("panda_arm", PANDA_JOINT_LABELS)
+PANDA_FINGER_DEFAULT_Q = _joint_defaults("panda_hand", PANDA_FINGER_LABELS)
+UR10_DEFAULT_Q = _joint_defaults("ur10", UR10_JOINT_LABELS)
+
+# ---- custom-directive parameters --------------------------------------------------------
+_TABLETOP = _D.custom("add_tabletop_collision").params
+_GROUND = _D.custom("add_ground_plane").params
+_TABLE_REFS = (_TABLETOP.get("table_visual"), _GROUND.get("height_from_aabb_min_z_of"))
+if any(ref != TABLE_VISUAL_LABEL for ref in _TABLE_REFS):
+    raise ValueError(
+        f"{SCENE_DIRECTIVES}: tabletop and ground must both reference {TABLE_VISUAL_LABEL!r}, "
+        f"got {_TABLE_REFS}"
+    )
+TABLE_TOP_Z = float(_TABLETOP["top_z"])
+TABLETOP_COLLISION_THICKNESS = float(_TABLETOP["thickness"])
+
+_BELT = _D.custom("add_rod_ellipse", "flexible_ellipse_cable").params
+BELT_CENTER = tuple(float(v) for v in _BELT["center"])
+BELT_SEMI_AXIS_X, BELT_SEMI_AXIS_Y = (float(v) for v in _BELT["semi_axes"])
+BELT_RADIUS = float(_BELT["radius"])
+BELT_NUM_ELEMENTS = int(_BELT["num_elements"])
+BELT_COLOR = tuple(float(v) for v in _BELT["color"])
+
+_ALOHA_DIRECTIVE = _D.custom("add_aloha_fingers")
+_ALOHA = _ALOHA_DIRECTIVE.params
+ROBOTIQ_FINGER_DIR = _D.resolve_path(_ALOHA["finger_dir"], _source(_ALOHA_DIRECTIVE))
+ALOHA_FINGER_OFFSET_X = float(_ALOHA["offset_x"])
+ALOHA_FINGER_OFFSET_Z = float(_ALOHA["offset_z"])
+MJCF_BASE_MOUNT_OFFSET_Z = float(_ALOHA["base_mount_offset_z"])
+ALOHA_FINGER_COLOR = tuple(float(v) for v in _ALOHA["color"])
+
+# ---- board colours (the board add_model's color / link_colors / component_colors) -------
+_BOARD = _D.model("board")
+_MOUNT = _BOARD.component_colors[0]
+BOARD_COLOR = _BOARD.color
+SMALL_PULLEY_COLOR = _BOARD.link_colors["small_round_pulley"]
+LARGE_PULLEY_COLOR = _BOARD.link_colors["large_round_pulley"]
+PULLEY_MOUNT_COLOR = _MOUNT.color
+SMALL_PULLEY_MOUNT_LOCAL_XY = _MOUNT.near_local_xy
+SMALL_PULLEY_MOUNT_RADIUS = _MOUNT.radius
+BOARD_PANEL_MIN_SPAN = _MOUNT.max_span
+
+# ---- controller gains (physics tuning, not scene data) ----------------------------------
 ARM_TARGET_KE = 700.0
 ARM_TARGET_KD = 110.0
 FINGER_TARGET_KE = 100.0

@@ -62,18 +62,3 @@ directives:
       X_PC:
         translation: [0.0, 0.0, 0.0]
         rotation: !Rpy { deg: [0.0, 0.0, 90.0] }
-  # Drake's Robotiq fingers (external/robotiq-driver+/models/robotiq_arg85_parallel_grippers.sdf):
-  # left/right_finger links at (+/-0.047285310862444, 0, 0.1148045193817614) in the gripper base
-  # frame; 2f85.xml's root body carries a 7 mm +Z offset to be undone to reach it
-  # (``<body name="base_mount" pos="0 0 0.007">``).  Must directly follow the gripper.
-  - add_aloha_fingers:
-      name: aloha_fingers
-      gripper: robotiq_2f85
-      finger_dir: ../robotiq_2f85/fingers
-      offset_x: 0.047285310862444
-      offset_z: 0.1148045193817614
-      base_mount_offset_z: 0.007
-      # Drake's SDF paints these fingers orange (<diffuse>1 0.5 0 1</diffuse>); black is a
-      # deliberate deviation, matching the 2f85 body they mount on and the SDF's own
-      # robotiq_85_base_link (<diffuse>0.1 0.1 0.1 1</diffuse>).
-      color: [0.10, 0.10, 0.10]

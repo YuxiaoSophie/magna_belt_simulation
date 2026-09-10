@@ -111,6 +111,33 @@ def _span(records: Sequence[ModelRecord], what: str) -> tuple[list[int], list[in
     )
 
 
+# Label suffix of the ALOHA finger colliders baked into 2f85.xml's pad bodies
+# (right_aloha_finger_collision / left_aloha_finger_collision).
+FINGER_COLLIDER_SUFFIX = "_aloha_finger_collision"
+
+
+def _finger_colliders(
+    builder: newton.ModelBuilder, gripper: ModelRecord, pad_bodies: Sequence[int]
+) -> list[int]:
+    """The ALOHA finger collider on each pad body, in ``pad_bodies`` order: the shapes
+    ``simulation.py`` gives GRIPPER_CONTACT_MU/KE/KD.  Raises unless each pad carries
+    exactly one."""
+    shapes = []
+    for body in pad_bodies:
+        hits = [
+            s for s in gripper.shapes
+            if int(builder.shape_body[s]) == int(body)
+            and str(builder.shape_label[s] or "").endswith(FINGER_COLLIDER_SUFFIX)
+        ]
+        if len(hits) != 1:
+            raise RuntimeError(
+                f"pad body {builder.body_label[body]!r} carries {len(hits)} shapes labelled "
+                f"*{FINGER_COLLIDER_SUFFIX}, expected exactly 1; 2f85.xml's finger geoms changed"
+            )
+        shapes.append(int(hits[0]))
+    return shapes
+
+
 def build_scene(
     builder: newton.ModelBuilder, directives_path: Path = SCENE_DIRECTIVES
 ) -> SceneInfo:
@@ -124,7 +151,6 @@ def build_scene(
     statics = [record for record in models.values() if record.directive.kind == "static"]
     robots = [record for record in models.values() if record.directive.kind != "static"]
     tabletop = scene.extras["tabletop_collision"]
-    fingers = scene.extras["aloha_fingers"]
     belt = scene.extras["flexible_ellipse_cable"]
     ground = scene.extras["ground"]
 
@@ -142,11 +168,16 @@ def build_scene(
     labels["tabletop_collision"] = tabletop_collision_shape
     static_labels = dict(sorted(labels.items(), key=lambda item: item[1]))
 
-    # Robots: Franka arm + hand, UR10, gripper (its shape range already extended over the
-    # ALOHA fingers by add_aloha_fingers) -- contiguous in bodies, joints and shapes.
+    # Robots: Franka arm + hand, UR10, gripper -- contiguous in bodies, joints and shapes.
     franka_bodies, franka_joints, _ = _span([models["panda_arm"], models["panda_hand"]], "franka")
     ur10, gripper = models["ur10"], models["robotiq_2f85"]
     robot_bodies, robot_joints, robot_shapes = _span(robots, "robots")
+    pad_bodies = round_belt._select_gripper_proxy_bodies(
+        builder, gripper.body_start, gripper.body_end
+    )
+    if len(pad_bodies) != 2:
+        raise RuntimeError(f"gripper contact needs exactly 2 pad bodies; got {pad_bodies}")
+    pad_shapes = _finger_colliders(builder, gripper, pad_bodies)
 
     table_aabb = scene.aabbs[TABLE_VISUAL_LABEL]
     ground_height = float(ground["height"])
@@ -162,8 +193,7 @@ def build_scene(
         franka_bodies=franka_bodies, franka_joints=franka_joints,
         ur10_bodies=ur10.bodies, ur10_joints=ur10.joints,
         gripper_bodies=gripper.bodies, gripper_joints=gripper.joints,
-        gripper_pad_bodies=list(fingers["pad_bodies"]),
-        gripper_pad_shapes=list(fingers["pad_shapes"]),
+        gripper_pad_bodies=[int(b) for b in pad_bodies], gripper_pad_shapes=pad_shapes,
         belt_bodies=belt["bodies"], belt_joints=belt["joints"], belt_shapes=belt["shapes"],
         static_shapes=static_shapes, static_shape_labels=static_labels,
         tabletop_collision_shape=tabletop_collision_shape,

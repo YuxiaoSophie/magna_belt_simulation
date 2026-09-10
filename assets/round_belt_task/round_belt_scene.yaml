@@ -8,8 +8,7 @@
 # NOT round_belt.py's TABLE_TOP_Z = 0.72; do not "fix" it.
 #
 # ORDER IS LOAD-BEARING: it fixes every body and shape index.  The tabletop collider must sit
-# between the table and the board (static shape range), and add_aloha_fingers must directly
-# follow the gripper (its shapes count as gripper shapes).
+# between the table and the board (static shape range).
 #
 # PyYAML is YAML 1.1: `8.95207485e01` and `2e4` parse as strings, which the loader coerces.
 # Still write the signed form (8.95207485e+01, 2.0e+4): magna's dmd files do, so the two diff.

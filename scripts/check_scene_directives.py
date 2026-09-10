@@ -4,10 +4,11 @@
 Covers parsing (YAML 1.1 numeric coercion, `!Rpy`, strict keys), weld/frame composition
 onto a real articulation, static models + AABB collection + `add_directives` includes, the
 error guards, custom-directive plumbing and a smoke load of the real round-belt scene, plus
-the real board's colours and three guards exercised on edited copies of the real scene
-(directive order, an MJCF root-body weld child, a URDF gripper under add_aloha_fingers).
-Builds synthetic directives files at runtime under `tempfile.TemporaryDirectory()`; nothing
-is committed under `assets/`. No solver stepping, no viewer.
+the real board's colours, two guards exercised on edited copies of the real scene (directive
+order, an MJCF root-body weld child) and the ALOHA finger geoms baked into `2f85.xml` (with an
+edited copy of that XML that must fail). Builds synthetic directives files and XML copies at
+runtime under `tempfile.TemporaryDirectory()`; nothing is committed under `assets/`. No
+solver stepping, no viewer.
 
 Run:
     uv run python scripts/check_scene_directives.py
@@ -102,7 +103,7 @@ class Skipped(Exception):
 PANDA_ARM_URDF = REPO_ROOT / "assets/common/franka/urdf/panda_arm.urdf"
 PANDA_HAND_URDF = REPO_ROOT / "assets/common/franka/urdf/panda_hand_with_long_fingers.urdf"
 HOLDER_URDF = REPO_ROOT / "assets/common/belt_chain_holder/belt_chain_holder.urdf"
-ROBOTIQ_FINGER_DIR = REPO_ROOT / "assets/common/robotiq_2f85/fingers"
+ROBOTIQ_MJCF = REPO_ROOT / "2f85.xml"
 BOARD_URDF = REPO_ROOT / "assets/round_belt_task/round_belt_task_board.urdf"
 SCENE_YAML = REPO_ROOT / "assets/round_belt_task/round_belt_scene.yaml"
 UR10_2F85_YAML = REPO_ROOT / "assets/common/directives/ur10_2f85.yaml"
@@ -163,7 +164,7 @@ def _real_scene():
 # from a temp dir; entries are edited as whole list items so comments cannot mislead.
 # ----------------------------------------------------------------------------
 
-_PATH_KEY = re.compile(r"(\b(?:file|finger_dir):[ \t]*)([^\s,}#]+)")
+_PATH_KEY = re.compile(r"(\bfile:[ \t]*)([^\s,}#]+)")
 Edit = Callable[[list[str]], None]
 
 
@@ -473,9 +474,28 @@ BOARD_WELD_TRANSLATION = (0.64483928, -0.19718233, 0.01076393)
 def check_real_scene_smoke() -> None:
     _, info = _real_scene()
     for attr, want in (("static_shapes", 50), ("robot_bodies", 36), ("belt_bodies", 48),
-                       ("gripper_pad_bodies", 2)):
+                       ("gripper_pad_bodies", 2), ("gripper_pad_shapes", 2)):
         got = len(getattr(info, attr))
         _require(got == want, f"len(info.{attr}) = {got}, expected {want}")
+
+    # The contact shapes are the ALOHA finger colliders baked into 2f85.xml, one per pad body,
+    # in pad-body order; no directive adds them any more.
+    builder = _real_scene()[0]
+    pads = [str(builder.body_label[b]).rsplit("/", 1)[-1] for b in info.gripper_pad_bodies]
+    _require(pads == ["right_pad", "left_pad"],
+             f"info.gripper_pad_bodies leaves = {pads}, expected ['right_pad', 'left_pad']")
+    for body, shape in zip(info.gripper_pad_bodies, info.gripper_pad_shapes):
+        label = str(builder.shape_label[shape])
+        _require(int(builder.shape_body[shape]) == body and label.endswith(
+                     f"/{pads[info.gripper_pad_bodies.index(body)]}"
+                     f"/{pads[info.gripper_pad_bodies.index(body)].split('_')[0]}"
+                     "_aloha_finger_collision"),
+                 f"gripper_pad_shapes entry {shape} ({label!r}) is not the finger collider on "
+                 f"body {body}")
+    extension = sorted(EXTENSION_DIRECTIVES)
+    expected_extension = ["add_ground_plane", "add_rod_ellipse", "add_tabletop_collision"]
+    _require(extension == expected_extension,
+             f"EXTENSION_DIRECTIVES = {extension}, expected {expected_extension}")
 
     for label in (
         "tabletop_collision", "board/board/collision0",
@@ -635,27 +655,127 @@ def check_mjcf_root_child_pose_guard() -> None:
                       "robotiq_2f85::base_mount", "off by 7.000 mm", "bare model name")
 
 
-@check("13. add_aloha_fingers refuses a URDF gripper (identity body_q)")
-def check_aloha_needs_body_poses() -> None:
+# Independently transcribed from the Drake Robotiq SDF
+# (external/robotiq-driver+/models/robotiq_arg85_parallel_grippers.sdf): the left_finger /
+# right_finger links sit at (+/-X, 0, Z) in robotiq_85_base_link, right_finger yawed by pi.
+# That frame is 2f85.xml's import frame. Do NOT read these back from 2f85.xml: this check
+# compares the XML's baked pad-local poses against the Drake numbers, not against themselves.
+DRAKE_FINGER_X, DRAKE_FINGER_Z = 0.047285310862444, 0.1148045193817614
+# pad body -> (Drake finger link it carries, its pose in the import frame). Left and right cross
+# over: each finger rides the pad it sits nearest.
+EXPECTED_FINGERS = {
+    "right_pad": ("left_finger",
+                  mat4_from_xyz_rpy_deg((DRAKE_FINGER_X, 0.0, DRAKE_FINGER_Z), (0.0, 0.0, 0.0))),
+    "left_pad": ("right_finger",
+                 mat4_from_xyz_rpy_deg((-DRAKE_FINGER_X, 0.0, DRAKE_FINGER_Z), (0.0, 0.0, 180.0))),
+}
+FINGER_RGB = (0.1, 0.1, 0.1)
+FINGER_OBJ_DIR = REPO_ROOT / "assets/common/robotiq_2f85/fingers"
+
+
+def _world_aabb(tf: np.ndarray, vertices: np.ndarray) -> np.ndarray:
+    """(lo, hi) of ``vertices`` (N x 3, metres) placed by the 4x4 ``tf``, as one 6-vector."""
+    world = vertices @ tf[:3, :3].T + tf[:3, 3]
+    return np.concatenate([world.min(axis=0), world.max(axis=0)])
+
+
+def _obj_vertices(path: Path) -> np.ndarray:
+    """The raw ``v`` lines of an OBJ -- read directly, independent of Newton's mesh loader."""
+    rows = [line.split()[1:4] for line in path.read_text().splitlines() if line.startswith("v ")]
+    return np.asarray(rows, dtype=np.float64)
+
+
+def _finger_geom_problems(xml_path: Path) -> list[str]:
+    """Import ``xml_path`` alone at identity and list every way its pad geometry departs from
+    "one ALOHA finger visual + one finger collider per pad, at the Drake pose".  Uses the
+    importer's build-time ``body_q`` (MJCF does forward kinematics at q = 0)."""
+    builder = newton.ModelBuilder(up_axis=newton.Axis.Z, gravity=-9.81)
+    builder.add_mjcf(str(xml_path), enable_self_collisions=False)
+    flags = newton.ShapeFlags
+    leaf = {b: str(label).rsplit("/", 1)[-1] for b, label in enumerate(builder.body_label)}
+    problems: list[str] = []
+    for side in ("right", "left"):
+        silicone = [b for b, name in leaf.items() if name == f"{side}_silicone_pad"]
+        on_silicone = [str(builder.shape_label[s]) for s in range(builder.shape_count)
+                       if silicone and int(builder.shape_body[s]) == silicone[0]]
+        if len(silicone) != 1 or on_silicone:
+            problems.append(f"{side}_silicone_pad: body count {len(silicone)} (want 1), "
+                            f"shapes {on_silicone} (want none)")
+    for pad, (finger, expected) in EXPECTED_FINGERS.items():
+        bodies = [b for b, name in leaf.items() if name == pad]
+        if len(bodies) != 1:
+            problems.append(f"{pad}: {len(bodies)} bodies with that name, expected 1")
+            continue
+        body = bodies[0]
+        shapes = [s for s in range(builder.shape_count) if int(builder.shape_body[s]) == body]
+        names = {s: str(builder.shape_label[s]).rsplit("/", 1)[-1] for s in shapes}
+        side = pad.split("_")[0]
+        want = {f"{side}_aloha_finger_visual", f"{side}_aloha_finger_collision"}
+        if sorted(names.values()) != sorted(want):
+            # Catches any leftover pad_box (right_pad1/2), pad or silicone_pad geom, too.
+            problems.append(f"{pad}: shapes {sorted(names.values())}, expected exactly "
+                            f"{sorted(want)}")
+            continue
+        body_tf = tf_mat4(builder.body_q[body])
+        for s, name in names.items():
+            f = int(builder.shape_flags[s])
+            collider = name.endswith("_collision")
+            has_shape = bool(f & flags.COLLIDE_SHAPES)
+            has_particle = bool(f & flags.COLLIDE_PARTICLES)
+            if collider:
+                group = int(builder.shape_collision_group[s])
+                if (group, has_shape, has_particle) != (1, True, True):
+                    problems.append(f"{name}: collision group {group}, shape/particle collision "
+                                    f"{has_shape}/{has_particle}; want 1, True/True")
+            else:
+                rgb = tuple(round(float(c), 6) for c in builder.shape_color[s])
+                visible = bool(f & flags.VISIBLE)
+                if has_shape or has_particle or not visible or rgb != FINGER_RGB:
+                    problems.append(f"{name}: visible {visible}, collides {has_shape}/"
+                                    f"{has_particle}, rgb {rgb}; want True, False/False, "
+                                    f"{FINGER_RGB}")
+            got = body_tf @ tf_mat4(builder.shape_transform[s])
+            err = float(np.max(np.abs(got - expected)))
+            if err > 1.0e-6:
+                problems.append(f"{name}: frame off Drake's {finger} frame by {err:.3e} (> 1e-6)")
+            # The geometry, not just the frame: a swapped left/right mesh or a lost scale="1 1 1"
+            # (x0.001, the 2f85 class) keeps the frame but moves the mesh.
+            vertices = np.asarray(builder.shape_source[s].vertices, dtype=np.float64)
+            vertices = vertices * np.asarray(builder.shape_scale[s], dtype=np.float64)
+            drake = _obj_vertices(FINGER_OBJ_DIR / f"{finger}.obj")
+            err = float(np.max(np.abs(_world_aabb(got, vertices) - _world_aabb(expected, drake))))
+            if err > 1.0e-5:
+                problems.append(f"{name}: mesh AABB off Drake's {finger} by {err:.3e} m (> 1e-5)")
+    return problems
+
+
+def _xml_copy(out_dir: Path, *swaps: tuple[str, str]) -> Path:
+    """2f85.xml with ``meshdir`` made absolute and each ``(old, new)`` swapped once."""
+    text = ROBOTIQ_MJCF.read_text()
+    meshdir = re.search(r'meshdir="([^"]+)"', text)
+    _require(meshdir is not None, "fixture: 2f85.xml has no meshdir")
+    text = text.replace(meshdir.group(0), f'meshdir="{ROBOTIQ_MJCF.parent / meshdir.group(1)}"')
+    for old, new in swaps:
+        _require(text.count(old) == 1, f"fixture: {old!r} occurs {text.count(old)}x in 2f85.xml")
+        text = text.replace(old, new)
+    return _write(out_dir / "2f85.xml", text)
+
+
+@check("13. 2f85.xml pad bodies carry exactly the ALOHA fingers, at the Drake pose")
+def check_aloha_fingers_in_mjcf() -> None:
+    problems = _finger_geom_problems(ROBOTIQ_MJCF)
+    _require(not problems, "2f85.xml: " + "; ".join(problems))
+    # The easy mistake: wiring each finger mesh to the pad of the same name.  A copy doing that
+    # must fail, or this check proves nothing.
     with _tmpdir() as tmp:
-        path = _write(
-            tmp / "urdf_gripper.yaml",
-            "directives:\n"
-            f"  - add_model: {{name: hand, file: {PANDA_HAND_URDF}}}\n"
-            "  - add_weld:\n"
-            "      parent: world\n"
-            "      child: hand::panda_hand\n"
-            "      X_PC: {translation: [0.3, 0.0, 0.5]}\n"
-            "  - add_aloha_fingers:\n"
-            "      gripper: hand\n"
-            f"      finger_dir: {ROBOTIQ_FINGER_DIR}\n"
-            "      offset_x: 0.047285310862444\n"
-            "      offset_z: 0.1148045193817614\n"
-            "      base_mount_offset_z: 0.007\n"
-            "      color: [0.1, 0.1, 0.1]\n",
+        crossed = _xml_copy(
+            tmp, ('mesh name="left_finger"', 'mesh name="tmp_finger"'),
+            ('mesh name="right_finger"', 'mesh name="left_finger"'),
+            ('mesh name="tmp_finger"', 'mesh name="right_finger"'),
         )
-        _expect_error(functools.partial(_load, path, EXTENSION_DIRECTIVES),
-                      "add_aloha_fingers on a URDF gripper", "at identity in builder.body_q")
+        problems = _finger_geom_problems(crossed)
+    _require(any("mesh AABB off Drake" in p for p in problems),
+             f"a 2f85.xml copy with the finger meshes swapped passed: {problems}")
 
 
 def main() -> int:

@@ -9,7 +9,7 @@ my_projects/
 ├── round_belt_task_simulation.py   # entry point: parser, logging, run
 ├── round_belt_task/                # the round-belt task (built from directives)
 │   ├── constants.py                #   typed view over round_belt_scene.yaml
-│   ├── directives.py               #   custom directives (belt rod, ALOHA fingers, ...)
+│   ├── directives.py               #   custom directives (belt rod, tabletop, ground)
 │   ├── scene.py                    #   build_scene: load directives -> SceneInfo
 │   ├── joint_state.py              #   seeds joint values on the finalized Model
 │   └── simulation.py               #   RoundBeltTaskSimulation: solver, stepping
@@ -128,9 +128,9 @@ The scene is authored as data, not code: `assets/round_belt_task/round_belt_scen
 a Drake-shaped directives file — `add_model` / `add_weld` / `add_frame` / `add_directives`
 with `X_PC` + `!Rpy { deg: ... }` poses transcribed verbatim from the Drake yaml, plus the
 Newton-native custom directives in `round_belt_task/directives.py` (`add_tabletop_collision`,
-`add_aloha_fingers`, `add_rod_ellipse`, `add_ground_plane`). It is loaded onto the
+`add_rod_ellipse`, `add_ground_plane`). It is loaded onto the
 `ModelBuilder` by `utils/directives/`, and `round_belt_task/constants.py` reads its numbers
-from the parsed file, so every scene number and its provenance comment lives once, in the
+from the parsed file, so every scene number lives once, in the
 YAML. Directive order is load-bearing: it fixes every body and shape index. Schema
 reference: `docs/scene-directives.md`.
 

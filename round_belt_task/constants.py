@@ -132,14 +132,6 @@ BELT_RADIUS = float(_BELT["radius"])
 BELT_NUM_ELEMENTS = int(_BELT["num_elements"])
 BELT_COLOR = tuple(float(v) for v in _BELT["color"])
 
-_ALOHA_DIRECTIVE = _D.custom("add_aloha_fingers")
-_ALOHA = _ALOHA_DIRECTIVE.params
-ROBOTIQ_FINGER_DIR = _D.resolve_path(_ALOHA["finger_dir"], _source(_ALOHA_DIRECTIVE))
-ALOHA_FINGER_OFFSET_X = float(_ALOHA["offset_x"])
-ALOHA_FINGER_OFFSET_Z = float(_ALOHA["offset_z"])
-MJCF_BASE_MOUNT_OFFSET_Z = float(_ALOHA["base_mount_offset_z"])
-ALOHA_FINGER_COLOR = tuple(float(v) for v in _ALOHA["color"])
-
 # ---- board colours (the board add_model's color / link_colors / component_colors) -------
 _BOARD = _D.model("board")
 _MOUNT = _BOARD.component_colors[0]

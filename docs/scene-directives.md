@@ -206,12 +206,14 @@ strictly (the shared `_params` helper: unknown key → `ValueError`, missing req
 `ValueError`) and, by convention (not enforced by the loader), stores its output in
 `ctx.scene.extras[params["name"]]`.
 
+The Robotiq's ALOHA fingers are not a directive: they are geoms in `2f85.xml`'s pad bodies
+(see `assets/README.md`).
+
 | directive | required params | optional params (default) | `extras[name]` | ordering |
 |---|---|---|---|---|
 | `add_tabletop_collision` | `table_visual`, `top_z`, `thickness`, `color` | `name` (`"tabletop_collision"`) | `{"shape": int, "aabb": (lo, hi)}` | must sit inside the static shape range, between the model owning `table_visual` and whatever comes after it (order is load-bearing for `round_belt_task/scene.py`'s contiguous static-shape check) |
 | `add_ground_plane` | exactly one of `height` or `height_from_aabb_min_z_of` | `name` (`"ground"`) | `{"shape": int, "height": float}` | by convention last — not enforced by the loader, just kept out of any model's contiguous shape range |
 | `add_rod_ellipse` | `name`, `center`, `semi_axes`, `radius`, `num_elements`, `color`, `stretch_stiffness`, `stretch_damping`, `bend_stiffness`, `bend_damping` | `twist_total` (`0.0`), `closed` (`true`), `body_frame_origin` (`"com"`), `margin` (`0.0`), `gap` (`0.001`), `density`/`ke`/`kd`/`mu` (fall back to `round_belt`'s belt-density estimate and cable-contact constants) | `{"bodies": [...], "joints": [...], "shapes": [...]}` | by convention after all robot models — required in practice because `round_belt_task/scene.py`'s `_span` helper needs each robot model's body/joint/shape ranges to be mutually contiguous, which a rod inserted in between would break; not checked by the loader itself |
-| `add_aloha_fingers` | `gripper`, `finger_dir`, `offset_x`, `offset_z`, `base_mount_offset_z`, `color` | `name` (`"aloha_fingers"`) | `{"pad_bodies": [...], "pad_shapes": [...]}` | **enforced by the directive itself**: it raises `ValueError` unless the builder's shape count still equals the gripper model's `shape_end`, i.e. it must directly follow that gripper's `add_model`/`add_weld` with nothing in between |
 
 ## 6. What is NOT data and why
 
@@ -220,12 +222,6 @@ strictly (the shared `_params` helper: unknown key → `ValueError`, missing req
   the ellipse and the rod construction itself (`builder.add_rod` with parallel-transported
   edge quaternions) are plain Python in `round_belt_task/directives.py`; no vertex data lives in
   the YAML.
-- **The ALOHA finger attachment derives its transform from body poses at build time.**
-  `add_aloha_fingers` reads the gripper's already-imported `body_q` to locate its base
-  frame and its pad bodies, then picks, per finger, whichever pad body is nearest in world
-  space — that pairing is computed at build time, not authored. It therefore needs an
-  MJCF/USD gripper: `add_urdf` leaves `body_q` at identity, so for a URDF gripper the
-  directive raises `ValueError` instead of placing the fingers at the origin.
 - **The tabletop collider is sized from the table's AABB.** `add_tabletop_collision` only
   takes `top_z`/`thickness`/`color`; its XY footprint comes from the table visual shape's
   collected world-space AABB (`ctx.scene.aabbs`), not from authored dimensions.
@@ -309,11 +305,11 @@ top-to-bottom recipe.
 | `visual_cfg` / `collision_cfg` | the shared `ModelBuilder.ShapeConfig`s used everywhere else in the scene |
 | `resolve_path(file)` | resolves a `file:`-style string exactly like `add_model` does |
 
-Rules, from the `round_belt_task/directives.py` module docstring and the four existing
+Rules, from the `round_belt_task/directives.py` module docstring and the three existing
 directives:
 - **Validate your own keys strictly.** The loader does not check a custom directive's
   `params` at all — unknown keys, missing required keys, and type coercion are entirely
-  the directive's job. `round_belt_task/directives.py::_params` is the pattern the four
+  the directive's job. `round_belt_task/directives.py::_params` is the pattern the three
   existing directives use (merge over a spec dict where `_REQUIRED` marks no default,
   raise on anything unknown or still-`_REQUIRED`).
 - **Coerce numbers with the loader's own helpers** (`utils.directives.as_float` /
@@ -339,4 +335,4 @@ directives:
 | UR10 glTF-textureless URDF | NVIDIA `universal_robots_ur10` USD | the Drake glTFs carry no images; see `assets/README.md` |
 | (no equivalent) | `ur10_wrist_3_link_drake` frame | absorbs the USD-vs-URDF `wrist_3_link` frame difference so every weld/frame downstream of it stays at the Drake numbers |
 | Franka starts at `franka.dmd.yaml`'s "ready" pose | starts at `q_init_franka`/`q_init_franka_hand` | this scene never loads `franka.dmd.yaml`; it reproduces what the Drake *simulation* actually seeds (`round_belt_simulation_params.yaml`), not the directives file's own default |
-| n/a | `static`, `kind`, `color`/`link_colors`/`component_colors`/`split_components`, `importer_options`, `urdf_fixups`, `gravity_compensation` on `add_model`; `add_tabletop_collision`, `add_rod_ellipse`, `add_ground_plane`, `add_aloha_fingers` as directives | Newton-native extensions with no Drake equivalent (§1, §4, §5) |
+| n/a | `static`, `kind`, `color`/`link_colors`/`component_colors`/`split_components`, `importer_options`, `urdf_fixups`, `gravity_compensation` on `add_model`; `add_tabletop_collision`, `add_rod_ellipse`, `add_ground_plane` as directives | Newton-native extensions with no Drake equivalent (§1, §4, §5) |

@@ -163,8 +163,21 @@ yourself (or load via `load_meshes_from_file`) before trusting the geometry.
 The Newton scene uses the existing `2f85.xml` MJCF already in this repo for the
 Robotiq 2F-85 gripper. The Drake Robotiq SDF model
 (`drake_models` Robotiq description) was **intentionally not copied**, because
-Newton has no SDF importer. `assets/*.stl` (the 2F-85 meshes referenced by
-`2f85.xml`) predate this port and were left exactly where they are.
+Newton has no SDF importer. The 2F-85 STLs referenced by `2f85.xml` predate this port;
+they now live in `common/robotiq_2f85/` (its `meshdir`).
+
+### ALOHA-style fingers, baked into `2f85.xml`
+
+`2f85.xml` is shared (`round_belt.py`, `round_belt_two_arms.py`, `timing_belt.py` and
+`ur10_2f85.yaml` all load it). Each pad body carries a black finger visual and collider in
+place of the original pad geoms:
+
+* Meshes: `common/robotiq_2f85/fingers/{left,right}_finger.obj`, from the Drake Robotiq SDF.
+  They are in metres, hence `scale="1 1 1"` instead of the `2f85` class.
+* Pose: the SDF finger links sit at `(+/-0.047285310862444, 0, 0.1148045193817614)` in the
+  MJCF import frame; on the pad that is `pos="0 -0.002014689137556 -0.0079154806182386"`,
+  quat Rz(+90 deg). Drake's `left_finger` mesh rides `right_pad`, and vice versa.
+* Mass: `*_silicone_pad` keeps the inertial its removed mesh used to give it.
 
 ## Table and task board — not copied here
 

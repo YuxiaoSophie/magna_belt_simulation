@@ -6,59 +6,42 @@ This project develops a Newton/Warp belt simulation.
 
 ```text
 my_projects/
+├── round_belt_task_simulation.py   # entry point: parser, logging, run
+├── round_belt_task/                # the round-belt task (built from directives)
+│   ├── constants.py                #   typed view over round_belt_scene.yaml
+│   ├── directives.py               #   custom directives (belt rod, ALOHA fingers, ...)
+│   ├── scene.py                    #   build_scene: load directives -> SceneInfo
+│   ├── joint_state.py              #   seeds joint values on the finalized Model
+│   └── simulation.py               #   RoundBeltTaskSimulation: solver, stepping
+│
+├── utils/                          # task-agnostic Newton helpers
+│   ├── directives/                 #   Drake-style scene directives loader
+│   └── labels.py meshes.py transforms.py urdf.py viewer_patches.py
+│
 ├── assets/
-│   ├── project assets and additional simulation resources
-│   │   (Robotiq 2F-85 STL meshes used by 2f85.xml)
-│   │
-│   ├── README.md
-│   │   └── provenance + normalisations for the ported robot assets
-│   │
-│   ├── franka/
-│   │   ├── urdf/
-│   │   │   ├── panda_arm.urdf
-│   │   │   └── panda_hand_with_long_fingers.urdf
-│   │   └── meshes/visual/
-│   │
-│   ├── ur10/
-│   │   ├── ur10.urdf
-│   │   └── ur10/
-│   │       ├── visual/
-│   │       └── collision/
-│   │
-│   └── belt_holder/
-│       ├── belt_chain_holder.urdf
-│       └── *.obj
+│   ├── README.md                   # provenance + edits for every vendored asset
+│   ├── common/                     # shared robots and fixtures
+│   │   ├── directives/ur10_2f85.yaml
+│   │   ├── franka/                 #   arm + long-finger hand (URDF + meshes)
+│   │   ├── ur10/                   #   URDF: kinematic source of truth for the pose check
+│   │   ├── robotiq_2f85/           #   2F-85 STLs (meshdir of 2f85.xml) + fingers/
+│   │   ├── belt_chain_holder/
+│   │   └── table/  franka_mount/  scene.urdf
+│   └── round_belt_task/
+│       ├── round_belt_scene.yaml   # THE SCENE (schema: docs/scene-directives.md)
+│       ├── round_belt_task_board.urdf
+│       └── round_belt_task_board/  #   board + small/large pulleys
 │
-├── external/
-│   └── newton
+├── scripts/
+│   ├── check_round_belt_task_poses.py   # independent-FK pose check vs the Drake yaml
+│   └── check_scene_directives.py        # directives loader / scene checks
 │
-├── task_board_urdf/
-│   ├── common/
-│   │   ├── table/
-│   │   │   ├── table.obj
-│   │   │   └── table.mtl
-│   │   └── task_board_just_board.glb
-│   │
-│   ├── round_belt_task/
-│   │   └── round_belt_task_board/
-│   │       ├── small_round_pulley/
-│   │       └── large_round_pulley/
-│   │
-│   └── timing_belt_task/
-│       └── ...
-│
-├── test/
-│   ├── README.md
-│   ├── test.py
-│   └── ...
-│
-├── 2f85.xml
-│   └── MuJoCo MJCF model for the Robotiq 2F-85 gripper
-│
-├── README.md
-├── round_belt.py
-├── round_belt.urdf.xacro
-└── ...
+├── docs/scene-directives.md        # directive schema + how to add a task
+├── 2f85.xml                        # Robotiq 2F-85 MJCF (shared with the other sims)
+├── external/newton/                # Newton source (git submodule)
+├── task_board_urdf/                # optional submodule; no longer needed by this task
+├── round_belt.py  round_belt_two_arms.py  round_belt_command.py  timing_belt.py
+└── test/
 ```
 
 ## Run
@@ -134,17 +117,28 @@ Building on `round_belt.py`, this setup adds another UR10 and Robotiq 2F-85.
 This is a Newton port of the Drake round-belt scene
 (`magna/models/round_belt_task/round-belt-scene.dmd.yaml`). The file itself is a
 ~50-line entry point; the scene lives in the `round_belt_task/` package
-(`constants.py` — every Drake-transcribed number; `scene.py` — assembly into a
+(`constants.py` — a typed view over the scene YAML; `scene.py` — assembly into a
 `ModelBuilder`; `joint_state.py` — seeding the finalized `Model`; `simulation.py` —
 the runnable `RoundBeltTaskSimulation`). It is standalone in the sense that it does
 not build on
 `round_belt.py`, it only reuses its helpers and its contact/solver constants.
 
+The scene is authored as data, not code: `assets/round_belt_task/round_belt_scene.yaml`
+(plus the shared `assets/common/directives/ur10_2f85.yaml` for the UR10 + Robotiq 2F-85) is
+a Drake-shaped directives file — `add_model` / `add_weld` / `add_frame` / `add_directives`
+with `X_PC` + `!Rpy { deg: ... }` poses transcribed verbatim from the Drake yaml, plus the
+Newton-native custom directives in `round_belt_task/directives.py` (`add_tabletop_collision`,
+`add_aloha_fingers`, `add_rod_ellipse`, `add_ground_plane`). It is loaded onto the
+`ModelBuilder` by `utils/directives/`, and `round_belt_task/constants.py` reads its numbers
+from the parsed file, so every scene number and its provenance comment lives once, in the
+YAML. Directive order is load-bearing: it fixes every body and shape index. Schema
+reference: `docs/scene-directives.md`.
+
 It reproduces, with the Drake world-frame poses and default joint angles:
 
-* table + Franka mount (`task_board_urdf/common/scene.urdf`)
+* table + Franka mount (`assets/common/scene.urdf`)
 * round-belt task board with its two fixed pulleys
-  (`task_board_urdf/round_belt_task/round_belt_task_board.urdf`)
+  (`assets/round_belt_task/round_belt_task_board.urdf`)
 * belt chain holder (`assets/common/belt_chain_holder/belt_chain_holder.urdf`)
 * Franka Panda arm + long-finger hand (`assets/common/franka/urdf/`)
 * UR10 -- the textured NVIDIA `universal_robots_ur10` USD (same asset as

@@ -5,3 +5,15 @@ __pycache__/
 
 # UV environment
 .venv/
+
+# Tiered-agent workflow scaffolding (local tooling, not part of the sim).
+# Scoped to the workflow's own dirs so a shared /.claude/settings.json could
+# still be tracked later if the project wants one.
+/handoffs/
+/docs/workflow/
+/.claude/agents/
+/.claude/commands/
+/.claude/settings.local.json
+
+# Viewer UI state
+imgui.ini

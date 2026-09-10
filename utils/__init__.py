@@ -18,7 +18,6 @@ from utils.directives import (
 from utils.labels import (
     body_index,
     body_label_endswith,
-    hide_shapes,
     joint_index,
     label_shapes_by_body,
 )
@@ -40,7 +39,6 @@ __all__ = [
     "DirectiveFn",
     "drake_xform",
     "fix_inverted_mesh_winding",
-    "hide_shapes",
     "joint_index",
     "label_shapes_by_body",
     "load_directives",

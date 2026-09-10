@@ -484,12 +484,11 @@ def check_real_scene_smoke() -> None:
     pads = [str(builder.body_label[b]).rsplit("/", 1)[-1] for b in info.gripper_pad_bodies]
     _require(pads == ["right_pad", "left_pad"],
              f"info.gripper_pad_bodies leaves = {pads}, expected ['right_pad', 'left_pad']")
-    for body, shape in zip(info.gripper_pad_bodies, info.gripper_pad_shapes):
+    for body, shape, pad in zip(info.gripper_pad_bodies, info.gripper_pad_shapes, pads):
         label = str(builder.shape_label[shape])
-        _require(int(builder.shape_body[shape]) == body and label.endswith(
-                     f"/{pads[info.gripper_pad_bodies.index(body)]}"
-                     f"/{pads[info.gripper_pad_bodies.index(body)].split('_')[0]}"
-                     "_aloha_finger_collision"),
+        side = pad.split("_")[0]
+        _require(int(builder.shape_body[shape]) == body
+                 and label.endswith(f"/{pad}/{side}_aloha_finger_collision"),
                  f"gripper_pad_shapes entry {shape} ({label!r}) is not the finger collider on "
                  f"body {body}")
     extension = sorted(EXTENSION_DIRECTIVES)

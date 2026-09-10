@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 
 import newton
 
@@ -63,18 +63,3 @@ def label_shapes_by_body(builder: newton.ModelBuilder, shape_start: int, shape_e
         builder.shape_label[shape] = f"{base}/{kind}{index}"
         relabelled += 1
     return relabelled
-
-
-def hide_shapes(builder: newton.ModelBuilder, predicate: Callable[[str], bool]) -> int:
-    """Clear VISIBLE and COLLIDE_SHAPES on every shape whose label matches.
-
-    ModelBuilder has no shape removal, so dropping a shape means clearing both
-    flags: the viewer skips its batch and the collision pipeline ignores it.
-    """
-    clear = ~(int(newton.ShapeFlags.VISIBLE) | int(newton.ShapeFlags.COLLIDE_SHAPES))
-    dropped = 0
-    for shape in range(builder.shape_count):
-        if predicate(builder.shape_label[shape] or ""):
-            builder.shape_flags[shape] = int(builder.shape_flags[shape]) & clear
-            dropped += 1
-    return dropped

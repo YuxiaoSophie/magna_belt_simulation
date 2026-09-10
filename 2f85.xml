@@ -5,7 +5,6 @@
 
   <asset>
     <material name="metal" rgba="0.58 0.58 0.58 1"/>
-    <material name="silicone" rgba="0.1882 0.1882 0.1882 1"/>
     <material name="gray" rgba="0.4627 0.4627 0.4627 1"/>
     <material name="black" rgba="0.149 0.149 0.149 1"/>
 
@@ -14,8 +13,6 @@
     <mesh class="2f85" file="driver.stl"/>
     <mesh class="2f85" file="coupler.stl"/>
     <mesh class="2f85" file="follower.stl"/>
-    <mesh class="2f85" file="pad.stl"/>
-    <mesh class="2f85" file="silicone_pad.stl"/>
     <mesh class="2f85" file="spring_link.stl"/>
     <!-- ALOHA-style Robotiq fingers from the Drake model. These OBJs are in metres, so they must
          NOT take class="2f85" (its mesh scale 0.001 is for the millimetre STLs above). -->
@@ -48,14 +45,6 @@
       </default>
       <default class="collision">
         <geom type="mesh" group="3"/>
-        <default class="pad_box1">
-          <geom mass="0" type="box" pos="0 -0.0026 0.028125" size="0.011 0.004 0.009375" friction="0.7"
-            solimp="0.95 0.99 0.001" solref="0.004 1" priority="1" rgba="0.55 0.55 0.55 1"/>
-        </default>
-        <default class="pad_box2">
-          <geom mass="0" type="box" pos="0 -0.0026 0.009375" size="0.011 0.004 0.009375" friction="0.6"
-            solimp="0.95 0.99 0.001" solref="0.004 1" priority="1" rgba="0.45 0.45 0.45 1"/>
-        </default>
       </default>
     </default>
   </default>

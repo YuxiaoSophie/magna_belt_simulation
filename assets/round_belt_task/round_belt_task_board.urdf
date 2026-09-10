@@ -1,0 +1,104 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<robot name="task_board">
+  <link name="board">
+    <visual name="board">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="round_belt_task_board/round_belt_task_board.obj" scale="1 1 1"/>
+      </geometry>
+      <material name="light_grey">
+        <color rgba="0.8 0.8 0.8 1"/>
+      </material>
+    </visual>
+    <collision name="board_collision">
+      <origin xyz="0.192 0.192 -0.005" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.384 0.384 0.01"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="small_round_pulley">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="3.06677e-05" iyy="3.0667375e-05" izz="6.0454911e-05" ixy="5.7518697e-14" ixz="1.6724428e-11" iyz="-1.9003215e-11"/>
+    </inertial>
+    <visual name="first_half">
+      <origin xyz="0.355 0.196 0.0248" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="round_belt_task_board/small_round_pulley/small_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="white">
+        <color rgba="0.8 0.8 0.8 1"/>
+      </material>
+    </visual>
+    <collision name="first_half_volume">
+      <origin xyz="0.355 0.196 0.0248" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="round_belt_task_board/small_round_pulley/small_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+    <visual name="second_half">
+      <origin xyz="0.355 0.196 0.0248" rpy="3.14159 0 0"/>
+      <geometry>
+        <mesh filename="round_belt_task_board/small_round_pulley/small_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="white">
+        <color rgba="0.8 0.8 0.8 1"/>
+      </material>
+    </visual>
+    <collision name="second_half_volume">
+      <origin xyz="0.355 0.196 0.0248" rpy="3.14159 0 0"/>
+      <geometry>
+        <mesh filename="round_belt_task_board/small_round_pulley/small_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+  <link name="large_round_pulley">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <mass value="0.05"/>
+      <inertia ixx="3.06677e-05" iyy="3.0667375e-05" izz="6.0454911e-05" ixy="5.7518697e-14" ixz="1.6724428e-11" iyz="-1.9003215e-11"/>
+    </inertial>
+    <visual name="first_half">
+      <origin xyz="0.140 0.196 0.0248" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="round_belt_task_board/large_round_pulley/large_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="dark_grey">
+        <color rgba="0.1 0.1 0.1 1"/>
+      </material>
+    </visual>
+    <collision name="first_half_volume">
+      <origin xyz="0.140 0.196 0.0248" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="round_belt_task_board/large_round_pulley/large_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+    <visual name="second_half">
+      <origin xyz="0.140 0.196 0.0248" rpy="3.14159 0 0"/>
+      <geometry>
+        <mesh filename="round_belt_task_board/large_round_pulley/large_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="dark_grey">
+        <color rgba="0.1 0.1 0.1 1"/>
+      </material>
+    </visual>
+    <collision name="second_half_volume">
+      <origin xyz="0.140 0.196 0.0248" rpy="3.14159 0 0"/>
+      <geometry>
+        <mesh filename="round_belt_task_board/large_round_pulley/large_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="small_round_pulley_joint" type="fixed">
+    <parent link="board"/>
+    <child link="small_round_pulley"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <joint name="large_round_pulley_joint" type="fixed">
+    <parent link="board"/>
+    <child link="large_round_pulley"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+</robot>

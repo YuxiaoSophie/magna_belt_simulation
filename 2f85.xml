@@ -1,5 +1,5 @@
 <mujoco model="robotiq_2f85">
-  <compiler angle="radian" meshdir="assets" autolimits="true"/>
+  <compiler angle="radian" meshdir="assets/common/robotiq_2f85" autolimits="true"/>
 
   <option cone="elliptic" impratio="10"/>
 

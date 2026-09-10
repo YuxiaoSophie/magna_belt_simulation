@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<robot xmlns:drake='http://drake.mit.edu' name="panda_hand">
+  <material name="dark_grey">
+    <color rgba="0.2 0.2 0.2 1"/>
+  </material>
+  <link name="panda_hand">
+    <inertial>
+      <mass value="0.73" />
+      <origin xyz="0 0.0015244 0.0275912" rpy="0 0 0" />
+      <inertia ixx="0.00278560230025" ixy="0.0" ixz="0.0" iyy="0.000400033405336" iyz="0.0"
+        izz="0.00256378041832" />
+    </inertial>
+    <visual>
+      <origin rpy="1.5707963267948966 0 0" />
+      <geometry>
+        <mesh filename="../meshes/visual/hand.gltf" />
+      </geometry>
+    </visual>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 -0.06 0.015" />
+      <geometry>
+        <sphere radius="0.05" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 -0.06 0.03" />
+      <geometry>
+        <sphere radius="0.05" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0 0.03" />
+      <geometry>
+        <sphere radius="0.05" />
+      </geometry>
+    </collision>
+    <collision>
+      <origin rpy="0 0 0" xyz="0 0.06 0.03" />
+      <geometry>
+        <sphere radius="0.05" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="panda_leftfinger">
+    <inertial>
+      <mass value="0.1" />
+      <origin xyz="0 0.0145644 0.0227941" rpy="0 0 0" />
+      <inertia ixx="3.01220925051e-05" ixy="0.0" ixz="0.0" iyy="2.95873808038e-05" iyz="0.0"
+        izz="6.95125211657e-06" />
+    </inertial>
+    <visual>
+      <origin rpy="3.14159265359 0 -1.57079632679" xyz="-0.0105 0.0175 0.019" />
+      <geometry>
+        <mesh filename="../meshes/visual/finger_holder.obj" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin rpy="3.14159265359 0 1.57079632679" xyz="0.0125 0 0.023" />
+      <geometry>
+        <mesh filename="../meshes/visual/long_finger.obj" />
+      </geometry>
+      <material name="dark_grey" />
+    </visual>
+    <collision>
+      <origin rpy="3.14159265359 0 1.57079632679" xyz="0.0125 0 0.023" />
+      <geometry>
+        <mesh filename="../meshes/visual/long_finger.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="panda_rightfinger">
+    <inertial>
+      <mass value="0.1" />
+      <origin xyz="0 0.0145644 0.0227941" rpy="0 0 3.14159265359" />
+      <inertia ixx="3.01220925051e-05" ixy="0.0" ixz="0.0" iyy="2.95873808038e-05" iyz="0.0"
+        izz="6.95125211657e-06" />
+    </inertial>
+    <visual>
+      <origin rpy="3.14159265359 0 1.57079632679" xyz="0.0105 -0.0175 0.019" />
+      <geometry>
+        <mesh filename="../meshes/visual/finger_holder.obj" />
+      </geometry>
+    </visual>
+    <visual>
+      <origin rpy="3.14159265359 0 -1.57079632679" xyz="-0.0125 0 0.023" />
+      <geometry>
+        <mesh filename="../meshes/visual/long_finger.obj" />
+      </geometry>
+      <material name="dark_grey" />
+    </visual>
+    <collision>
+      <origin rpy="3.14159265359 0 -1.57079632679" xyz="-0.0125 0 0.023" />
+      <geometry>
+        <mesh filename="../meshes/visual/long_finger.obj" />
+      </geometry>
+    </collision>
+  </link>
+  <link name="finger_tip" />
+  <joint name="finger_tip_joint" type="fixed">
+    <parent link="panda_hand" />
+    <child link="finger_tip" />
+    <origin rpy="3.14159 0 0" xyz="0 0 0.203191" />
+  </joint>
+  <joint name="panda_finger_joint1" type="prismatic">
+    <parent link="panda_hand" />
+    <child link="panda_rightfinger" />
+    <origin rpy="0 0 0" xyz="0 0 0.0584" />
+    <axis xyz="0 1 0" />
+    <limit effort="20" lower="-0.045" upper="0.0" velocity="0.2" drake:acceleration="1.0" />
+  </joint>
+  <joint name="panda_finger_joint2" type="prismatic">
+    <parent link="panda_hand" />
+    <child link="panda_leftfinger" />
+    <origin rpy="0 0 0" xyz="0 0 0.0584" />
+    <axis xyz="0 1 0" />
+    <limit effort="20" lower="0.0" upper="0.045" velocity="0.2" drake:acceleration="1.0" />
+  </joint>
+  <link name="panda_finger_tip_center" />
+  <joint name="_frame_weld1" type="fixed">
+    <origin rpy="0 0 0" xyz="0 0 0.112" />
+    <parent link="panda_hand" />
+    <child link="panda_finger_tip_center" />
+  </joint>
+  <transmission name="panda_finger_tran1">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="panda_finger_joint1">
+      <hardwareInterface>PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="panda_finger_motor1">
+      <hardwareInterface>PositionJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+  <transmission name="panda_finger_tran2">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="panda_finger_joint2">
+      <hardwareInterface>PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="panda_finger_motor2">
+      <hardwareInterface>PositionJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+</robot>

@@ -7,7 +7,27 @@ This project develops a Newton/Warp belt simulation.
 ```text
 my_projects/
 ├── assets/
-│   └── project assets and additional simulation resources
+│   ├── project assets and additional simulation resources
+│   │   (Robotiq 2F-85 STL meshes used by 2f85.xml)
+│   │
+│   ├── README.md
+│   │   └── provenance + normalisations for the ported robot assets
+│   │
+│   ├── franka/
+│   │   ├── urdf/
+│   │   │   ├── panda_arm.urdf
+│   │   │   └── panda_hand_with_long_fingers.urdf
+│   │   └── meshes/visual/
+│   │
+│   ├── ur10/
+│   │   ├── ur10.urdf
+│   │   └── ur10/
+│   │       ├── visual/
+│   │       └── collision/
+│   │
+│   └── belt_holder/
+│       ├── belt_chain_holder.urdf
+│       └── *.obj
 │
 ├── external/
 │   └── newton
@@ -104,6 +124,109 @@ The setup includes everything in `round_belt_old.py`, along with additional feat
 ##### Current setup
 
 Building on `round_belt.py`, this setup adds another UR10 and Robotiq 2F-85.
+
+---
+
+#### `round_belt_task_simulation.py`
+
+##### Current setup
+
+This is a Newton port of the Drake round-belt scene
+(`magna/models/round_belt_task/round-belt-scene.dmd.yaml`). The file itself is a
+~50-line entry point; the scene lives in the `round_belt_task/` package
+(`constants.py` — every Drake-transcribed number; `scene.py` — assembly into a
+`ModelBuilder`; `joint_state.py` — seeding the finalized `Model`; `simulation.py` —
+the runnable `RoundBeltTaskSimulation`). It is standalone in the sense that it does
+not build on
+`round_belt.py`, it only reuses its helpers and its contact/solver constants.
+
+It reproduces, with the Drake world-frame poses and default joint angles:
+
+* table + Franka mount (`task_board_urdf/common/scene.urdf`)
+* round-belt task board with its two fixed pulleys
+  (`task_board_urdf/round_belt_task/round_belt_task_board.urdf`)
+* belt chain holder (`assets/common/belt_chain_holder/belt_chain_holder.urdf`)
+* Franka Panda arm + long-finger hand (`assets/common/franka/urdf/`)
+* UR10 -- the textured NVIDIA `universal_robots_ur10` USD (same asset as
+  `round_belt.py`), **not** `assets/common/ur10/ur10.urdf` -- + Robotiq 2F-85 (`2f85.xml`)
+* the deformable round belt (48-element closed rod, resting in the holder)
+
+Key points:
+
+* **World frame = the Drake world frame verbatim.** The origin is at
+  `panda_link0`, Z is up, the table top is at `z = -0.02858` and the floor is at
+  `z = -0.81852` (the table visual's own AABB min z), i.e. about 0.82 m below
+  the origin. This is deliberately *not* the `round_belt.py` convention
+  (`TABLE_TOP_Z = 0.72`).
+* **Start pose.** The UR10 uses the `default_joint_positions` from
+  `ur.dmd.yaml`. The round-belt scene yaml gives the Franka *no*
+  `default_joint_positions`, so the Franka arm/hand start at what the Drake sim
+  actually seeds — `q_init_franka` / `q_init_franka_hand` from
+  `magna/systems/parameters/round_belt_simulation_params.yaml` — and **not** the
+  "ready" pose in `franka.dmd.yaml`, which this scene never loads.
+* Drake `!Rpy { deg: [r, p, y] }` maps to `R = Rz(y) · Ry(p) · Rx(r)`, which is
+  what `round_belt.quat_from_rpy` computes. `_assert_rpy_convention()` proves
+  this numerically at import time; it will raise if anyone changes the
+  convention.
+* Table / board / holder are added as static world shapes (body `-1`) so the
+  VBD half of the coupled solver owns them, exactly as `round_belt.py` does for
+  its table and board.
+* The Robotiq gripper uses the existing `2f85.xml` MJCF (Newton has no SDF
+  importer), welded to the UR10 wrist-3 frame with `Rz(+90°)`.
+* **UR10 asset.** The scene builds the UR10 from
+  `newton.utils.download_asset("universal_robots_ur10")/usd/ur10_instanceable.usda`.
+  The ported Drake `assets/common/ur10/ur10.urdf` is kept on disk as the *kinematic*
+  source of truth (the pose check walks it with an independent numpy FK) but is
+  no longer built into the scene: its 7 visual glTFs contain **zero images** --
+  only `baseColorFactor` greys plus a pale UR blue -- so the arm rendered flat
+  grey/white. The USD's root frame is identical to the URDF's `base_link` frame,
+  so the Drake weld `X_W_UR10` is unchanged; its `wrist_3_link` *frame* differs
+  by `T(0, 0.0922, 0)·Rx(-90°)`, which `X_USDWRIST3_URDFWRIST3` absorbs so the
+  gripper, its pads and every pose number stay exactly where they were. See
+  `assets/README.md` for the measurements.
+* Physics is the repo's MuJoCo + VBD proxy-coupled solver, configured only to
+  hold both arms at their default configuration. There is **no** teleop, IK,
+  recording, replay or ADMM here.
+* **CUDA graph capture (performance only).** The frame is a fixed 10-substep
+  sequence of the same kernels, so it is captured once into a CUDA graph and
+  replayed, exactly as `round_belt.py` does. This removes repeated GPU launch
+  overhead and nothing else — `sim_substeps`, `sim_dt`, the solver entries and
+  every iteration count are unchanged. Measured here: **0.139 s/frame (7.2 FPS)
+  before, 0.020 s/frame (49 FPS) after**, sim-only (`--viewer null`, 200 vs 400
+  frames differenced to remove the ~5 s startup). Pass `--no-cuda-graph` to run
+  the uncaptured path for A/B testing; capture is skipped automatically on CPU
+  and falls back with a printed reason if it fails.
+
+##### Assets
+
+The Franka, UR10 and belt-holder models live under `assets/` and were ported
+out of the `magna` checkout; see `assets/README.md` for provenance and the
+normalisations that were applied (relative mesh paths, robot renames, glTF
+up-axis fix on the visual origins), plus why the UR10 URDF is now kinematic
+reference only.
+
+The Franka's own textures (9 × 2048² PNG baseColor) **do** import and reach the
+viewer intact — on `--viewer viser` the Panda renders its real white-and-black
+livery. On `--viewer gl` those textures are multiplied by Newton's rotating
+debug palette because the glTF import path leaves `Mesh.color = None`; that is a
+Newton bug under `external/newton/`, documented with the exact code path in
+`assets/README.md`.
+
+##### Run
+
+```bash
+# headless self-check
+uv run python round_belt_task_simulation.py --viewer null --num-frames 120 --test
+
+# interactive viewer
+vglrun -d :1 uv run python round_belt_task_simulation.py
+
+# same physics, no CUDA graph (A/B comparison)
+uv run python round_belt_task_simulation.py --viewer null --num-frames 200 --no-cuda-graph
+```
+
+The script prints a world-pose table for the key robot frames on startup, which
+is the quickest way to confirm the scene matches Drake.
 
 ---
 

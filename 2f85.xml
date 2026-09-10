@@ -14,8 +14,7 @@
     <mesh class="2f85" file="coupler.stl"/>
     <mesh class="2f85" file="follower.stl"/>
     <mesh class="2f85" file="spring_link.stl"/>
-    <!-- ALOHA-style Robotiq fingers from the Drake model. These OBJs are in metres, so they must
-         NOT take class="2f85" (its mesh scale 0.001 is for the millimetre STLs above). -->
+    <!-- ALOHA fingers are in metres: not class="2f85" (scale 0.001). -->
     <mesh name="left_finger" file="fingers/left_finger.obj" scale="1 1 1"/>
     <mesh name="right_finger" file="fingers/right_finger.obj" scale="1 1 1"/>
   </asset>
@@ -89,31 +88,13 @@
             <body name="right_pad" pos="0 -0.0189 0.01352">
               <inertial mass="0.0035" pos="0 -0.0025 0.0185" quat="0.707107 0 0 0.707107"
                 diaginertia="4.73958e-07 3.64583e-07 1.23958e-07"/>
-              <!-- ALOHA-style finger: replaces this pad's pad_box1/pad_box2 colliders and its pad and
-                   silicone_pad visuals. Source: the Drake Robotiq SDF,
-                   external/robotiq-driver+/models/robotiq_arg85_parallel_grippers.sdf, whose left_finger /
-                   right_finger links sit at (+/-0.047285310862444, 0, 0.1148045193817614) in
-                   robotiq_85_base_link, right_finger yawed by pi. That frame is this file's import frame:
-                   base_mount's pos="0 0 0.007" is the MJCF's own offset, not Drake's.
-                   Pad-local pose: at q = 0 right_pad sits at (0.0493, 0, 0.12272) in the import frame,
-                   rotated Rz(-90 deg), so the finger is at
-                   pos = (0, 0.047285310862444 - 0.0493, 0.1148045193817614 - 0.12272), quat = Rz(+90 deg).
-                   left_pad mirrors it and gets the same pad-local pose.
-                   Left and right cross over: Drake's left_finger mesh rides right_pad, the pad it sits
-                   nearest, and right_finger rides left_pad.
-                   The pads rotate where Drake's fingers translate, so the match is exact only at q = 0.
-                   One visual plus one collider per finger, as the SDF declares. Both are mass="0", so the
-                   pad's explicit inertial stays the body's mass. The colour is a deliberate deviation:
-                   Drake paints the fingers orange (1 0.5 0 1); these are 0.1 black, matching the SDF's
-                   own robotiq_85_base_link. -->
+              <!-- ALOHA finger (Drake Robotiq SDF); left/right meshes cross over by design. -->
               <geom name="right_aloha_finger_visual" class="visual" mesh="left_finger" rgba="0.1 0.1 0.1 1"
                 mass="0" pos="0 -0.002014689137556 -0.0079154806182386" quat="0.7071067811865476 0 0 0.7071067811865476"/>
               <geom name="right_aloha_finger_collision" class="collision" mesh="left_finger" rgba="0.1 0.1 0.1 1"
                 mass="0"
                 pos="0 -0.002014689137556 -0.0079154806182386" quat="0.7071067811865476 0 0 0.7071067811865476"/>
-              <!-- Its silicone_pad visual was removed with the pad geometry. That mesh was this body's
-                   only geom and so its only mass, so the inertial pins the mass, COM and inertia that the
-                   mesh gave it (the float32 values Newton computed at the default density). -->
+              <!-- Mass the removed silicone_pad mesh used to provide. -->
               <body name="right_silicone_pad">
                 <inertial mass="0.001302812248468399"
                   pos="-7.584350036893284e-09 -0.005800000391900539 0.018517373129725456"
@@ -152,8 +133,6 @@
             <body name="left_pad" pos="0 -0.0189 0.01352">
               <inertial mass="0.0035" pos="0 -0.0025 0.0185" quat="1 0 0 1"
                 diaginertia="4.73958e-07 3.64583e-07 1.23958e-07"/>
-              <!-- ALOHA-style finger, mirroring right_pad (provenance and pose derivation there): Drake's
-                   right_finger mesh rides this pad. -->
               <geom name="left_aloha_finger_visual" class="visual" mesh="right_finger" rgba="0.1 0.1 0.1 1"
                 mass="0" pos="0 -0.002014689137556 -0.0079154806182386" quat="0.7071067811865476 0 0 0.7071067811865476"/>
               <geom name="left_aloha_finger_collision" class="collision" mesh="right_finger" rgba="0.1 0.1 0.1 1"

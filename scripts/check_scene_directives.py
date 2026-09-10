@@ -478,8 +478,6 @@ def check_real_scene_smoke() -> None:
         got = len(getattr(info, attr))
         _require(got == want, f"len(info.{attr}) = {got}, expected {want}")
 
-    # The contact shapes are the ALOHA finger colliders baked into 2f85.xml, one per pad body,
-    # in pad-body order; no directive adds them any more.
     builder = _real_scene()[0]
     pads = [str(builder.body_label[b]).rsplit("/", 1)[-1] for b in info.gripper_pad_bodies]
     _require(pads == ["right_pad", "left_pad"],
@@ -654,14 +652,9 @@ def check_mjcf_root_child_pose_guard() -> None:
                       "robotiq_2f85::base_mount", "off by 7.000 mm", "bare model name")
 
 
-# Independently transcribed from the Drake Robotiq SDF
-# (external/robotiq-driver+/models/robotiq_arg85_parallel_grippers.sdf): the left_finger /
-# right_finger links sit at (+/-X, 0, Z) in robotiq_85_base_link, right_finger yawed by pi.
-# That frame is 2f85.xml's import frame. Do NOT read these back from 2f85.xml: this check
-# compares the XML's baked pad-local poses against the Drake numbers, not against themselves.
+# Drake Robotiq SDF finger poses in the MJCF import frame; not read from 2f85.xml on purpose.
 DRAKE_FINGER_X, DRAKE_FINGER_Z = 0.047285310862444, 0.1148045193817614
-# pad body -> (Drake finger link it carries, its pose in the import frame). Left and right cross
-# over: each finger rides the pad it sits nearest.
+# pad body -> (finger mesh, pose). Left/right cross over.
 EXPECTED_FINGERS = {
     "right_pad": ("left_finger",
                   mat4_from_xyz_rpy_deg((DRAKE_FINGER_X, 0.0, DRAKE_FINGER_Z), (0.0, 0.0, 0.0))),
@@ -673,21 +666,19 @@ FINGER_OBJ_DIR = REPO_ROOT / "assets/common/robotiq_2f85/fingers"
 
 
 def _world_aabb(tf: np.ndarray, vertices: np.ndarray) -> np.ndarray:
-    """(lo, hi) of ``vertices`` (N x 3, metres) placed by the 4x4 ``tf``, as one 6-vector."""
+    """World AABB of ``vertices`` under ``tf``, as (lo, hi) concatenated."""
     world = vertices @ tf[:3, :3].T + tf[:3, 3]
     return np.concatenate([world.min(axis=0), world.max(axis=0)])
 
 
 def _obj_vertices(path: Path) -> np.ndarray:
-    """The raw ``v`` lines of an OBJ -- read directly, independent of Newton's mesh loader."""
+    """OBJ vertices, parsed without Newton's loader."""
     rows = [line.split()[1:4] for line in path.read_text().splitlines() if line.startswith("v ")]
     return np.asarray(rows, dtype=np.float64)
 
 
 def _finger_geom_problems(xml_path: Path) -> list[str]:
-    """Import ``xml_path`` alone at identity and list every way its pad geometry departs from
-    "one ALOHA finger visual + one finger collider per pad, at the Drake pose".  Uses the
-    importer's build-time ``body_q`` (MJCF does forward kinematics at q = 0)."""
+    """Ways ``xml_path``'s pads differ from one finger visual + collider at the Drake pose."""
     builder = newton.ModelBuilder(up_axis=newton.Axis.Z, gravity=-9.81)
     builder.add_mjcf(str(xml_path), enable_self_collisions=False)
     flags = newton.ShapeFlags
@@ -711,7 +702,6 @@ def _finger_geom_problems(xml_path: Path) -> list[str]:
         side = pad.split("_")[0]
         want = {f"{side}_aloha_finger_visual", f"{side}_aloha_finger_collision"}
         if sorted(names.values()) != sorted(want):
-            # Catches any leftover pad_box (right_pad1/2), pad or silicone_pad geom, too.
             problems.append(f"{pad}: shapes {sorted(names.values())}, expected exactly "
                             f"{sorted(want)}")
             continue
@@ -737,8 +727,7 @@ def _finger_geom_problems(xml_path: Path) -> list[str]:
             err = float(np.max(np.abs(got - expected)))
             if err > 1.0e-6:
                 problems.append(f"{name}: frame off Drake's {finger} frame by {err:.3e} (> 1e-6)")
-            # The geometry, not just the frame: a swapped left/right mesh or a lost scale="1 1 1"
-            # (x0.001, the 2f85 class) keeps the frame but moves the mesh.
+            # Catches a swapped mesh or lost scale="1 1 1" that keeps the frame right.
             vertices = np.asarray(builder.shape_source[s].vertices, dtype=np.float64)
             vertices = vertices * np.asarray(builder.shape_scale[s], dtype=np.float64)
             drake = _obj_vertices(FINGER_OBJ_DIR / f"{finger}.obj")
@@ -749,7 +738,7 @@ def _finger_geom_problems(xml_path: Path) -> list[str]:
 
 
 def _xml_copy(out_dir: Path, *swaps: tuple[str, str]) -> Path:
-    """2f85.xml with ``meshdir`` made absolute and each ``(old, new)`` swapped once."""
+    """Copy of 2f85.xml with an absolute meshdir and each ``(old, new)`` applied once."""
     text = ROBOTIQ_MJCF.read_text()
     meshdir = re.search(r'meshdir="([^"]+)"', text)
     _require(meshdir is not None, "fixture: 2f85.xml has no meshdir")
@@ -764,8 +753,7 @@ def _xml_copy(out_dir: Path, *swaps: tuple[str, str]) -> Path:
 def check_aloha_fingers_in_mjcf() -> None:
     problems = _finger_geom_problems(ROBOTIQ_MJCF)
     _require(not problems, "2f85.xml: " + "; ".join(problems))
-    # The easy mistake: wiring each finger mesh to the pad of the same name.  A copy doing that
-    # must fail, or this check proves nothing.
+    # Negative control: same-name mesh/pad wiring must fail.
     with _tmpdir() as tmp:
         crossed = _xml_copy(
             tmp, ('mesh name="left_finger"', 'mesh name="tmp_finger"'),

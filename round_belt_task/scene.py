@@ -111,17 +111,13 @@ def _span(records: Sequence[ModelRecord], what: str) -> tuple[list[int], list[in
     )
 
 
-# Label suffix of the ALOHA finger colliders baked into 2f85.xml's pad bodies
-# (right_aloha_finger_collision / left_aloha_finger_collision).
 FINGER_COLLIDER_SUFFIX = "_aloha_finger_collision"
 
 
 def _finger_colliders(
     builder: newton.ModelBuilder, gripper: ModelRecord, pad_bodies: Sequence[int]
 ) -> list[int]:
-    """The ALOHA finger collider on each pad body, in ``pad_bodies`` order: the shapes
-    ``simulation.py`` gives GRIPPER_CONTACT_MU/KE/KD.  Raises unless each pad carries
-    exactly one."""
+    """The one ALOHA finger collider on each pad body, in ``pad_bodies`` order."""
     shapes = []
     for body in pad_bodies:
         hits = [

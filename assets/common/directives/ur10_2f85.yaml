@@ -1,18 +1,10 @@
-# UR10 + Robotiq 2F-85 for Newton.  Mirrors magna/models/common/directives/ur.dmd.yaml:
-# same default_joint_positions, same wrist_3 -> gripper weld (Rz +90 deg).  Differences:
-# the arm is the textured NVIDIA USD (the Drake glTFs carry no images), the gripper is the
-# repo's 2f85.xml MJCF (Newton has no SDF importer), and the USD's wrist_3_link frame is
-# mapped onto the Drake/URDF one through the `ur10_wrist_3_link_drake` frame below.
-# Drake name mapping: robotiq_85 -> robotiq_2f85.  Loaded by utils/directives; schema in
-# docs/scene-directives.md.  Floats in the signed form (8.95207485e+01), as magna writes them.
+# UR10 + Robotiq 2F-85; port of magna ur.dmd.yaml (robotiq_85 -> robotiq_2f85 MJCF).
 directives:
-  # The scene builds the NVIDIA USD UR10, downloaded/cached exactly as round_belt.py does,
-  # not assets/common/ur10/ur10.urdf: that URDF's glTFs carry no images, so the arm rendered
-  # flat.  The URDF stays the *kinematic* source of truth (see UR10_URDF in constants.py).
+  # Textured NVIDIA USD; assets/common/ur10/ur10.urdf is only the FK reference.
   - add_model:
       name: ur10
       file: newton_asset://universal_robots_ur10/usd/ur10_instanceable.usda
-      default_joint_positions:            # ur.dmd.yaml
+      default_joint_positions:
         shoulder_pan_joint: [0.0]
         shoulder_lift_joint: [-1.57079632679]
         elbow_joint: [1.57079632679]
@@ -21,44 +13,21 @@ directives:
         wrist_3_joint: [0.0]
       gravity_compensation: true
       importer_options: {collapse_fixed_joints: false, enable_self_collisions: false, hide_collision_shapes: true}
-  # The NVIDIA USD UR10's ``wrist_3_link`` body frame is not the ROS/Drake URDF's frame for
-  # the same link.  Measured (USD at identity, both at the ur.dmd.yaml default pose):
-  #     inv(X_usd_wrist3) . X_urdf_wrist3 = T(0, d6, 0) . Rx(-90 deg)
-  # with d6 = 0.0922 m, exactly the ``wrist_3_joint`` origin translation in
-  # assets/common/ur10/ur10.urdf:259: the USD keeps its wrist_3 frame at the joint axis while
-  # the URDF pushes it out by the link length, and the two differ by a quarter turn about X.
-  # Every other UR10 link differs by a similar constant; base_link is the one link where they
-  # agree exactly, which is why the world -> ur10::base_link weld needs no correction.
-  # This frame IS the Drake/URDF wrist_3_link, so everything Drake welds to wrist_3_link
-  # welds here instead (constants.py: X_USDWRIST3_URDFWRIST3, asserted against UR10_WRIST3_D6).
+  # The URDF wrist_3_link frame on the USD wrist_3_link (d6 = 0.0922, ur10.urdf:259).
   - add_frame:
       name: ur10_wrist_3_link_drake
       X_PF:
         base_frame: ur10::wrist_3_link
-        translation: [0.0, 0.0922, 0.0]     # d6 = 0.0922: wrist_3_joint origin, ur10.urdf:259
+        translation: [0.0, 0.0922, 0.0]
         rotation: !Rpy { deg: [-90.0, 0.0, 0.0] }
   - add_model:
-      name: robotiq_2f85                    # Drake: robotiq_85 (robotiq_arg85_parallel_grippers.sdf)
+      name: robotiq_2f85
       file: ../../../2f85.xml
       gravity_compensation: true
       importer_options: {enable_self_collisions: false}
-  # ur.dmd.yaml welds robotiq_85::robotiq_85_base_link to ur10::wrist_3_link with yaw +90 deg.
-  # 2f85.xml is substituted for the Drake Robotiq SDF, so the weld is re-derived for the MJCF
-  # root frame:
-  #   * Drake SDF: the fingers translate along +/-X of robotiq_85_base_link and the fingertips
-  #     lie along +Z of wrist_3_link (ur.dmd's finger_tip_frame is wrist_3_link + (0, 0, 0.194)),
-  #     so the +90 deg yaw closes the pads on +/-Y.
-  #   * 2f85.xml: the root child body ``base`` carries quat="1 0 0 -1" = Rz(-90 deg) w.r.t. the
-  #     MJCF root and the pads are offset along ``base`` +/-Y, so in MJCF-root coordinates they
-  #     sit along +/-X and the gripper extends along the root's +Z.
-  #   => MJCF root = wrist_3_link . Rz(+90 deg), zero translation, putting the pads back on +/-Y
-  #      of wrist_3_link, matching Drake.
-  # NOT round_belt.py's Ry(90 deg): that compensates the Newton USD UR10's tool frame, which
-  # this scene does not use.  The composed xform (frame X_PF * X_PC) is constants.py's
-  # X_USDWRIST3_GRIPPER.
   - add_weld:
       parent: ur10_wrist_3_link_drake
-      child: robotiq_2f85                   # the MJCF import frame; base_mount body sits +7 mm (pos="0 0 0.007")
+      child: robotiq_2f85
       X_PC:
         translation: [0.0, 0.0, 0.0]
         rotation: !Rpy { deg: [0.0, 0.0, 90.0] }

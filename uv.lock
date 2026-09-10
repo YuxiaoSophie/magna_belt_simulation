@@ -548,6 +548,7 @@ dependencies = [
     { name = "evdev" },
     { name = "loguru" },
     { name = "newton", extra = ["examples"] },
+    { name = "pyyaml" },
     { name = "trimesh" },
     { name = "viser" },
 ]
@@ -557,6 +558,7 @@ requires-dist = [
     { name = "evdev", specifier = ">=1.9.3" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "newton", extras = ["examples"], editable = "external/newton" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "trimesh", specifier = ">=4.12.2" },
     { name = "viser", specifier = ">=1.0.26" },
 ]

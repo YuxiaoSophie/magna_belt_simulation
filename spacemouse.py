@@ -49,7 +49,7 @@ LOOP_HZ = 200.0 # producer update rate.
 BOX_HALF = np.array([0.6, 0.6, 0.5], dtype=np.float64)
 
 # Shared memory target buffer
-SHARED_PATH_DEFAULT = "/tmp/sm_teleop_target_1.bin"
+SHARED_PATH_DEFAULT = "/tmp/sm_teleop_target.bin"
 
 
 class SharedTarget:

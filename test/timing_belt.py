@@ -13,35 +13,35 @@ BELT_MINOR_DIAMETER = 0.168
 BELT_STRIP_WIDTH = 0.050
 
 # Mesh resolution.
-CIRCUMFERENCE_CELLS = 128
-WIDTH_CELLS = 10
+CIRCUMFERENCE_CELLS = 64
+WIDTH_CELLS = 4
 
 PARTICLE_RADIUS = 0.0010
 GROUND_EPSILON = 0.0001
-CLOTH_DENSITY = 10.0  # kg/m^2
+
+# Total belt mass.
+TARGET_BELT_MASS = 0.033 # kg (33 g)
 
 # Ordinary membrane stiffness.
-TRI_KE = 1.0e3
-TRI_KA = 1.0e3
-TRI_KD = 1.0e2
+TRI_KE = 1.0e4
+TRI_KA = 1.0e4
+TRI_KD = 2.0e2
 
-# Ordinary cloth bending stiffness. This stays relatively low so the belt can
-# still bend around its circumference and wrap around pulleys.
-BASE_EDGE_KE = 1.0e1
-BASE_EDGE_KD = 0.0
+# Ordinary cloth bending stiffness.
+BASE_EDGE_KE = 5.0e1
+BASE_EDGE_KD = 5.0
 
-# Very high bending stiffness for hinges that bend a cross-sectional rib.
-# These are the most important values for preventing the fold.
 RIB_BENDING_KE = 2.0e4
 RIB_BENDING_KD = 2.0e1
 
-# Additional distance springs inside every cross-sectional line. These preserve
-# the line's total width and strongly discourage individual points from leaving
-# their original location along that line.
+# Additional distance springs inside every cross-sectional line.
 RIB_SPRING_KE = 2.0e4
 RIB_SPRING_KD = 2.0e1
 
-# More iterations/substeps help the stiff constraints converge.
+# Circumferential reinforcement. 
+LOOP_SPRING_KE = 1.0e4
+LOOP_SPRING_KD = 5.0e1
+
 SIM_FPS = 60
 SIM_SUBSTEPS = 20
 VBD_ITERATIONS = 20
@@ -108,10 +108,35 @@ def build_elliptical_ring_mesh(
             v11 = vertex_id(i_next, j + 1)
             v01 = vertex_id(i, j + 1)
 
-            indices.extend((v00, v10, v01))
-            indices.extend((v10, v11, v01))
+            if (i + j) % 2 == 0:
+                indices.extend((v00, v10, v01))
+                indices.extend((v10, v11, v01))
+            else:
+                indices.extend((v00, v10, v11))
+                indices.extend((v00, v11, v01))
 
     return vertices, indices
+
+
+def compute_cloth_area(vertices: list[wp.vec3], indices: list[int]) -> float:
+    """Sum the area of every triangle in the mesh.
+    """
+    total = 0.0
+    for t in range(0, len(indices), 3):
+        p0 = vertices[indices[t + 0]]
+        p1 = vertices[indices[t + 1]]
+        p2 = vertices[indices[t + 2]]
+
+        ax, ay, az = p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]
+        bx, by, bz = p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]
+
+        cx = ay * bz - az * by
+        cy = az * bx - ax * bz
+        cz = ax * by - ay * bx
+
+        total += 0.5 * math.sqrt(cx * cx + cy * cy + cz * cz)
+
+    return total
 
 
 # Rib-stiffening helpers
@@ -140,20 +165,6 @@ def make_cross_section_bending_stiff(
     rib_edge_kd: float,
 ) -> int:
     """Assign high bending stiffness only to cross-sectional rib hinges.
-
-    Newton's cloth bending element is a hinge shared by two triangles. The
-    hinge itself is the edge between entries k and l of builder.edge_indices.
-
-    A hinge whose k/l particles:
-      1. have the same width index j, and
-      2. are neighbours around the circumference
-
-    runs along the belt circumference. Bending around this hinge changes the
-    angle between the two width segments on its two sides, which is exactly the
-    undesirable cross-sectional folding.
-
-    Other bending hinges retain BASE_EDGE_KE, allowing the complete belt loop
-    to change curvature and wrap around a pulley.
     """
     row_size = width_cells + 1
     belt_particle_end = particle_start + circumference_cells * row_size
@@ -210,22 +221,6 @@ def add_cross_section_rib_springs(
     spring_kd: float,
 ) -> int:
     """Add a stiff distance network separately to every cross-sectional rib.
-
-    For each fixed circumferential index i, the particles
-
-        p(i, 0), p(i, 1), ..., p(i, width_cells)
-
-    form one line. We preserve:
-      * the full endpoint-to-endpoint width; and
-      * each interior particle's distance to both endpoints.
-
-    In the rest pose, the endpoint distance equals the sum of the two partial
-    distances. Therefore, satisfying all three distances forces each interior
-    point to remain close to its original position on the same straight line.
-
-    The high anisotropic bending stiffness above supplies the direct angular
-    resistance, while these springs provide additional finite-deformation
-    reinforcement and stop a rib from collapsing or forming an S shape.
     """
     spring_count_before = builder.spring_count
 
@@ -264,6 +259,36 @@ def add_cross_section_rib_springs(
     return builder.spring_count - spring_count_before
 
 
+def add_circumferential_springs(
+    builder: newton.ModelBuilder,
+    *,
+    particle_start: int,
+    circumference_cells: int,
+    width_cells: int,
+    spring_ke: float,
+    spring_kd: float,
+) -> int:
+    """Preserve segment lengths around every horizontal row of the belt.
+    """
+    spring_count_before = builder.spring_count
+
+    for j in range(width_cells + 1):
+        for i in range(circumference_cells):
+            p0 = belt_particle_id(
+                particle_start, i, j, circumference_cells, width_cells
+            )
+            p1 = belt_particle_id(
+                particle_start,
+                (i + 1) % circumference_cells,
+                j,
+                circumference_cells,
+                width_cells,
+            )
+            builder.add_spring(p0, p1, spring_ke, spring_kd, 0.0)
+
+    return builder.spring_count - spring_count_before
+
+
 class Example:
     def __init__(self, viewer, args):
         self.viewer = viewer
@@ -287,6 +312,11 @@ class Example:
             bottom_z=PARTICLE_RADIUS + GROUND_EPSILON,
         )
 
+        # Derive density from the requested total mass and the true mesh area so
+        # the belt weighs exactly args.target_mass regardless of resolution.
+        belt_area = compute_cloth_area(vertices, indices)
+        cloth_density = args.target_mass / belt_area
+
         # Record ranges so the code remains correct even if other particles or
         # cloth objects are added before this belt later.
         belt_particle_start = builder.particle_count
@@ -299,7 +329,7 @@ class Example:
             vel=wp.vec3(0.0, 0.0, 0.0),
             vertices=vertices,
             indices=indices,
-            density=CLOTH_DENSITY,
+            density=cloth_density,
             tri_ke=args.tri_ke,
             tri_ka=args.tri_ka,
             tri_kd=args.tri_kd,
@@ -333,17 +363,39 @@ class Example:
                 spring_kd=args.rib_spring_kd,
             )
 
+        loop_spring_count = add_circumferential_springs(
+            builder,
+            particle_start=belt_particle_start,
+            circumference_cells=args.circumference_cells,
+            width_cells=args.width_cells,
+            spring_ke=LOOP_SPRING_KE,
+            spring_kd=LOOP_SPRING_KD,
+        )
+
+        print(
+            f"Belt mesh: {len(vertices)} particles, "
+            f"area {belt_area * 1e4:.1f} cm^2, "
+            f"density {cloth_density:.4f} kg/m^2, "
+            f"target mass {args.target_mass * 1e3:.1f} g."
+        )
         print(
             "Belt rib reinforcement: "
             f"{stiff_hinge_count} high-stiffness bending hinges, "
-            f"{rib_spring_count} rib springs."
+            f"{rib_spring_count} rib springs, "
+            f"{loop_spring_count} circumferential springs."
         )
 
         builder.color(include_bending=True)
         self.model = builder.finalize()
 
-        self.model.soft_contact_ke = 1.0e2
-        self.model.soft_contact_kd = 1.0e2
+        try:
+            actual_mass = float(self.model.particle_mass.numpy().sum())
+            print(f"Finalized belt mass: {actual_mass * 1e3:.2f} g.")
+        except Exception:
+            pass
+
+        self.model.soft_contact_ke = 2.0e4
+        self.model.soft_contact_kd = 2.0e2
         self.model.soft_contact_mu = 1.0
 
         self.solver = newton.solvers.SolverVBD(
@@ -433,8 +485,14 @@ class Example:
         parser.add_argument(
             "--gravity",
             type=float,
-            default=0.0,
-            help="Gravity acceleration along Z.",
+            default=-9.81,
+            help="Gravity along Z (negative = down). 0.0 makes the belt float.",
+        )
+        parser.add_argument(
+            "--target-mass",
+            type=float,
+            default=TARGET_BELT_MASS,
+            help="Total belt mass in kilograms (default 0.033 kg = 33 g).",
         )
         parser.add_argument(
             "--strip-width",

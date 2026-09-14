@@ -76,12 +76,12 @@ BELT_STRIP_WIDTH = 0.050
 CIRCUMFERENCE_CELLS = 64
 WIDTH_CELLS = 4
 
-PARTICLE_RADIUS = 0.0010
+PARTICLE_RADIUS = 0.0020
 # Newton cloth_franka-style particle<->rigid contact envelope.
 # The official example uses body-contact margin equal to its particle radius;
 # use a slightly larger envelope here because the timing-belt surface is coarse
 # (only 5 particles across the 50 mm width).
-CLOTH_BODY_CONTACT_MARGIN = 1.0 * PARTICLE_RADIUS
+CLOTH_BODY_CONTACT_MARGIN = 0.75 * PARTICLE_RADIUS
 GROUND_EPSILON = 0.0001
 TARGET_BELT_MASS = 0.033  # kg (33 g)
 
@@ -177,9 +177,9 @@ PULLEY_CONTACT_KE = 3.0e5
 PULLEY_CONTACT_KD = 1.0e-5 * PULLEY_CONTACT_KE
 
 # Gripper-pad contact used by the mjc -> vbd proxy coupling.
-GRIPPER_CONTACT_KE = 2.0e4
-GRIPPER_CONTACT_KD = 20.0
-GRIPPER_CONTACT_MU = 4.0
+GRIPPER_CONTACT_KE = 3.0e4
+GRIPPER_CONTACT_KD = 40.0
+GRIPPER_CONTACT_MU = 6.0
 
 # Belt<->gripper collision simplification.
 GRIPPER_SIMPLE_PAD_HALF_X = 0.0110 # 22 mm wide

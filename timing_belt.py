@@ -74,47 +74,31 @@ BELT_STRIP_WIDTH = 0.050
 
 # Mesh resolution.
 CIRCUMFERENCE_CELLS = 64
-WIDTH_CELLS = 4
+# 9 rows across the 50 mm width (6.25 mm spacing) so the 6.6 mm
+# particle diameters form a continuous gripper-contact sampling band.
+WIDTH_CELLS = 8
 
-PARTICLE_RADIUS = 0.0020
-# Newton cloth_franka-style particle<->rigid contact envelope.
-# The official example uses body-contact margin equal to its particle radius;
-# use a slightly larger envelope here because the timing-belt surface is coarse
-# (only 5 particles across the 50 mm width).
-CLOTH_BODY_CONTACT_MARGIN = 0.75 * PARTICLE_RADIUS
+PARTICLE_RADIUS = 0.0033
+CLOTH_BODY_CONTACT_MARGIN = PARTICLE_RADIUS
 GROUND_EPSILON = 0.0001
 TARGET_BELT_MASS = 0.033  # kg (33 g)
 
-# Ordinary membrane stiffness.
-TRI_KE = 8.0e3
-TRI_KA = 8.0e3
-TRI_KD = 5.0
+# Keep the belt nearly inextensible with the triangle membrane itself.
+TRI_KE = 8.0e4
+TRI_KA = 8.0e4
+TRI_KD = 1.5
 
-# Ordinary cloth bending stiffness.
-BASE_EDGE_KE = 5.0e1
-BASE_EDGE_KD = 2.0
+# Longitudinal hinge bending is the right place to prevent collapse/folding.
+# Unlike distance/chord springs, these do not create the old rubber-band
+# translation behavior; they resist sharp changes of local angle.
+BASE_EDGE_KE = 1.5e3
+BASE_EDGE_KD = 6.0
 
-# High cross-sectional rib bending stiffness.
-RIB_BENDING_KE = 8.0e3
-RIB_BENDING_KD = 8.0
-
-# Additional distance springs inside every cross-sectional rib.
-# The original standalone timing-belt test used 2e4 here with 20 substeps.
-# At 10 substeps that duplicates the already-stiff rib bending too aggressively.
-# Keep the springs as width/line reinforcement, but let the 2e4 bending hinges
-# provide the main anti-folding behavior.
+# Cross-sectional ribs remain the stiffest direction of the belt.
+RIB_BENDING_KE = 1.2e4
+RIB_BENDING_KD = 10.0
 RIB_SPRING_KE = 2.0e3
-RIB_SPRING_KD = 8.0
-
-# Circumferential reinforcement.
-LOOP_SPRING_KE = 6.0e3
-LOOP_SPRING_KD = 1.0e1
-
-# Second-neighbour chord springs preserve the ring curvature at 10 substeps.
-# They use Newton spring rest lengths from the initial ellipse, so they do not
-# pull the belt smaller; they only resist local circumferential folding.
-SHAPE_SPRING_KE = 1.5e3
-SHAPE_SPRING_KD = 8.0
+RIB_SPRING_KD = 4.0
 
 # Keep the original scene names so every non-belt subsystem stays untouched.
 BELT_OUTER_MAJOR_DIAMETER = BELT_MAJOR_DIAMETER
@@ -166,10 +150,20 @@ IK_INIT_ITERS = 96
 IK_TRACK_ITERS = 8
 IK_LAMBDA_INITIAL = 0.05
 
-# Contact material.
-CABLE_CONTACT_KE = 1.0e4
-CABLE_CONTACT_KD = 1.0e-5 * CABLE_CONTACT_KE
+# Particle<->rigid contact material.  In meter scale use a stiffer, damped
+# contact than the centimeter cloth demo; otherwise a 33 g belt can visibly sink
+# into the fingers/table before the penalty force catches up.
+CABLE_CONTACT_KE = 1.0e5
+CABLE_CONTACT_KD = 2.0e1
 CABLE_CONTACT_MU = 1.0
+
+# Table/board should let the loop translate when pushed, but damp the drop
+# enough that it settles instead of continuing to roll/twist.
+TABLE_CONTACT_KE = 8.0e4
+TABLE_CONTACT_KD = 2.0e1
+TABLE_CONTACT_MU = 0.20
+TABLE_CONTACT_MARGIN = 0.0010
+TABLE_CONTACT_GAP = 0.0020
 
 # Stiffer + damped pulley contact so the belt cannot penetrate the
 # sheave and squeeze out the bottom of the groove.
@@ -177,18 +171,23 @@ PULLEY_CONTACT_KE = 3.0e5
 PULLEY_CONTACT_KD = 1.0e-5 * PULLEY_CONTACT_KE
 
 # Gripper-pad contact used by the mjc -> vbd proxy coupling.
-GRIPPER_CONTACT_KE = 3.0e4
-GRIPPER_CONTACT_KD = 40.0
-GRIPPER_CONTACT_MU = 6.0
+GRIPPER_CONTACT_KE = 1.5e5
+GRIPPER_CONTACT_KD = 80.0
+GRIPPER_CONTACT_MU = 10.0
+GRIPPER_CONTACT_MARGIN = 0.0015
+GRIPPER_CONTACT_GAP = 0.0020
 
 # Belt<->gripper collision simplification.
-GRIPPER_SIMPLE_PAD_HALF_X = 0.0110 # 22 mm wide
-GRIPPER_SIMPLE_PAD_HALF_Y = 0.0010 # 2 mm total thickness (plane-like)
-GRIPPER_SIMPLE_PAD_HALF_Z = 0.01875 # 37.5 mm tall
-# Keep the contact face at approximately the original inner pad surface.
-GRIPPER_SIMPLE_PAD_CENTER_Y = -0.0056
-GRIPPER_SIMPLE_PAD_CENTER_Z = 0.01875
-GRIPPER_SIMPLE_PAD_GAP = 0.0005
+GRIPPER_SIMPLE_PAD_HALF_X = 0.0150  # 30 mm tangential contact width
+# Thicker proxy prevents a particle crossing the entire collider within one
+# contact step. Move the center outward so the INNER face stays at -4.6 mm.
+GRIPPER_SIMPLE_PAD_HALF_Y = 0.0030  # 6 mm total proxy thickness
+# Cover the full 50 mm cloth-made belt width so the complete cross section is
+# pinched instead of only the lower/middle rows.
+GRIPPER_SIMPLE_PAD_HALF_Z = 0.5 * BELT_STRIP_WIDTH
+GRIPPER_SIMPLE_PAD_CENTER_Y = -0.0076
+GRIPPER_SIMPLE_PAD_CENTER_Z = 0.5 * BELT_STRIP_WIDTH
+GRIPPER_SIMPLE_PAD_GAP = GRIPPER_CONTACT_GAP
 
 # During an explicit open command, temporarily disable the two simple pad contacts.
 GRIPPER_RELEASE_KE = 0.0
@@ -226,9 +225,9 @@ GRIPPER_PAD_KEYWORDS = ("pad",)
 ROBOTIQ_GRIPPER_SAFE_CLOSE_FRACTION = 0.93
 
 # Gripper grasp-safety settings.
-GRIPPER_DRIVE_KE = 180.0
-GRIPPER_DRIVE_KD = 80.0
-GRIPPER_EFFORT_LIMIT = 1.0
+GRIPPER_DRIVE_KE = 800.0
+GRIPPER_DRIVE_KD = 120.0
+GRIPPER_EFFORT_LIMIT = 120.0
 
 # Anti-crush grasp latch.
 GRIPPER_STALL_MIN_FRACTION = 0.60
@@ -243,15 +242,13 @@ GRASP_STABILIZE_FRAMES = 6
 GRASP_CONTACT_SAFE_FRACTION = 0.45
 GRASP_CONTACT_SAFE_UNCAPTURED = True
 
-# Use ADMM only around the actual first-contact event.
-CONTACT_ADMM_PRECONTACT_MIN_FRACTION = max(0.0, GRIPPER_STALL_MIN_FRACTION - 0.05)
-CONTACT_ADMM_PRECONTACT_ERROR_FRACTION = 0.5 * GRIPPER_STALL_ERROR_FRACTION
-CONTACT_ADMM_PRECONTACT_SPEED_FRACTION_PER_SEC = 2.0 * GRIPPER_STALL_SPEED_FRACTION_PER_SEC
-CONTACT_ADMM_POST_STALL_FRAMES = 3
-CONTACT_ADMM_MAX_CONTACT_FRAMES = 8
+# Switch to ADMM before the fingers reach the belt and keep ADMM through transport.
+CONTACT_ADMM_PRECONTACT_MIN_FRACTION = 0.35
+CONTACT_ADMM_PRECONTACT_ERROR_FRACTION = 0.0
+CONTACT_ADMM_PRECONTACT_SPEED_FRACTION_PER_SEC = 1.0e9
 
-GRASPED_MAX_ARM_SPEED = 0.75
-GRIPPER_HOLD_PRELOAD_FRACTION = 0.004
+GRASPED_MAX_ARM_SPEED = 0.60
+GRIPPER_HOLD_PRELOAD_FRACTION = 0.025
 GRIPPER_RELEASE_HYSTERESIS = 0.020
 
 # SpaceMouse target-following safety.
@@ -498,7 +495,8 @@ def make_visual_cfg() -> newton.ModelBuilder.ShapeConfig:
 
 def make_robust_table_collision_cfg(visible=True) -> newton.ModelBuilder.ShapeConfig:
     return newton.ModelBuilder.ShapeConfig(
-        density=0.0, ke=CABLE_CONTACT_KE, kd=CABLE_CONTACT_KD, mu=CABLE_CONTACT_MU,
+        density=0.0, ke=TABLE_CONTACT_KE, kd=TABLE_CONTACT_KD, mu=TABLE_CONTACT_MU,
+        margin=TABLE_CONTACT_MARGIN, gap=TABLE_CONTACT_GAP,
         has_shape_collision=True, has_particle_collision=True,
         collision_group=1, is_visible=visible,
     )
@@ -1047,7 +1045,10 @@ def _replace_proxy_pad_colliders_with_two_planes(builder, proxy_bodies: list[int
         ke=GRIPPER_CONTACT_KE,
         kd=GRIPPER_CONTACT_KD,
         mu=GRIPPER_CONTACT_MU,
-        margin=0.0,
+        # Margin determines the resting contact surface; gap only admits the
+        # candidate earlier.  Use both so the cloth cannot visually sink through
+        # the pad before normal force develops.
+        margin=GRIPPER_CONTACT_MARGIN,
         gap=GRIPPER_SIMPLE_PAD_GAP,
         has_shape_collision=True,
         has_particle_collision=True,
@@ -1282,10 +1283,9 @@ class Example:
         self.fps = 60
         self.frame_dt = 1.0 / self.fps
         self.sim_time = 0.0
-        # 10-substep mode.  Contact conditioning follows Newton cloth_franka,
-        # while redundant rib distance-spring stiffness is reduced below so the
-        # belt remains stable without changing the strong rib bending behavior.
-        self.sim_substeps = 10
+        # Use the current Newton ADMM example's 16-substep default.  This greatly
+        # reduces thin-contact tunneling during finger closure.
+        self.sim_substeps = 16
         self.sim_dt = self.frame_dt / self.sim_substeps
         self.frame_id = 0
         
@@ -1441,22 +1441,12 @@ class Example:
             spring_ke=RIB_SPRING_KE,
             spring_kd=RIB_SPRING_KD,
         )
-        loop_spring_count = add_circumferential_springs(
-            builder,
-            particle_start=belt_particle_start,
-            circumference_cells=CIRCUMFERENCE_CELLS,
-            width_cells=WIDTH_CELLS,
-            spring_ke=LOOP_SPRING_KE,
-            spring_kd=LOOP_SPRING_KD,
-        )
-        shape_spring_count = add_circumferential_shape_springs(
-            builder,
-            particle_start=belt_particle_start,
-            circumference_cells=CIRCUMFERENCE_CELLS,
-            width_cells=WIDTH_CELLS,
-            spring_ke=SHAPE_SPRING_KE,
-            spring_kd=SHAPE_SPRING_KD,
-        )
+        # Do not add longitudinal distance/chord springs. The triangle membrane
+        # carries in-plane stiffness, while BASE_EDGE_KE supplies angular bending
+        # resistance around the loop. This prevents sharp folds WITHOUT reintroducing
+        # the distance-spring rubber-band translation behavior.
+        loop_spring_count = 0
+        shape_spring_count = 0
 
         self.belt_particles = list(range(belt_particle_start, belt_particle_end))
         # Compatibility aliases for non-belt code paths. The timing belt has no
@@ -1489,8 +1479,8 @@ class Example:
         # pattern (soft-contact material + an explicit body-contact envelope).
         # Keep our scene's friction policy; only the contact conditioning follows
         # the Newton cloth example.
-        self.model.soft_contact_ke = 2.0e4
-        self.model.soft_contact_kd = 5.0e1
+        self.model.soft_contact_ke = CABLE_CONTACT_KE
+        self.model.soft_contact_kd = CABLE_CONTACT_KD
         self.model.soft_contact_mu = CABLE_CONTACT_MU
 
         # Global reset of material arrays...
@@ -1664,11 +1654,11 @@ class Example:
         if hasattr(self.fast_solver, "prepare_contacts"):
             self.fast_solver.prepare_contacts(self.fast_contacts)
 
-        # ADMM additionally needs pad<->belt contacts in the shared contact buffer.
+        # During grasp/transport use the full collision buffer, like Newton's
+        # successful cloth and ADMM manipulation examples.
         self.admm_collision_pipeline = newton.CollisionPipeline(
-            self.model, broad_phase="explicit",
-            soft_contact_gap=CLOTH_BODY_CONTACT_MARGIN,
-            shape_pairs_filtered=self._belt_world_shape_pairs(include_gripper=True))
+            self.model,
+            soft_contact_gap=CLOTH_BODY_CONTACT_MARGIN)
         self.admm_contacts = self.admm_collision_pipeline.contacts()
         if hasattr(self.admm_solver, "prepare_contacts"):
             self.admm_solver.prepare_contacts(self.admm_contacts)
@@ -1837,9 +1827,7 @@ class Example:
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
             newton.examples.apply_coupled_viewer_forces(self, self.state_0)
-            self.model.collide(
-                self.state_0, self.fast_contacts, collision_pipeline=self.fast_collision_pipeline
-            )
+            self.fast_collision_pipeline.collide(self.state_0, self.fast_contacts)
             self.fast_solver.step(
                 self.state_0, self.state_1, self.control, self.fast_contacts, self.sim_dt
             )
@@ -1853,9 +1841,7 @@ class Example:
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
             newton.examples.apply_coupled_viewer_forces(self, self.state_0)
-            self.model.collide(
-                self.state_0, self.admm_contacts, collision_pipeline=self.admm_collision_pipeline
-            )
+            self.admm_collision_pipeline.collide(self.state_0, self.admm_contacts)
             self.admm_solver.step(
                 self.state_0, self.state_1, self.control, self.admm_contacts, self.sim_dt
             )
@@ -1889,7 +1875,7 @@ class Example:
 
             wp.synchronize_device(self.device)
             t0 = time.perf_counter()
-            self.model.collide(self.state_0, contacts, collision_pipeline=pipeline)
+            pipeline.collide(self.state_0, contacts)
             wp.synchronize_device(self.device)
             collide_s += time.perf_counter() - t0
 
@@ -1963,69 +1949,26 @@ class Example:
         return forming_grasp or settling_grasp
 
     def _use_admm_physics(self) -> bool:
-        """ADMM is active only around the first loaded pad<->belt contact.
-
-        The transition is intentionally hysteretic:
-          * normal closing/free motion       -> FAST proxy CUDA graph
-          * fingers slow + load begins       -> ADMM CUDA graph (pre-contact)
-          * strict stall is confirmed        -> keep ADMM for a few settle frames
-          * established grasp / transport    -> FAST proxy CUDA graph again
-        """
-        return self._contact_admm_active
+        closing_or_closed = (
+            self._grip_requested_fraction >= CONTACT_ADMM_PRECONTACT_MIN_FRACTION
+            or self._grip_fraction >= CONTACT_ADMM_PRECONTACT_MIN_FRACTION
+        )
+        return closing_or_closed or self._grip_hold_fraction is not None
 
     def _launch_physics(self) -> None:
-        # Fully opening re-arms the one-shot contact handoff for the next grasp.
-        if self._grip_requested_fraction < GRASP_CONTACT_SAFE_FRACTION:
-            self._contact_admm_armed = True
-            self._contact_admm_active = False
-            self._contact_admm_age = 0
-            self._contact_admm_frames_remaining = 0
+        use_admm = self._use_admm_physics()
+        if use_admm != self._contact_admm_active:
+            self._contact_admm_active = use_admm
+            print("[COUPLING] ADMM grasp/transport" if use_admm else "[COUPLING] FAST free/released")
 
-        # Start ADMM slightly before the strict stall detector.
-        if (
-            self._contact_admm_armed
-            and not self._contact_admm_active
-            and self._grip_near_contact
-        ):
-            self._contact_admm_active = True
-            self._contact_admm_age = 0
-            self._contact_admm_frames_remaining = 0
-            print("[COUPLING] near contact -> ADMM pre-contact handoff")
-
-        if self._contact_admm_active:
+        if use_admm:
             if self.admm_physics_graph is not None:
                 with wp.ScopedDevice(self.device):
                     wp.capture_launch(self.admm_physics_graph)
             else:
                 self._simulate_admm_physics()
-
-            self._contact_admm_age += 1
-
-            # As soon as the existing strict stall detector sees load, hold ADMM
-            # for a small fixed number of additional frames.
-            if self._grip_stall_frames > 0:
-                self._contact_admm_frames_remaining = CONTACT_ADMM_POST_STALL_FRAMES
-                self._contact_admm_armed = False
-            elif self._contact_admm_frames_remaining > 0:
-                self._contact_admm_frames_remaining -= 1
-
-            # Leave ADMM only after the strict stall has disappeared AND its short
-            # post-contact settle countdown has expired.
-            contact_settled = (
-                self._grip_stall_frames == 0
-                and self._contact_admm_frames_remaining <= 0
-                and self._contact_admm_age >= 2
-            )
-            timed_out = self._contact_admm_age >= CONTACT_ADMM_MAX_CONTACT_FRAMES
-            if contact_settled or timed_out:
-                self._contact_admm_active = False
-                self._contact_admm_frames_remaining = 0
-                self._contact_admm_armed = False
-                print("[COUPLING] first contact settled -> FAST CUDA transport")
             return
 
-        # Established grasp/transport uses the original fast proxy graph, matching
-        # the ~0.4 RTF behavior that was working well.
         if self.fast_physics_graph is not None:
             with wp.ScopedDevice(self.device):
                 wp.capture_launch(self.fast_physics_graph)
@@ -2396,10 +2339,8 @@ class Example:
         error = requested - actual
         closing_request = requested > self._grip_fraction + 1.0e-5
         self._grip_near_contact = (
-            closing_request
-            and actual >= CONTACT_ADMM_PRECONTACT_MIN_FRACTION
-            and error >= CONTACT_ADMM_PRECONTACT_ERROR_FRACTION
-            and actual_speed <= CONTACT_ADMM_PRECONTACT_SPEED_FRACTION_PER_SEC
+            requested >= CONTACT_ADMM_PRECONTACT_MIN_FRACTION
+            and closing_request
         )
         stalled = (
             closing_request

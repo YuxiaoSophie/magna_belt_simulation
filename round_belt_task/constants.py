@@ -6,6 +6,14 @@ from pathlib import Path
 
 import warp as wp
 
+from task_common.joint_state import (  # noqa: F401
+    ARM_TARGET_KD,
+    ARM_TARGET_KE,
+    FINGER_TARGET_KD,
+    FINGER_TARGET_KE,
+    GRIPPER_OPEN_MARGIN,
+)
+from task_common.scene import UR10_BASE_LABEL, UR10_WRIST3_LABEL  # noqa: F401
 from utils.directives import Directive, parse_directives
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -38,8 +46,6 @@ UR10_JOINT_LABELS = [
     "/ur10/wrist_1_link/wrist_2_joint",
     "/ur10/wrist_2_link/wrist_3_joint",
 ]
-UR10_BASE_LABEL = "/ur10/base_link"
-UR10_WRIST3_LABEL = "/ur10/wrist_3_link"
 
 TABLE_URDF = _model_file("table")
 BOARD_URDF = _model_file("board")
@@ -112,10 +118,3 @@ PULLEY_MOUNT_COLOR = _MOUNT.color
 SMALL_PULLEY_MOUNT_LOCAL_XY = _MOUNT.near_local_xy
 SMALL_PULLEY_MOUNT_RADIUS = _MOUNT.radius
 BOARD_PANEL_MIN_SPAN = _MOUNT.max_span
-
-# Controller gains.
-ARM_TARGET_KE = 700.0
-ARM_TARGET_KD = 110.0
-FINGER_TARGET_KE = 100.0
-FINGER_TARGET_KD = 10.0
-GRIPPER_OPEN_MARGIN = 0.005

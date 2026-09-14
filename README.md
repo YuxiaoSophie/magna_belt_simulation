@@ -13,6 +13,7 @@ my_projects/
 │   ├── scene.py                    #   build_scene: load directives -> SceneInfo
 │   ├── joint_state.py              #   seeds joint values on the finalized Model
 │   └── simulation.py               #   RoundBeltTaskSimulation: solver, stepping
+├── task_common/                    # task-agnostic scene/joint/simulation scaffolding
 │
 ├── utils/                          # task-agnostic Newton helpers
 │   ├── directives/                 #   Drake-style scene directives loader

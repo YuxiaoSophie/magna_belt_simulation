@@ -202,7 +202,7 @@ shared UR10 + Robotiq rig:
 
 Registered as `EXTENSION_DIRECTIVES` in `round_belt_task/directives.py`, passed to
 `load_directives(..., directives=EXTENSION_DIRECTIVES)`. Each validates its own keys
-strictly (the shared `_params` helper: unknown key → `ValueError`, missing required key →
+strictly (the shared `task_common.directives.params` helper: unknown key → `ValueError`, missing required key →
 `ValueError`) and, by convention (not enforced by the loader), stores its output in
 `ctx.scene.extras[params["name"]]`.
 
@@ -211,9 +211,9 @@ The Robotiq's ALOHA fingers are not a directive: they are geoms in `2f85.xml`'s 
 
 | directive | required params | optional params (default) | `extras[name]` | ordering |
 |---|---|---|---|---|
-| `add_tabletop_collision` | `table_visual`, `top_z`, `thickness`, `color` | `name` (`"tabletop_collision"`) | `{"shape": int, "aabb": (lo, hi)}` | must sit inside the static shape range, between the model owning `table_visual` and whatever comes after it (order is load-bearing for `round_belt_task/scene.py`'s contiguous static-shape check) |
+| `add_tabletop_collision` | `table_visual`, `top_z`, `thickness`, `color` | `name` (`"tabletop_collision"`) | `{"shape": int, "aabb": (lo, hi)}` | must sit inside the static shape range, between the model owning `table_visual` and whatever comes after it (order is load-bearing for `task_common/scene.py`'s contiguous static-shape check) |
 | `add_ground_plane` | exactly one of `height` or `height_from_aabb_min_z_of` | `name` (`"ground"`) | `{"shape": int, "height": float}` | by convention last — not enforced by the loader, just kept out of any model's contiguous shape range |
-| `add_rod_ellipse` | `name`, `center`, `semi_axes`, `radius`, `num_elements`, `color`, `stretch_stiffness`, `stretch_damping`, `bend_stiffness`, `bend_damping` | `twist_total` (`0.0`), `closed` (`true`), `body_frame_origin` (`"com"`), `margin` (`0.0`), `gap` (`0.001`), `density`/`ke`/`kd`/`mu` (fall back to `round_belt`'s belt-density estimate and cable-contact constants) | `{"bodies": [...], "joints": [...], "shapes": [...]}` | by convention after all robot models — required in practice because `round_belt_task/scene.py`'s `_span` helper needs each robot model's body/joint/shape ranges to be mutually contiguous, which a rod inserted in between would break; not checked by the loader itself |
+| `add_rod_ellipse` | `name`, `center`, `semi_axes`, `radius`, `num_elements`, `color`, `stretch_stiffness`, `stretch_damping`, `bend_stiffness`, `bend_damping` | `twist_total` (`0.0`), `closed` (`true`), `body_frame_origin` (`"com"`), `margin` (`0.0`), `gap` (`0.001`), `density`/`ke`/`kd`/`mu` (fall back to `round_belt`'s belt-density estimate and cable-contact constants) | `{"bodies": [...], "joints": [...], "shapes": [...]}` | by convention after all robot models — required in practice because `task_common/scene.py`'s `span` helper needs each robot model's body/joint/shape ranges to be mutually contiguous, which a rod inserted in between would break; not checked by the loader itself |
 
 ## 6. What is NOT data and why
 
@@ -309,9 +309,9 @@ Rules, from the `round_belt_task/directives.py` module docstring and the three e
 directives:
 - **Validate your own keys strictly.** The loader does not check a custom directive's
   `params` at all — unknown keys, missing required keys, and type coercion are entirely
-  the directive's job. `round_belt_task/directives.py::_params` is the pattern the three
-  existing directives use (merge over a spec dict where `_REQUIRED` marks no default,
-  raise on anything unknown or still-`_REQUIRED`).
+  the directive's job. `task_common/directives.py::params` is the pattern the three
+  existing directives use (merge over a spec dict where `REQUIRED` marks no default,
+  raise on anything unknown or still-`REQUIRED`).
 - **Coerce numbers with the loader's own helpers** (`utils.directives.as_float` /
   `as_floats` / `as_vec3`, exported for this purpose), so a bad literal fails the same way a
   core directive's would.

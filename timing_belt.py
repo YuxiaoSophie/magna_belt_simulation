@@ -35,586 +35,6 @@ from newton.viewer import ViewerFile
 from newton.solvers import SolverMuJoCo, SolverVBD
 from newton.solvers.experimental.coupled import SolverCoupled, SolverCoupledProxy, SolverCoupledADMM
 
-# Timing-belt constants and original cloth helpers.
-BELT_MAJOR_DIAMETER = 0.248
-
-BELT_MINOR_DIAMETER = 0.168
-
-BELT_STRIP_WIDTH = 0.050
-
-CIRCUMFERENCE_CELLS = 64
-
-WIDTH_CELLS = 4
-
-PARTICLE_RADIUS = 0.0010
-
-GROUND_EPSILON = 0.0001
-
-TRI_KE = 1.0e4
-
-TRI_KA = 1.0e4
-
-TRI_KD = 2.0e2
-
-BASE_EDGE_KE = 5.0e1
-
-BASE_EDGE_KD = 5.0
-
-RIB_BENDING_KE = 2.0e4
-
-RIB_BENDING_KD = 2.0e1
-
-RIB_SPRING_KE = 2.0e4
-
-RIB_SPRING_KD = 2.0e1
-
-# Circumferential reinforcement from the standalone timing-belt model.
-LOOP_SPRING_KE = 1.0e4
-
-LOOP_SPRING_KD = 5.0e1
-
-def build_elliptical_ring_mesh(
-    major_diameter: float,
-    minor_diameter: float,
-    strip_width: float,
-    circumference_cells: int,
-    width_cells: int,
-    bottom_z: float,
-) -> tuple[list[wp.vec3], list[int]]:
-    """Create a seamless vertical cloth strip wrapped around an ellipse.
-
-    Particle layout:
-
-        local particle id = i * (width_cells + 1) + j
-
-    where:
-        i = circumferential position around the closed belt
-        j = position across the belt width
-
-    For one fixed i, all particles j=0...width_cells form one cross-sectional
-    rib. Initially, they have identical x/y and vary only in z.
-    """
-    if major_diameter <= 0.0 or minor_diameter <= 0.0:
-        raise ValueError("The two belt diameters must be positive.")
-    if strip_width <= 0.0:
-        raise ValueError("The belt strip width must be positive.")
-    if circumference_cells < 8:
-        raise ValueError("circumference_cells must be at least 8.")
-    if width_cells < 2:
-        raise ValueError("width_cells must be at least 2 for rib bending.")
-
-    a = 0.5 * major_diameter
-    b = 0.5 * minor_diameter
-    row_size = width_cells + 1
-
-    vertices: list[wp.vec3] = []
-    indices: list[int] = []
-
-    # The loop lies in XY; belt width extends along Z.
-    for i in range(circumference_cells):
-        theta = 2.0 * math.pi * i / circumference_cells
-        x = a * math.cos(theta)
-        y = b * math.sin(theta)
-
-        for j in range(row_size):
-            z = bottom_z + strip_width * j / width_cells
-            vertices.append(wp.vec3(x, y, z))
-
-    def vertex_id(i: int, j: int) -> int:
-        return (i % circumference_cells) * row_size + j
-
-    # Two triangles per quadrilateral cell.
-    for i in range(circumference_cells):
-        i_next = (i + 1) % circumference_cells
-
-        for j in range(width_cells):
-            v00 = vertex_id(i, j)
-            v10 = vertex_id(i_next, j)
-            v11 = vertex_id(i_next, j + 1)
-            v01 = vertex_id(i, j + 1)
-
-            if (i + j) % 2 == 0:
-                indices.extend((v00, v10, v01))
-                indices.extend((v10, v11, v01))
-            else:
-                indices.extend((v00, v10, v11))
-                indices.extend((v00, v11, v01))
-
-    return vertices, indices
-
-def belt_particle_id(
-    particle_start: int,
-    circumference_index: int,
-    width_index: int,
-    circumference_cells: int,
-    width_cells: int,
-) -> int:
-    """Return the global Newton particle id of one belt mesh vertex."""
-    row_size = width_cells + 1
-    local_id = (circumference_index % circumference_cells) * row_size + width_index
-    return particle_start + local_id
-
-def make_cross_section_bending_stiff(
-    builder: newton.ModelBuilder,
-    *,
-    particle_start: int,
-    edge_start: int,
-    edge_end: int,
-    circumference_cells: int,
-    width_cells: int,
-    rib_edge_ke: float,
-    rib_edge_kd: float,
-) -> int:
-    """Assign high bending stiffness only to cross-sectional rib hinges.
-
-    Newton's cloth bending element is a hinge shared by two triangles. The
-    hinge itself is the edge between entries k and l of builder.edge_indices.
-
-    A hinge whose k/l particles:
-      1. have the same width index j, and
-      2. are neighbours around the circumference
-
-    runs along the belt circumference. Bending around this hinge changes the
-    angle between the two width segments on its two sides, which is exactly the
-    undesirable cross-sectional folding.
-
-    Other bending hinges retain BASE_EDGE_KE, allowing the complete belt loop
-    to change curvature and wrap around a pulley.
-    """
-    row_size = width_cells + 1
-    belt_particle_end = particle_start + circumference_cells * row_size
-    stiffened_count = 0
-
-    def decode(global_particle: int) -> tuple[int, int]:
-        local_particle = global_particle - particle_start
-        return divmod(local_particle, row_size)
-
-    for edge_id in range(edge_start, edge_end):
-        opposite_0, opposite_1, hinge_0, hinge_1 = builder.edge_indices[edge_id]
-
-        # Boundary edges have only one adjacent triangle and cannot provide a
-        # proper dihedral bending constraint.
-        if opposite_0 == -1 or opposite_1 == -1:
-            continue
-
-        if not (
-            particle_start <= hinge_0 < belt_particle_end
-            and particle_start <= hinge_1 < belt_particle_end
-        ):
-            continue
-
-        circ_0, width_0 = decode(hinge_0)
-        circ_1, width_1 = decode(hinge_1)
-
-        circumferential_delta = (circ_1 - circ_0) % circumference_cells
-        are_circumferential_neighbours = circumferential_delta in (
-            1,
-            circumference_cells - 1,
-        )
-
-        is_rib_bending_hinge = (
-            width_0 == width_1 and are_circumferential_neighbours
-        )
-
-        if is_rib_bending_hinge:
-            builder.edge_bending_properties[edge_id] = (
-                float(rib_edge_ke),
-                float(rib_edge_kd),
-            )
-            stiffened_count += 1
-
-    return stiffened_count
-
-def add_cross_section_rib_springs(
-    builder: newton.ModelBuilder,
-    *,
-    particle_start: int,
-    circumference_cells: int,
-    width_cells: int,
-    spring_ke: float,
-    spring_kd: float,
-) -> int:
-    """Add a stiff distance network separately to every cross-sectional rib.
-
-    For each fixed circumferential index i, the particles
-
-        p(i, 0), p(i, 1), ..., p(i, width_cells)
-
-    form one line. We preserve:
-      * the full endpoint-to-endpoint width; and
-      * each interior particle's distance to both endpoints.
-
-    In the rest pose, the endpoint distance equals the sum of the two partial
-    distances. Therefore, satisfying all three distances forces each interior
-    point to remain close to its original position on the same straight line.
-
-    The high anisotropic bending stiffness above supplies the direct angular
-    resistance, while these springs provide additional finite-deformation
-    reinforcement and stop a rib from collapsing or forming an S shape.
-    """
-    spring_count_before = builder.spring_count
-
-    for i in range(circumference_cells):
-        bottom = belt_particle_id(
-            particle_start,
-            i,
-            0,
-            circumference_cells,
-            width_cells,
-        )
-        top = belt_particle_id(
-            particle_start,
-            i,
-            width_cells,
-            circumference_cells,
-            width_cells,
-        )
-
-        # Preserve the complete physical belt width.
-        builder.add_spring(bottom, top, spring_ke, spring_kd, 0.0)
-
-        # Lock every interior point to its original fractional location between
-        # the two endpoints of this rib.
-        for j in range(1, width_cells):
-            particle = belt_particle_id(
-                particle_start,
-                i,
-                j,
-                circumference_cells,
-                width_cells,
-            )
-            builder.add_spring(bottom, particle, spring_ke, spring_kd, 0.0)
-            builder.add_spring(particle, top, spring_ke, spring_kd, 0.0)
-
-    return builder.spring_count - spring_count_before
-
-
-def add_circumferential_springs(
-    builder: newton.ModelBuilder,
-    *,
-    particle_start: int,
-    circumference_cells: int,
-    width_cells: int,
-    spring_ke: float,
-    spring_kd: float,
-) -> int:
-    """Preserve segment lengths around every horizontal row of the belt."""
-    spring_count_before = builder.spring_count
-
-    for j in range(width_cells + 1):
-        for i in range(circumference_cells):
-            p0 = belt_particle_id(
-                particle_start, i, j, circumference_cells, width_cells
-            )
-            p1 = belt_particle_id(
-                particle_start,
-                (i + 1) % circumference_cells,
-                j,
-                circumference_cells,
-                width_cells,
-            )
-            builder.add_spring(p0, p1, spring_ke, spring_kd, 0.0)
-
-    return builder.spring_count - spring_count_before
-
-def add_timing_belt_to_scene(scene, builder):
-    """Add the original cloth/rib model, translated onto the scene table."""
-
-    # Preserve the original restriction: belt contact with the robot occurs
-    # through the two simple gripper pads.
-    particle_flag = int(newton.ShapeFlags.COLLIDE_PARTICLES)
-    pads = set(scene.gripper_pad_shapes)
-    for shape in scene.robot_shapes:
-        if shape not in pads:
-            builder.shape_flags[shape] = (
-                int(builder.shape_flags[shape]) & ~particle_flag
-            )
-
-    vertices, indices = build_elliptical_ring_mesh(
-        major_diameter=BELT_MAJOR_DIAMETER,
-        minor_diameter=BELT_MINOR_DIAMETER,
-        strip_width=BELT_STRIP_WIDTH,
-        circumference_cells=CIRCUMFERENCE_CELLS,
-        width_cells=WIDTH_CELLS,
-        bottom_z=PARTICLE_RADIUS + GROUND_EPSILON,
-    )
-
-    # Compute density from the actual triangulated area, rather than an
-    # approximate ellipse circumference.
-    xyz = np.asarray(
-        [[float(v[0]), float(v[1]), float(v[2])] for v in vertices],
-        dtype=np.float64,
-    )
-    faces = np.asarray(indices, dtype=np.int32).reshape(-1, 3)
-    cross = np.cross(
-        xyz[faces[:, 1]] - xyz[faces[:, 0]],
-        xyz[faces[:, 2]] - xyz[faces[:, 0]],
-    )
-    area = float(0.5 * np.linalg.norm(cross, axis=1).sum())
-    if not np.isfinite(area) or area <= 0.0:
-        raise RuntimeError("Invalid timing-belt mesh area")
-
-    particle_start = builder.particle_count
-    edge_start = builder.edge_count
-
-    builder.add_cloth_mesh(
-        pos=wp.vec3(BELT_CENTER_X, BELT_CENTER_Y, TABLE_TOP_Z),
-        rot=wp.quat_identity(),
-        scale=1.0,
-        vel=wp.vec3(0.0, 0.0, 0.0),
-        vertices=vertices,
-        indices=indices,
-        density=TOTAL_BELT_MASS / area,
-        tri_ke=TRI_KE,
-        tri_ka=TRI_KA,
-        tri_kd=TRI_KD,
-        edge_ke=BASE_EDGE_KE,
-        edge_kd=BASE_EDGE_KD,
-        add_springs=False,
-        particle_radius=PARTICLE_RADIUS,
-    )
-
-    edge_end = builder.edge_count
-    particle_end = builder.particle_count
-
-    stiff_hinges = make_cross_section_bending_stiff(
-        builder,
-        particle_start=particle_start,
-        edge_start=edge_start,
-        edge_end=edge_end,
-        circumference_cells=CIRCUMFERENCE_CELLS,
-        width_cells=WIDTH_CELLS,
-        rib_edge_ke=RIB_BENDING_KE,
-        rib_edge_kd=RIB_BENDING_KD,
-    )
-
-    rib_springs = add_cross_section_rib_springs(
-        builder,
-        particle_start=particle_start,
-        circumference_cells=CIRCUMFERENCE_CELLS,
-        width_cells=WIDTH_CELLS,
-        spring_ke=RIB_SPRING_KE,
-        spring_kd=RIB_SPRING_KD,
-    )
-
-    loop_springs = add_circumferential_springs(
-        builder,
-        particle_start=particle_start,
-        circumference_cells=CIRCUMFERENCE_CELLS,
-        width_cells=WIDTH_CELLS,
-        spring_ke=LOOP_SPRING_KE,
-        spring_kd=LOOP_SPRING_KD,
-    )
-
-    # Preserve the builder's area-weighted mass distribution, normalizing
-    # only this belt's particles to exactly the requested total.
-    masses = np.asarray(
-        builder.particle_mass[particle_start:particle_end],
-        dtype=np.float64,
-    )
-    if not np.isfinite(masses).all() or np.any(masses <= 0.0):
-        raise RuntimeError("Belt particles must have positive finite mass")
-
-    masses *= TOTAL_BELT_MASS / float(masses.sum())
-    for particle, mass in zip(
-        range(particle_start, particle_end), masses
-    ):
-        builder.particle_mass[particle] = float(mass)
-
-    expected_particles = CIRCUMFERENCE_CELLS * (WIDTH_CELLS + 1)
-    expected_hinges = CIRCUMFERENCE_CELLS * (WIDTH_CELLS - 1)
-    expected_springs = CIRCUMFERENCE_CELLS * (2 * WIDTH_CELLS - 1)
-    expected_loop_springs = CIRCUMFERENCE_CELLS * (WIDTH_CELLS + 1)
-
-    if particle_end - particle_start != expected_particles:
-        raise RuntimeError("Unexpected timing-belt particle count")
-    if stiff_hinges != expected_hinges:
-        raise RuntimeError(
-            f"Expected {expected_hinges} stiff hinges, got {stiff_hinges}"
-        )
-    if rib_springs != expected_springs:
-        raise RuntimeError(
-            f"Expected {expected_springs} rib springs, got {rib_springs}"
-        )
-
-    if loop_springs != expected_loop_springs:
-        raise RuntimeError(
-            f"Expected {expected_loop_springs} loop springs, got {loop_springs}"
-        )
-
-    scene.belt_particles = list(range(particle_start, particle_end))
-    scene.belt_particle_indices = np.asarray(
-        scene.belt_particles, dtype=np.int32
-    )
-
-    # Keep the cloth triangle topology for a dedicated gray visual mesh.
-    # add_cloth_mesh() has no per-cloth appearance color, so render the same
-    # deforming particles explicitly in render().
-    scene.belt_triangle_indices = (
-        np.asarray(indices, dtype=np.int32) + int(particle_start)
-    )
-
-    # Cloth has particles and triangles, not rod rigid bodies/shapes.
-    scene.belt_bodies = []
-    scene.belt_joints = []
-    scene.belt_shapes = []
-
-    print(
-        f"[TIMING BELT] width={BELT_STRIP_WIDTH * 1000:.1f} mm, "
-        f"mass={masses.sum() * 1000:.6f} g, "
-        f"particles={len(scene.belt_particles)}, "
-        f"triangles={len(indices) // 3}, "
-        f"stiff hinges={stiff_hinges}, rib springs={rib_springs}, "
-        f"loop springs={loop_springs}"
-    )
-
-
-def remember_timing_contact_view(scene, model, pad_indices=None):
-    """Keep references to contact arrays, including separate solver views."""
-    flags_array = getattr(model, "shape_flags", None)
-    if flags_array is None:
-        return
-
-    for saved_model, _, _ in scene._timing_contact_views:
-        if saved_model.shape_flags is flags_array:
-            return
-
-    if pad_indices is None:
-        labels = getattr(model, "shape_label", ())
-        pad_indices = [
-            i for i, label in enumerate(labels)
-            if "simple_belt_contact_" in str(label)
-        ]
-
-    indices = np.asarray(pad_indices, dtype=np.int32)
-    if indices.size == 0:
-        return
-
-    flags = flags_array.numpy()
-    if np.any(indices >= len(flags)):
-        raise RuntimeError("Timing-belt pad indices do not match the view")
-
-    scene._timing_contact_views.append(
-        (model, indices, flags[indices].copy())
-    )
-
-
-def make_timing_vbd_solver(scene, **kwargs):
-    remember_timing_contact_view(scene, kwargs["model"])
-
-    # Newton cloth-contact stability settings, scaled to this belt's 1 mm
-    # particle radius.  Keep the existing VBD/ADMM architecture unchanged.
-    kwargs.update(
-        particle_enable_self_contact=True,
-        particle_self_contact_radius=PARTICLE_RADIUS,
-        particle_self_contact_margin=0.25 * PARTICLE_RADIUS,
-        particle_self_contact_gap=0.0,
-        particle_topological_contact_filter_threshold=1,
-        particle_rest_shape_contact_exclusion_radius=0.625 * PARTICLE_RADIUS,
-        particle_vertex_contact_buffer_size=16,
-        particle_edge_contact_buffer_size=20,
-        rigid_body_particle_contact_buffer_size=8192,
-    )
-    return SolverVBD(**kwargs)
-
-
-def update_timing_pad_contacts(scene, enabled):
-    """Apply the existing OPEN/CLOSE decision to particle contacts too."""
-    particle_flag = int(newton.ShapeFlags.COLLIDE_PARTICLES)
-
-    material_values = (
-        (
-            "shape_material_ke",
-            GRIPPER_CONTACT_KE if enabled else GRIPPER_RELEASE_KE,
-        ),
-        (
-            "shape_material_kd",
-            GRIPPER_CONTACT_KD if enabled else GRIPPER_RELEASE_KD,
-        ),
-        (
-            "shape_material_mu",
-            GRIPPER_CONTACT_MU if enabled else GRIPPER_RELEASE_MU,
-        ),
-    )
-
-    for model, indices, original_flags in scene._timing_contact_views:
-        flags = model.shape_flags.numpy().copy()
-        for index, original in zip(indices, original_flags):
-            value = int(original)
-            if not enabled:
-                value &= ~particle_flag
-            flags[index] = value
-        model.shape_flags.assign(flags)
-
-        for attribute, value in material_values:
-            array = getattr(model, attribute, None)
-            if array is not None:
-                values = array.numpy().copy()
-                values[indices] = value
-                array.assign(values)
-
-    # This persistent array is also read by the captured FAST graph.
-    wp.copy(scene._timing_active_shape_flags, scene.model.shape_flags)
-
-
-def initialize_timing_contacts(scene):
-    # Preserve the timing-belt file's global soft-contact parameters.
-    # Cloth uses soft (particle<->shape) contacts.  Use the same contact
-    # strength scale as the successful Robotiq grasp instead of the previous
-    # extremely soft 1e2 setting, otherwise the fingers can pass through the cloth.
-    # Stable cloth contact split:
-    #   global particle contact = moderate compliance
-    #   gripper pad material    = stronger contact
-    # This follows the stability pattern used by Newton's cloth-gripper example.
-    scene.model.soft_contact_ke = 1.0e4
-    scene.model.soft_contact_kd = 1.0e1
-    scene.model.soft_contact_mu = 1.0
-
-    mass = float(
-        scene.model.particle_mass.numpy()[
-            scene.belt_particle_indices
-        ].astype(np.float64).sum()
-    )
-    if not np.isclose(mass, TOTAL_BELT_MASS, rtol=0.0, atol=1.0e-8):
-        raise RuntimeError(
-            f"Finalized belt mass is {mass} kg, expected {TOTAL_BELT_MASS}"
-        )
-
-    scene._timing_contact_views = []
-    remember_timing_contact_view(
-        scene, scene.model, scene.gripper_pad_shapes
-    )
-
-    scene._timing_active_shape_flags = wp.clone(scene.model.shape_flags)
-    scene._timing_fast_shape_flags = wp.clone(scene.model.shape_flags)
-
-    # FAST generates pad/cloth contacts inside the proxy pipeline.
-    # Exclude those contacts from the main FAST collision pass to avoid
-    # processing the same interaction through two contact paths.
-    flags = scene.model.shape_flags.numpy().copy()
-    particle_flag = int(newton.ShapeFlags.COLLIDE_PARTICLES)
-    for shape in scene.gripper_pad_shapes:
-        flags[shape] = int(flags[shape]) & ~particle_flag
-    scene._timing_fast_shape_flags.assign(flags)
-
-
-def disable_timing_mouse_picking(viewer):
-    # Preserve the standalone timing-belt file's picking behavior.
-    picking = getattr(viewer, "picking", None)
-    if picking is None:
-        return
-    if hasattr(picking, "pick_stiffness"):
-        picking.pick_stiffness = 0.0
-    if hasattr(picking, "pick_damping"):
-        picking.pick_damping = 0.0
-    state = getattr(picking, "pick_state", None)
-    if state is not None:
-        values = state.numpy()
-        values[0]["pick_stiffness"] = 0.0
-        values[0]["pick_damping"] = 0.0
-        values[0]["pick_max_acceleration"] = 0.0
-        state.assign(values)
-
 SCRIPT_DIR = Path(__file__).resolve().parent
 TASK_BOARD_URDF_DIR = SCRIPT_DIR / "task_board_urdf"
 
@@ -647,16 +67,63 @@ BOARD_ROOT_Y = -0.192
 BOARD_ROOT_Z = TABLE_TOP_Z + BOARD_THICKNESS
 BOARD_YAW = math.pi  # rotate the complete task board 180 degrees about its center
 
-# Belt dimension
-BELT_OUTER_MAJOR_DIAMETER = 0.248
-BELT_OUTER_MINOR_DIAMETER = 0.168
-BELT_TUBE_DIAMETER = 0.0066
-BELT_RADIUS = BELT_TUBE_DIAMETER * 0.5
+# Timing-belt settings (from the second file).
+BELT_MAJOR_DIAMETER = 0.248
+BELT_MINOR_DIAMETER = 0.168
+BELT_STRIP_WIDTH = 0.050
+
+# Mesh resolution.
+CIRCUMFERENCE_CELLS = 64
+WIDTH_CELLS = 4
+
+PARTICLE_RADIUS = 0.0010
+# Newton cloth_franka-style particle<->rigid contact envelope.
+# The official example uses body-contact margin equal to its particle radius;
+# use a slightly larger envelope here because the timing-belt surface is coarse
+# (only 5 particles across the 50 mm width).
+CLOTH_BODY_CONTACT_MARGIN = 1.0 * PARTICLE_RADIUS
+GROUND_EPSILON = 0.0001
+TARGET_BELT_MASS = 0.033  # kg (33 g)
+
+# Ordinary membrane stiffness.
+TRI_KE = 8.0e3
+TRI_KA = 8.0e3
+TRI_KD = 5.0
+
+# Ordinary cloth bending stiffness.
+BASE_EDGE_KE = 5.0e1
+BASE_EDGE_KD = 2.0
+
+# High cross-sectional rib bending stiffness.
+RIB_BENDING_KE = 8.0e3
+RIB_BENDING_KD = 8.0
+
+# Additional distance springs inside every cross-sectional rib.
+# The original standalone timing-belt test used 2e4 here with 20 substeps.
+# At 10 substeps that duplicates the already-stiff rib bending too aggressively.
+# Keep the springs as width/line reinforcement, but let the 2e4 bending hinges
+# provide the main anti-folding behavior.
+RIB_SPRING_KE = 2.0e3
+RIB_SPRING_KD = 8.0
+
+# Circumferential reinforcement.
+LOOP_SPRING_KE = 6.0e3
+LOOP_SPRING_KD = 1.0e1
+
+# Second-neighbour chord springs preserve the ring curvature at 10 substeps.
+# They use Newton spring rest lengths from the initial ellipse, so they do not
+# pull the belt smaller; they only resist local circumferential folding.
+SHAPE_SPRING_KE = 1.5e3
+SHAPE_SPRING_KD = 8.0
+
+# Keep the original scene names so every non-belt subsystem stays untouched.
+BELT_OUTER_MAJOR_DIAMETER = BELT_MAJOR_DIAMETER
+BELT_OUTER_MINOR_DIAMETER = BELT_MINOR_DIAMETER
+BELT_RADIUS = PARTICLE_RADIUS
 BELT_CENTER_X = -0.320
 BELT_CENTER_Y = 0.000
-BELT_CENTER_Z = TABLE_TOP_Z + PARTICLE_RADIUS + GROUND_EPSILON + 0.5 * BELT_STRIP_WIDTH
-BELT_NUM_ELEMENTS = 48  # maximum 87
-TOTAL_BELT_MASS = 0.033
+BELT_BOTTOM_Z = TABLE_TOP_Z + PARTICLE_RADIUS + CLOTH_BODY_CONTACT_MARGIN + GROUND_EPSILON
+BELT_CENTER_Z = BELT_BOTTOM_Z + 0.5 * BELT_STRIP_WIDTH
 
 # UR10 + Robotiq 2F-85 gripper placement.
 UR10_ARM_DOFS = 6
@@ -710,9 +177,9 @@ PULLEY_CONTACT_KE = 3.0e5
 PULLEY_CONTACT_KD = 1.0e-5 * PULLEY_CONTACT_KE
 
 # Gripper-pad contact used by the mjc -> vbd proxy coupling.
-GRIPPER_CONTACT_KE = 5.0e4
-GRIPPER_CONTACT_KD = 5.0e1
-GRIPPER_CONTACT_MU = 1.5
+GRIPPER_CONTACT_KE = 2.0e4
+GRIPPER_CONTACT_KD = 20.0
+GRIPPER_CONTACT_MU = 4.0
 
 # Belt<->gripper collision simplification.
 GRIPPER_SIMPLE_PAD_HALF_X = 0.0110 # 22 mm wide
@@ -727,17 +194,7 @@ GRIPPER_SIMPLE_PAD_GAP = 0.0005
 GRIPPER_RELEASE_KE = 0.0
 GRIPPER_RELEASE_KD = 0.0
 GRIPPER_RELEASE_MU = 0.0
-GRIPPER_RELEASE_FRACTION = 0.10
-
-# Smoothly turn particle contact on as the fingers close instead of jumping
-# from ghosted pads to full stiffness/friction in one frame.
-GRIPPER_CONTACT_RAMP_START = 0.10
-GRIPPER_CONTACT_RAMP_FULL = 0.55
-
-# Smooth SpaceMouse gripper command.  The previous code could jump directly
-# from open to the requested close fraction in one rendered frame.
-GRIPPER_MAX_CLOSE_FRACTION_PER_SEC = 1.25
-GRIPPER_MAX_OPEN_FRACTION_PER_SEC = 2.0
+GRIPPER_RELEASE_FRACTION = 0.25
 
 # Pulley parameters.
 PULLEY_DENSITY = 1000.0
@@ -1299,26 +756,183 @@ def add_pulleys_from_xacro_poses(builder: newton.ModelBuilder) -> dict[str, Any]
     }
 
 
-def create_ellipse_cable_geometry(pos: wp.vec3, num_elements=48, twisting_angle=0.0):
-    num_points = num_elements + 1
-    points = []
-    a = 0.248 / 2.0
-    b = 0.168 / 2.0
-    for i in range(num_points):
-        theta = 2.0 * np.pi * i / num_elements
-        points.append(pos + wp.vec3(a * np.cos(theta), b * np.sin(theta), 0.0))
-    edge_q = newton.utils.create_parallel_transport_cable_quaternions(points, twist_total=float(twisting_angle))
-    return points, edge_q
+def build_elliptical_ring_mesh(
+    major_diameter: float,
+    minor_diameter: float,
+    strip_width: float,
+    circumference_cells: int,
+    width_cells: int,
+    bottom_z: float,
+) -> tuple[list[wp.vec3], list[int]]:
+    """Create the seamless vertical timing-belt strip from the second file."""
+    if major_diameter <= 0.0 or minor_diameter <= 0.0:
+        raise ValueError("The two belt diameters must be positive.")
+    if strip_width <= 0.0:
+        raise ValueError("The belt strip width must be positive.")
+    if circumference_cells < 8:
+        raise ValueError("circumference_cells must be at least 8.")
+    if width_cells < 2:
+        raise ValueError("width_cells must be at least 2 for rib bending.")
+
+    a = 0.5 * major_diameter
+    b = 0.5 * minor_diameter
+    row_size = width_cells + 1
+    vertices: list[wp.vec3] = []
+    indices: list[int] = []
+
+    for i in range(circumference_cells):
+        theta = 2.0 * math.pi * i / circumference_cells
+        x = a * math.cos(theta)
+        y = b * math.sin(theta)
+        for j in range(row_size):
+            z = bottom_z + strip_width * j / width_cells
+            vertices.append(wp.vec3(x, y, z))
+
+    def vertex_id(i: int, j: int) -> int:
+        return (i % circumference_cells) * row_size + j
+
+    for i in range(circumference_cells):
+        i_next = (i + 1) % circumference_cells
+        for j in range(width_cells):
+            v00 = vertex_id(i, j)
+            v10 = vertex_id(i_next, j)
+            v11 = vertex_id(i_next, j + 1)
+            v01 = vertex_id(i, j + 1)
+            if (i + j) % 2 == 0:
+                indices.extend((v00, v10, v01))
+                indices.extend((v10, v11, v01))
+            else:
+                indices.extend((v00, v10, v11))
+                indices.extend((v00, v11, v01))
+    return vertices, indices
 
 
-def _estimate_belt_density() -> float:
-    a = 0.5 * BELT_OUTER_MAJOR_DIAMETER
-    b = 0.5 * BELT_OUTER_MINOR_DIAMETER
-    h = ((a - b) ** 2) / ((a + b) ** 2)
-    length = math.pi * (a + b) * (1.0 + (3.0 * h) / (10.0 + math.sqrt(4.0 - 3.0 * h)))
-    volume = math.pi * BELT_RADIUS * BELT_RADIUS * length
-    return float(TOTAL_BELT_MASS / max(volume, 1.0e-12))
+def compute_cloth_area(vertices: list[wp.vec3], indices: list[int]) -> float:
+    total = 0.0
+    for t in range(0, len(indices), 3):
+        p0 = vertices[indices[t + 0]]
+        p1 = vertices[indices[t + 1]]
+        p2 = vertices[indices[t + 2]]
+        ax, ay, az = p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]
+        bx, by, bz = p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]
+        cx = ay * bz - az * by
+        cy = az * bx - ax * bz
+        cz = ax * by - ay * bx
+        total += 0.5 * math.sqrt(cx * cx + cy * cy + cz * cz)
+    return total
 
+
+def belt_particle_id(
+    particle_start: int,
+    circumference_index: int,
+    width_index: int,
+    circumference_cells: int,
+    width_cells: int,
+) -> int:
+    row_size = width_cells + 1
+    local_id = (circumference_index % circumference_cells) * row_size + width_index
+    return particle_start + local_id
+
+
+def make_cross_section_bending_stiff(
+    builder: newton.ModelBuilder,
+    *,
+    particle_start: int,
+    edge_start: int,
+    edge_end: int,
+    circumference_cells: int,
+    width_cells: int,
+    rib_edge_ke: float,
+    rib_edge_kd: float,
+) -> int:
+    row_size = width_cells + 1
+    belt_particle_end = particle_start + circumference_cells * row_size
+    stiffened_count = 0
+
+    def decode(global_particle: int) -> tuple[int, int]:
+        return divmod(global_particle - particle_start, row_size)
+
+    for edge_id in range(edge_start, edge_end):
+        opposite_0, opposite_1, hinge_0, hinge_1 = builder.edge_indices[edge_id]
+        if opposite_0 == -1 or opposite_1 == -1:
+            continue
+        if not (particle_start <= hinge_0 < belt_particle_end and particle_start <= hinge_1 < belt_particle_end):
+            continue
+        circ_0, width_0 = decode(hinge_0)
+        circ_1, width_1 = decode(hinge_1)
+        circumferential_delta = (circ_1 - circ_0) % circumference_cells
+        are_circumferential_neighbours = circumferential_delta in (1, circumference_cells - 1)
+        if width_0 == width_1 and are_circumferential_neighbours:
+            builder.edge_bending_properties[edge_id] = (float(rib_edge_ke), float(rib_edge_kd))
+            stiffened_count += 1
+    return stiffened_count
+
+
+def add_cross_section_rib_springs(
+    builder: newton.ModelBuilder,
+    *,
+    particle_start: int,
+    circumference_cells: int,
+    width_cells: int,
+    spring_ke: float,
+    spring_kd: float,
+) -> int:
+    spring_count_before = builder.spring_count
+    for i in range(circumference_cells):
+        bottom = belt_particle_id(particle_start, i, 0, circumference_cells, width_cells)
+        top = belt_particle_id(particle_start, i, width_cells, circumference_cells, width_cells)
+        builder.add_spring(bottom, top, spring_ke, spring_kd, 0.0)
+        for j in range(1, width_cells):
+            particle = belt_particle_id(particle_start, i, j, circumference_cells, width_cells)
+            builder.add_spring(bottom, particle, spring_ke, spring_kd, 0.0)
+            builder.add_spring(particle, top, spring_ke, spring_kd, 0.0)
+    return builder.spring_count - spring_count_before
+
+
+def add_circumferential_springs(
+    builder: newton.ModelBuilder,
+    *,
+    particle_start: int,
+    circumference_cells: int,
+    width_cells: int,
+    spring_ke: float,
+    spring_kd: float,
+) -> int:
+    spring_count_before = builder.spring_count
+    for j in range(width_cells + 1):
+        for i in range(circumference_cells):
+            p0 = belt_particle_id(particle_start, i, j, circumference_cells, width_cells)
+            p1 = belt_particle_id(particle_start, (i + 1) % circumference_cells, j,
+                                  circumference_cells, width_cells)
+            builder.add_spring(p0, p1, spring_ke, spring_kd, 0.0)
+    return builder.spring_count - spring_count_before
+
+
+def add_circumferential_shape_springs(
+    builder: newton.ModelBuilder,
+    *,
+    particle_start: int,
+    circumference_cells: int,
+    width_cells: int,
+    spring_ke: float,
+    spring_kd: float,
+) -> int:
+    """Add second-neighbour rest-length chords around each horizontal row.
+
+    Local loop springs preserve segment length but allow the closed ring to fold
+    inward like a chain. These i->i+2 chords preserve local ellipse curvature
+    without pinning the belt in world space.
+    """
+    spring_count_before = builder.spring_count
+    for j in range(width_cells + 1):
+        for i in range(circumference_cells):
+            p0 = belt_particle_id(particle_start, i, j, circumference_cells, width_cells)
+            p2 = belt_particle_id(
+                particle_start, (i + 2) % circumference_cells, j,
+                circumference_cells, width_cells
+            )
+            builder.add_spring(p0, p2, spring_ke, spring_kd, 0.0)
+    return builder.spring_count - spring_count_before
 
 def as_numpy(x):
     return x.numpy() if hasattr(x, "numpy") else np.asarray(x)
@@ -1668,7 +1282,10 @@ class Example:
         self.fps = 60
         self.frame_dt = 1.0 / self.fps
         self.sim_time = 0.0
-        self.sim_substeps = 20
+        # 10-substep mode.  Contact conditioning follows Newton cloth_franka,
+        # while redundant rib distance-spring stiffness is reduced below so the
+        # belt remains stable without changing the strong rib bending behavior.
+        self.sim_substeps = 10
         self.sim_dt = self.frame_dt / self.sim_substeps
         self.frame_id = 0
         
@@ -1769,29 +1386,112 @@ class Example:
         self.pulley_guard_shapes = list(pulley_info["guard_shapes"])
         self.pulley_shapes = list(pulley_info["shapes"])
 
-        add_timing_belt_to_scene(self, builder)
+        # ------------------------------------------------------------------
+        # TIMING BELT ONLY: replace the original rigid rod loop with the
+        # particle/triangle belt from the second file. Everything else in the
+        # scene (UR10, gripper, pulleys, teleop and hybrid coupling) stays the same.
+        # ------------------------------------------------------------------
+        vertices, indices = build_elliptical_ring_mesh(
+            major_diameter=BELT_MAJOR_DIAMETER,
+            minor_diameter=BELT_MINOR_DIAMETER,
+            strip_width=BELT_STRIP_WIDTH,
+            circumference_cells=CIRCUMFERENCE_CELLS,
+            width_cells=WIDTH_CELLS,
+            bottom_z=BELT_BOTTOM_Z,
+        )
+        belt_area = compute_cloth_area(vertices, indices)
+        cloth_density = TARGET_BELT_MASS / belt_area
+
+        belt_particle_start = builder.particle_count
+        belt_edge_start = builder.edge_count
+        builder.add_cloth_mesh(
+            pos=wp.vec3(BELT_CENTER_X, BELT_CENTER_Y, 0.0),
+            rot=wp.quat_identity(),
+            scale=1.0,
+            vel=wp.vec3(0.0, 0.0, 0.0),
+            vertices=vertices,
+            indices=indices,
+            density=cloth_density,
+            tri_ke=TRI_KE,
+            tri_ka=TRI_KA,
+            tri_kd=TRI_KD,
+            edge_ke=BASE_EDGE_KE,
+            edge_kd=BASE_EDGE_KD,
+            add_springs=False,
+            particle_radius=PARTICLE_RADIUS,
+        )
+        belt_particle_end = builder.particle_count
+        belt_edge_end = builder.edge_count
+
+        stiff_hinge_count = make_cross_section_bending_stiff(
+            builder,
+            particle_start=belt_particle_start,
+            edge_start=belt_edge_start,
+            edge_end=belt_edge_end,
+            circumference_cells=CIRCUMFERENCE_CELLS,
+            width_cells=WIDTH_CELLS,
+            rib_edge_ke=RIB_BENDING_KE,
+            rib_edge_kd=RIB_BENDING_KD,
+        )
+        rib_spring_count = add_cross_section_rib_springs(
+            builder,
+            particle_start=belt_particle_start,
+            circumference_cells=CIRCUMFERENCE_CELLS,
+            width_cells=WIDTH_CELLS,
+            spring_ke=RIB_SPRING_KE,
+            spring_kd=RIB_SPRING_KD,
+        )
+        loop_spring_count = add_circumferential_springs(
+            builder,
+            particle_start=belt_particle_start,
+            circumference_cells=CIRCUMFERENCE_CELLS,
+            width_cells=WIDTH_CELLS,
+            spring_ke=LOOP_SPRING_KE,
+            spring_kd=LOOP_SPRING_KD,
+        )
+        shape_spring_count = add_circumferential_shape_springs(
+            builder,
+            particle_start=belt_particle_start,
+            circumference_cells=CIRCUMFERENCE_CELLS,
+            width_cells=WIDTH_CELLS,
+            spring_ke=SHAPE_SPRING_KE,
+            spring_kd=SHAPE_SPRING_KD,
+        )
+
+        self.belt_particles = list(range(belt_particle_start, belt_particle_end))
+        # Compatibility aliases for non-belt code paths. The timing belt has no
+        # rigid bodies/joints/shapes of its own; it is a VBD particle mesh.
+        self.belt_bodies = []
+        self.belt_joints = []
+        self.belt_shapes = []
+
+        print(
+            f"[TIMING BELT] {len(vertices)} particles, area={belt_area * 1e4:.1f} cm^2, "
+            f"density={cloth_density:.4f} kg/m^2, mass={TARGET_BELT_MASS * 1e3:.1f} g"
+        )
+        print(
+            f"[TIMING BELT] {stiff_hinge_count} stiff rib hinges, "
+            f"{rib_spring_count} rib springs, {loop_spring_count} loop springs, "
+            f"{shape_spring_count} curvature springs"
+        )
 
         builder.add_ground_plane()
 
         self.vbd_shapes = [s for s in range(builder.shape_count) if s >= robot_shape_end]
-        self.vbd_bodies = sorted(self.pulley_bodies + self.belt_bodies)
-        self.vbd_joints = sorted(self.pulley_joints + self.belt_joints)
+        self.vbd_bodies = sorted(self.pulley_bodies)
+        self.vbd_joints = sorted(self.pulley_joints)
 
         builder.color(include_bending=True)
         self.model = builder.finalize()
         self.device = self.model.device
-        initialize_timing_contacts(self)
 
-        # Newton's cloth model does not carry a per-cloth appearance color.
-        # Hide the default deformable triangle rendering when supported and draw
-        # this belt explicitly as a medium-gray deforming mesh in render().
-        self._belt_render_indices = wp.array(
-            np.asarray(self.belt_triangle_indices, dtype=np.int32),
-            dtype=wp.int32,
-            device=self.device,
-        )
-        if hasattr(self.viewer, "show_triangles"):
-            self.viewer.show_triangles = False
+        # Particle <-> rigid contact: follow Newton's successful cloth_franka contact
+        # pattern (soft-contact material + an explicit body-contact envelope).
+        # Keep our scene's friction policy; only the contact conditioning follows
+        # the Newton cloth example.
+        self.model.soft_contact_ke = 2.0e4
+        self.model.soft_contact_kd = 5.0e1
+        self.model.soft_contact_mu = CABLE_CONTACT_MU
 
         # Global reset of material arrays...
         self.model.shape_material_ke.fill_(CABLE_CONTACT_KE)
@@ -1882,11 +1582,20 @@ class Example:
                     bodies=self.robot_bodies, joints=self.robot_joints, shapes=self.robot_shapes),
                 SolverCoupled.Entry(
                     name="vbd",
-                    solver=lambda v: make_timing_vbd_solver(self,
+                    solver=lambda v: SolverVBD(
                         model=v, iterations=VBD_ITERATIONS, rigid_avbd_beta=VBD_RIGID_AVBD_BETA,
                         rigid_contact_k_start=VBD_RIGID_CONTACT_K_START, rigid_contact_history=False,
-                        rigid_body_contact_buffer_size=VBD_RIGID_CONTACT_BUFFER_SIZE),
-                    bodies=self.vbd_bodies, particles=self.belt_particles, joints=self.vbd_joints, shapes=self.vbd_shapes),
+                        rigid_body_contact_buffer_size=VBD_RIGID_CONTACT_BUFFER_SIZE,
+                        rigid_body_particle_contact_buffer_size=8192,
+                        particle_enable_self_contact=True,
+                        particle_self_contact_margin=0.5 * PARTICLE_RADIUS,
+                        particle_self_contact_gap=0.0,
+                        particle_topological_contact_filter_threshold=1,
+                        particle_rest_shape_contact_exclusion_radius=0.625 * PARTICLE_RADIUS,
+                        particle_vertex_contact_buffer_size=48,
+                        particle_edge_contact_buffer_size=64),
+                    bodies=self.vbd_bodies, particles=self.belt_particles,
+                    joints=self.vbd_joints, shapes=self.vbd_shapes),
             ],
             coupling=SolverCoupledProxy.Config(
                 proxies=[SolverCoupledProxy.Proxy(
@@ -1910,14 +1619,23 @@ class Example:
                     bodies=self.robot_bodies, joints=self.robot_joints, shapes=self.robot_shapes),
                 SolverCoupled.Entry(
                     name="vbd",
-                    solver=lambda v: make_timing_vbd_solver(self,
+                    solver=lambda v: SolverVBD(
                         model=v, iterations=VBD_ITERATIONS,
                         rigid_compliant_alm=True,
                         rigid_avbd_beta=VBD_RIGID_AVBD_BETA,
                         rigid_contact_k_start=VBD_RIGID_CONTACT_K_START,
                         rigid_contact_history=False,
-                        rigid_body_contact_buffer_size=VBD_RIGID_CONTACT_BUFFER_SIZE),
-                    bodies=self.vbd_bodies, particles=self.belt_particles, joints=self.vbd_joints, shapes=self.vbd_shapes),
+                        rigid_body_contact_buffer_size=VBD_RIGID_CONTACT_BUFFER_SIZE,
+                        rigid_body_particle_contact_buffer_size=8192,
+                        particle_enable_self_contact=True,
+                        particle_self_contact_margin=0.5 * PARTICLE_RADIUS,
+                        particle_self_contact_gap=0.0,
+                        particle_topological_contact_filter_threshold=1,
+                        particle_rest_shape_contact_exclusion_radius=0.625 * PARTICLE_RADIUS,
+                        particle_vertex_contact_buffer_size=48,
+                        particle_edge_contact_buffer_size=64),
+                    bodies=self.vbd_bodies, particles=self.belt_particles,
+                    joints=self.vbd_joints, shapes=self.vbd_shapes),
             ],
             coupling=SolverCoupledADMM.Config(
                 iterations=ADMM_ITERATIONS,
@@ -1939,22 +1657,18 @@ class Example:
 
         # Fast/free-motion contact set is exactly the original belt<->world set.
         self.fast_collision_pipeline = newton.CollisionPipeline(
-            self.model,
-            broad_phase="explicit",
-            shape_pairs_filtered=self._belt_world_shape_pairs(include_gripper=False),
-            soft_contact_gap=1.0 * PARTICLE_RADIUS,
-        )
+            self.model, broad_phase="explicit",
+            soft_contact_gap=CLOTH_BODY_CONTACT_MARGIN,
+            shape_pairs_filtered=self._belt_world_shape_pairs(include_gripper=False))
         self.fast_contacts = self.fast_collision_pipeline.contacts()
         if hasattr(self.fast_solver, "prepare_contacts"):
             self.fast_solver.prepare_contacts(self.fast_contacts)
 
         # ADMM additionally needs pad<->belt contacts in the shared contact buffer.
         self.admm_collision_pipeline = newton.CollisionPipeline(
-            self.model,
-            broad_phase="explicit",
-            shape_pairs_filtered=self._belt_world_shape_pairs(include_gripper=True),
-            soft_contact_gap=1.0 * PARTICLE_RADIUS,
-        )
+            self.model, broad_phase="explicit",
+            soft_contact_gap=CLOTH_BODY_CONTACT_MARGIN,
+            shape_pairs_filtered=self._belt_world_shape_pairs(include_gripper=True))
         self.admm_contacts = self.admm_collision_pipeline.contacts()
         if hasattr(self.admm_solver, "prepare_contacts"):
             self.admm_solver.prepare_contacts(self.admm_contacts)
@@ -1973,7 +1687,6 @@ class Example:
         self.viewer.set_model(self.model)
         newton.examples.configure_coupled_view(self, self.args)
         self.viewer.show_contacts = False
-        disable_timing_mouse_picking(self.viewer)
 
         # Keep the original proxy-contact layer available for the fast/free-motion path.
         self.proxy_contacts = (self.fast_solver.get_proxy_contacts("mjc", "vbd")
@@ -2077,7 +1790,7 @@ class Example:
         self._sph_colors = wp.array([_v3(sc)] * len(self._sph_s), dtype=wp.vec3, device=self.device)
         self._last_dbg = 0.0
 
-        if hasattr(self.viewer, "set_picking_linear_only_bodies"):
+        if hasattr(self.viewer, "set_picking_linear_only_bodies") and self.belt_bodies:
             self.viewer.set_picking_linear_only_bodies(self.belt_bodies)
         if hasattr(self.viewer, "set_camera"):
             self.viewer.set_camera(wp.vec3(0.30, -1.30, 1.30), -22.0, -38.0)
@@ -2124,11 +1837,9 @@ class Example:
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
             newton.examples.apply_coupled_viewer_forces(self, self.state_0)
-            wp.copy(self.model.shape_flags, self._timing_fast_shape_flags)
             self.model.collide(
                 self.state_0, self.fast_contacts, collision_pipeline=self.fast_collision_pipeline
             )
-            wp.copy(self.model.shape_flags, self._timing_active_shape_flags)
             self.fast_solver.step(
                 self.state_0, self.state_1, self.control, self.fast_contacts, self.sim_dt
             )
@@ -2178,11 +1889,7 @@ class Example:
 
             wp.synchronize_device(self.device)
             t0 = time.perf_counter()
-            if not use_admm:
-                wp.copy(self.model.shape_flags, self._timing_fast_shape_flags)
             self.model.collide(self.state_0, contacts, collision_pipeline=pipeline)
-            if not use_admm:
-                wp.copy(self.model.shape_flags, self._timing_active_shape_flags)
             wp.synchronize_device(self.device)
             collide_s += time.perf_counter() - t0
 
@@ -2256,42 +1963,74 @@ class Example:
         return forming_grasp or settling_grasp
 
     def _use_admm_physics(self) -> bool:
-        """Use ADMM whenever the Robotiq is engaging/holding the cloth belt.
+        """ADMM is active only around the first loaded pad<->belt contact.
 
-        The round-cable success case can hand transport back to the FAST proxy
-        because the belt consists of rigid cable shapes.  This timing belt is a
-        particle cloth mesh, so pad contact must remain on the shared ADMM
-        particle/rigid contact path while the gripper is closed.
+        The transition is intentionally hysteretic:
+          * normal closing/free motion       -> FAST proxy CUDA graph
+          * fingers slow + load begins       -> ADMM CUDA graph (pre-contact)
+          * strict stall is confirmed        -> keep ADMM for a few settle frames
+          * established grasp / transport    -> FAST proxy CUDA graph again
         """
-        return self._grip_fraction > GRIPPER_CONTACT_RAMP_START or self._grip_hold_fraction is not None
+        return self._contact_admm_active
 
     def _launch_physics(self) -> None:
-        """FAST while open; ADMM for cloth grasp, hold, lift, and transport."""
-        use_admm = self._use_admm_physics()
+        # Fully opening re-arms the one-shot contact handoff for the next grasp.
+        if self._grip_requested_fraction < GRASP_CONTACT_SAFE_FRACTION:
+            self._contact_admm_armed = True
+            self._contact_admm_active = False
+            self._contact_admm_age = 0
+            self._contact_admm_frames_remaining = 0
 
-        # Print only on an actual mode transition.
-        previous = getattr(self, "_cloth_contact_mode_admm", None)
-        if previous is None or bool(previous) != bool(use_admm):
-            if use_admm:
-                print("[COUPLING] gripper engaging cloth -> ADMM particle/contact mode")
-            else:
-                print("[COUPLING] gripper open -> FAST free-motion mode")
-            self._cloth_contact_mode_admm = bool(use_admm)
-
-        if use_admm:
+        # Start ADMM slightly before the strict stall detector.
+        if (
+            self._contact_admm_armed
+            and not self._contact_admm_active
+            and self._grip_near_contact
+        ):
             self._contact_admm_active = True
+            self._contact_admm_age = 0
+            self._contact_admm_frames_remaining = 0
+            print("[COUPLING] near contact -> ADMM pre-contact handoff")
+
+        if self._contact_admm_active:
             if self.admm_physics_graph is not None:
                 with wp.ScopedDevice(self.device):
                     wp.capture_launch(self.admm_physics_graph)
             else:
                 self._simulate_admm_physics()
+
+            self._contact_admm_age += 1
+
+            # As soon as the existing strict stall detector sees load, hold ADMM
+            # for a small fixed number of additional frames.
+            if self._grip_stall_frames > 0:
+                self._contact_admm_frames_remaining = CONTACT_ADMM_POST_STALL_FRAMES
+                self._contact_admm_armed = False
+            elif self._contact_admm_frames_remaining > 0:
+                self._contact_admm_frames_remaining -= 1
+
+            # Leave ADMM only after the strict stall has disappeared AND its short
+            # post-contact settle countdown has expired.
+            contact_settled = (
+                self._grip_stall_frames == 0
+                and self._contact_admm_frames_remaining <= 0
+                and self._contact_admm_age >= 2
+            )
+            timed_out = self._contact_admm_age >= CONTACT_ADMM_MAX_CONTACT_FRAMES
+            if contact_settled or timed_out:
+                self._contact_admm_active = False
+                self._contact_admm_frames_remaining = 0
+                self._contact_admm_armed = False
+                print("[COUPLING] first contact settled -> FAST CUDA transport")
+            return
+
+        # Established grasp/transport uses the original fast proxy graph, matching
+        # the ~0.4 RTF behavior that was working well.
+        if self.fast_physics_graph is not None:
+            with wp.ScopedDevice(self.device):
+                wp.capture_launch(self.fast_physics_graph)
         else:
-            self._contact_admm_active = False
-            if self.fast_physics_graph is not None:
-                with wp.ScopedDevice(self.device):
-                    wp.capture_launch(self.fast_physics_graph)
-            else:
-                self._simulate_fast_physics()
+            self._simulate_fast_physics()
 
     def _load_replay_episode(self, episode_dir: Path) -> None:
         episode_dir = Path(episode_dir).expanduser()
@@ -2648,11 +2387,7 @@ class Example:
                 self._grip_hold_fraction = None
                 self._grip_stall_frames = 0
                 self._grasp_stabilize_frames_remaining = 0
-                current = float(np.clip(self._grip_fraction, 0.0, 1.0))
-                max_delta = GRIPPER_MAX_OPEN_FRACTION_PER_SEC * self.frame_dt
-                self._grip_fraction = current + float(
-                    np.clip(requested - current, -max_delta, max_delta)
-                )
+                self._grip_fraction = requested
             else:
                 self._grip_fraction = min(requested, self._grip_hold_fraction)
             return
@@ -2688,79 +2423,43 @@ class Example:
                 f"hold={self._grip_hold_fraction:.3f}, speed={actual_speed:.3f}/s"
             )
         else:
-            # Rate-limit the actual commanded finger closure/opening.  This avoids
-            # a one-frame target jump that can make both MuJoCo and the cloth
-            # contact react impulsively.
-            current = float(np.clip(self._grip_fraction, 0.0, 1.0))
-            if requested >= current:
-                max_delta = GRIPPER_MAX_CLOSE_FRACTION_PER_SEC * self.frame_dt
-            else:
-                max_delta = GRIPPER_MAX_OPEN_FRACTION_PER_SEC * self.frame_dt
-            self._grip_fraction = current + float(
-                np.clip(requested - current, -max_delta, max_delta)
-            )
+            self._grip_fraction = requested
 
     def _update_gripper_release_material(self):
-        """Smoothly enable cloth contact as the Robotiq fingers close.
-
-        This avoids the previous discontinuity where contact changed from fully
-        disabled to full stiffness/friction in a single frame.
+        """Ghost the two simple belt-contact plates while explicitly open.
         """
         idx = self._gripper_release_shape_indices
         if idx.size == 0:
             return
 
-        applied = float(np.clip(self._grip_fraction, 0.0, 1.0))
-        enabled = applied > GRIPPER_CONTACT_RAMP_START
-
-        # 0 at ramp start, 1 at/full past the normal pinch region.
-        denom = max(
-            GRIPPER_CONTACT_RAMP_FULL - GRIPPER_CONTACT_RAMP_START, 1.0e-6
-        )
-        ramp = smoothstep(
-            (applied - GRIPPER_CONTACT_RAMP_START) / denom
-        )
-
-        # Avoid pointless CPU<->device material copies if nothing changed.
-        last_enabled = getattr(self, "_timing_pad_contact_enabled", None)
-        last_ramp = getattr(self, "_timing_pad_contact_ramp", None)
-        if (
-            last_enabled is not None
-            and bool(last_enabled) == bool(enabled)
-            and last_ramp is not None
-            and abs(float(last_ramp) - float(ramp)) < 1.0e-4
-        ):
+        releasing = self._grip_requested_fraction <= GRIPPER_RELEASE_FRACTION
+        if releasing == self._release_friction_active:
             return
 
-        # First toggle particle collision flags on all solver views.
-        update_timing_pad_contacts(self, enabled)
+        mu_np = self.model.shape_material_mu.numpy().copy()
+        ke_np = self.model.shape_material_ke.numpy().copy()
+        kd_np = self.model.shape_material_kd.numpy().copy()
 
-        # Then overwrite the pad material with a smooth ramp.  update_timing_pad_contacts
-        # intentionally restores the full contact material when enabled, so this block
-        # applies the final ramped values afterwards.
-        for model, indices, _ in self._timing_contact_views:
-            ke_arr = getattr(model, "shape_material_ke", None)
-            kd_arr = getattr(model, "shape_material_kd", None)
-            mu_arr = getattr(model, "shape_material_mu", None)
+        if releasing:
+            mu_np[idx] = GRIPPER_RELEASE_MU
+            ke_np[idx] = GRIPPER_RELEASE_KE
+            kd_np[idx] = GRIPPER_RELEASE_KD
+            self._release_friction_active = True
+            print(
+                f"[GRASP] OPEN: ghosting {idx.size} simple pad shapes "
+                f"(ke={GRIPPER_RELEASE_KE:.1f}, kd={GRIPPER_RELEASE_KD:.1f}, "
+                f"mu={GRIPPER_RELEASE_MU:.1f})"
+            )
+        else:
+            mu_np[idx] = self._gripper_release_restore_mu
+            ke_np[idx] = self._gripper_release_restore_ke
+            kd_np[idx] = self._gripper_release_restore_kd
+            self._release_friction_active = False
+            print(f"[GRASP] CLOSE: restored {idx.size} proxy-pad shape contact materials")
 
-            if ke_arr is not None:
-                values = ke_arr.numpy().copy()
-                values[indices] = GRIPPER_CONTACT_KE * ramp if enabled else 0.0
-                ke_arr.assign(values)
-            if kd_arr is not None:
-                values = kd_arr.numpy().copy()
-                values[indices] = GRIPPER_CONTACT_KD * ramp if enabled else 0.0
-                kd_arr.assign(values)
-            if mu_arr is not None:
-                values = mu_arr.numpy().copy()
-                values[indices] = GRIPPER_CONTACT_MU * ramp if enabled else 0.0
-                mu_arr.assign(values)
-
-        self._timing_pad_contact_enabled = bool(enabled)
-        self._timing_pad_contact_ramp = float(ramp)
-
-        # Keep compatibility flags used elsewhere.
-        self._release_friction_active = not enabled
+        self.model.shape_material_mu.assign(mu_np)
+        self.model.shape_material_ke.assign(ke_np)
+        self.model.shape_material_kd.assign(kd_np)
 
     def _write_control_targets(self, solved_q):
         """Write the final primary-task IK solution to the robot (slew-limited)."""
@@ -2952,18 +2651,33 @@ class Example:
         )
 
     # Collision pair filter
-    def _belt_world_shape_pairs(self, include_gripper=False):
-        """Cloth uses particle/shape contacts, not rigid belt-shape pairs.
+    def _belt_world_shape_pairs(self, include_gripper: bool = False) -> wp.array:
+        """Rigid-shape filter for the particle timing belt scene.
 
-        VBD handles cloth self-contact. The FAST proxy pipeline handles
-        pad/cloth contact; ADMM receives it from the main collision pipeline.
+        The timing belt itself has no rigid shapes. Particle<->rigid contacts are
+        generated separately by CollisionPipeline from has_particle_collision.
+        We therefore retain only the existing pulley/world rigid pairs here; ADMM
+        still receives gripper-pad<->timing-belt particle contacts through the same
+        contacts buffer.
         """
+        pulley_shapes = set(self.pulley_shapes)
+        vbd_shapes = set(self.vbd_shapes)
+        pairs = []
+        for a, b in self.model.shape_contact_pairs.numpy():
+            a = int(a); b = int(b)
+            if (a in pulley_shapes and b in vbd_shapes) or (b in pulley_shapes and a in vbd_shapes):
+                pairs.append((a, b))
+
         mode = "ADMM" if include_gripper else "FAST"
         print(
-            f"[INFO] {mode}: cloth particle/shape contact enabled; "
-            "no rigid rod contact pairs."
+            f"[INFO] {mode} timing-belt collision pipeline: {len(pairs)} rigid pulley/world pairs; "
+            "timing-belt contacts are particle<->rigid contacts."
         )
-        return wp.empty(0, dtype=wp.vec2i, device=self.model.device)
+        return wp.array(
+            np.asarray(pairs, dtype=np.int32).reshape((-1, 2)),
+            dtype=wp.vec2i,
+            device=self.model.device,
+        )
 
     # Sim loop: teleop control + coupled physics stepping
     def step(self):
@@ -3155,26 +2869,6 @@ class Example:
         show_contacts = self.viewer.show_contacts
         newton.examples.log_coupled_view(self, self.contacts)
 
-        # Dedicated timing-belt visual: medium gray.
-        # The physics remains the same particle cloth; this is visualization only.
-        try:
-            self.viewer.log_mesh(
-                "/timing_belt_gray",
-                self.state_0.particle_q,
-                self._belt_render_indices,
-                backface_culling=False,
-                color=(0.45, 0.45, 0.45),
-            )
-        except TypeError:
-            # Compatibility fallback for viewers whose log_mesh() does not yet
-            # expose the color keyword.
-            self.viewer.log_mesh(
-                "/timing_belt_gray",
-                self.state_0.particle_q,
-                self._belt_render_indices,
-                backface_culling=False,
-            )
-
         # teleop visuals: live gripper TIP frame + commanded target frame/sphere
         bq = self.state_0.body_q.numpy()[self.link_index]
         base_pos = np.array(bq[0:3], dtype=np.float64)
@@ -3195,10 +2889,10 @@ class Example:
             #       f"grip_cmd={self._grip_fraction:0.2f} "
             #       f"grip_actual={self._grip_actual_fraction:0.2f} latch={latch}")
 
-        if (self.debug_belt_positions and self.state_0.body_q is not None
-                and len(self.belt_bodies) > 0 and self.frame_id % self.debug_every_n_frames == 0):
-            body_q = self.state_0.body_q.numpy()
-            belt_xyz = body_q[np.asarray(self.belt_bodies, dtype=np.int32), :3]
+        if (self.debug_belt_positions and self.state_0.particle_q is not None
+                and len(self.belt_particles) > 0 and self.frame_id % self.debug_every_n_frames == 0):
+            particle_q = self.state_0.particle_q.numpy()
+            belt_xyz = particle_q[np.asarray(self.belt_particles, dtype=np.int32), :3]
             # print("[BELT DEBUG] min xyz =", belt_xyz.min(axis=0), "max xyz =", belt_xyz.max(axis=0))
             if len(self.pulley_bodies) > 0 and self.state_0.joint_q is not None:
                 q_start = as_numpy(self.model.joint_q_start)
@@ -3262,31 +2956,20 @@ class Example:
         return parser
 
     def test_final(self):
-        positions = self.state_0.particle_q.numpy()[
-            self.belt_particle_indices
-        ]
-        velocities = self.state_0.particle_qd.numpy()[
-            self.belt_particle_indices
-        ]
-        assert len(positions) > 0, "No timing-belt particles"
-        assert np.isfinite(positions).all(), "Non-finite belt positions"
-        assert np.isfinite(velocities).all(), "Non-finite belt velocities"
-
-        minimum_z = float(positions[:, 2].min())
-        assert minimum_z > TABLE_TOP_Z - 0.05, (
-            f"Belt fell below the table: min_z={minimum_z:.4f}"
-        )
-
         if self.state_0.body_q is not None:
-            bodies = self.state_0.body_q.numpy()
-            assert np.isfinite(bodies).all(), "Non-finite body transforms"
-            if self.pulley_bodies:
-                pulley_positions = bodies[
-                    np.asarray(self.pulley_bodies, dtype=np.int32), :3
-                ]
-                assert np.all(
-                    pulley_positions[:, 2] > TABLE_TOP_Z - 0.01
-                ), "A pulley fell off its axle"
+            body_q = self.state_0.body_q.numpy()
+            assert np.isfinite(body_q).all(), "Non-finite body transforms"
+            if len(self.pulley_bodies) > 0:
+                pulley_xyz = body_q[np.asarray(self.pulley_bodies, dtype=np.int32), :3]
+                assert np.all(pulley_xyz[:, 2] > TABLE_TOP_Z - 0.01), (
+                    f"A pulley fell off its axle: min_z={float(pulley_xyz[:, 2].min()):.4f}")
+        if self.state_0.particle_q is not None and len(self.belt_particles) > 0:
+            particle_q = self.state_0.particle_q.numpy()
+            assert np.isfinite(particle_q).all(), "Non-finite timing-belt particle positions"
+            belt_xyz = particle_q[np.asarray(self.belt_particles, dtype=np.int32), :3]
+            belt_min_z = float(np.min(belt_xyz[:, 2]))
+            assert belt_min_z > TABLE_TOP_Z - 0.05, (
+                f"Belt fell too far below table: min_z={belt_min_z:.4f}, table_top={TABLE_TOP_Z:.4f}")
 
     def __del__(self):
         try:

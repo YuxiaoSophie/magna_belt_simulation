@@ -2522,7 +2522,7 @@ class Example:
             # Windowed RTF (current capability) vs lifetime-average RTF.
             # RTF(now) = sim advanced / wall elapsed over just the last window.
             # RTF(avg) = same ratio since the first real frame.
-            # behind    = how far the sim clock trails the wall clock (grows if slow).
+            # behind = how far the sim clock trails the wall clock (grows if slow).
             window_sim = self.sim_time - self._last_sim_time
             window_wall = wall_now - self._last_wall_time
             rtf_now = window_sim / window_wall if window_wall > 1.0e-9 else 0.0

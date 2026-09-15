@@ -130,6 +130,16 @@ asset or import problem, and no URDF was edited:
   all meshes are `.obj`, so no glTF up-axis fix is needed. `<robot name>` was
   already `belt_chain_holder`.
 
+## ZED camera (`assets/common/zed_camera/`)
+
+- **Source:** `magna` branch `hien/timing_belt_task`, `models/common/zed_camera/`
+  (`zed_camera.urdf`, `ZEDM.obj`, `ZEDM.mtl`)
+- **Upstream project:** Stereolabs ZED Mini mesh, via the `magna` round-belt task
+- **License:** none provided upstream
+- **Edits applied:** none. Copied verbatim. The link frame is the camera's optical frame;
+  the visual sits 0.305 m behind it, as in Drake. The camera poses and intrinsics live in
+  `assets/common/directives/zed_cameras.yaml`.
+
 ## Trap: the two Newton mesh loaders disagree on glTF node transforms
 
 Newton has two paths into a mesh file and they do **not** agree on the glTF

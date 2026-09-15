@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<robot name="zed_camera">
+    <link name="zed_camera">
+        <visual>
+            <origin rpy="1.57079 0 0" xyz="0 0 -0.305"/>
+            <geometry>
+                <mesh filename="ZEDM.obj" scale="0.001 0.001 0.001"/>
+            </geometry>
+        </visual>
+    </link>
+</robot>

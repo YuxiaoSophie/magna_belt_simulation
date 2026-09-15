@@ -24,7 +24,9 @@ from newton.solvers import SolverMuJoCo, SolverVBD
 from newton.solvers.experimental.coupled import SolverCoupled, SolverCoupledProxy
 
 import round_belt
+from task_common.cameras import RgbdCameras
 from task_common.joint_state import index_layout
+from task_common.point_cloud import CroppedPointCloud
 from task_common.scene import (
     UR10_BASE_LABEL, UR10_WRIST3_LABEL, JointConfig, SceneInfo, make_builder,
 )
@@ -92,6 +94,18 @@ class BeltTaskSimulation:
         self._initial_hand_pos = np.array(body_q[self._hand_body][:3], dtype=np.float64)
         self._initial_gripper_pos = np.array(body_q[self._gripper_root_body][:3], dtype=np.float64)
         self._print_pose_table()
+
+        self.cameras: RgbdCameras | None = None
+        self.point_clouds: dict[str, CroppedPointCloud] = {}
+        self.cameras_updated = False
+        self._next_camera_time = 0.0
+        if info.cameras and getattr(self.args, "cameras", True):
+            self.cameras = RgbdCameras(self.model, info.cameras)
+            self.point_clouds = {
+                spec.name: CroppedPointCloud(self.cameras, spec) for spec in info.point_clouds
+            }
+            names = [spec.name for spec in info.cameras]
+            logger.info(f"[CAMERAS] {names} at {1.0 / self.cameras.period:g} fps")
 
         # Performance only: the frame is a fixed 10-substep sequence of the same kernels,
         # so it is captured once and replayed as round_belt.py:1522-1528, 1604-1648,
@@ -288,10 +302,25 @@ class BeltTaskSimulation:
             self._simulate_physics()
         self.sim_time += self.frame_dt
         self.frame_id += 1
+        self._update_cameras()
+
+    def _update_cameras(self) -> None:
+        """Render the cameras once per camera period."""
+        self.cameras_updated = False
+        # Half a frame of slack so float drift in sim_time never skips a period.
+        if self.cameras is None or self.sim_time + 0.5 * self.frame_dt < self._next_camera_time:
+            return
+        self.cameras.update(self.state_0)
+        self.cameras_updated = True
+        self._next_camera_time += self.cameras.period
 
     def render(self) -> None:
         self.viewer.begin_frame(self.sim_time)
         newton.examples.log_coupled_view(self, self.contacts)
+        if self.cameras_updated and not isinstance(self.viewer, newton.viewer.ViewerNull):
+            self.cameras.log(self.viewer)
+            for cloud in self.point_clouds.values():
+                cloud.log(self.viewer)
         self.viewer.end_frame()
 
     @staticmethod
@@ -303,6 +332,10 @@ class BeltTaskSimulation:
         parser.add_argument(
             "--no-cuda-graph", action="store_false", dest="cuda_graph", default=True,
             help="disable CUDA graph capture (A/B testing); solver settings are unchanged",
+        )
+        parser.add_argument(
+            "--no-cameras", action="store_false", dest="cameras", default=True,
+            help="do not render the scene's RGBD cameras",
         )
         # The scene's colliders are created with is_visible=False (round_belt.py's
         # make_robust_table_collision_cfg), so ViewerBase._shape_visible only draws them

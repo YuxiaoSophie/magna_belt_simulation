@@ -4,4 +4,6 @@
     scene.py        make_builder, SceneInfo and build_task_scene
     joint_state.py  seeding the finalized Model with default joint state and gains
     simulation.py   BeltTaskSimulation: solver, stepping, CUDA graph, diagnostics
+    cameras.py      CameraSpec and RgbdCameras: the scene's RGBD cameras on SensorTiledCamera
+    point_cloud.py  PointCloudSpec and CroppedPointCloud: merged, cropped, voxelized world cloud
 """

@@ -44,6 +44,15 @@ directives:
       X_PC:
         translation: [0.4736603358808432, 0.3520562100563749, -0.02858]
         rotation: !Rpy { deg: [0.0, 0.0, 90.0] }
+  # Drake adds the cameras last; here they must stay in the contiguous static shape range.
+  - add_directives: {file: ../common/directives/zed_cameras.yaml}
+  # magna's point_cloud_* sim params (POINT_CLOUD_CROPPED).
+  - add_cropped_point_cloud:
+      name: cropped_point_cloud
+      cameras: [zed_camera_franka_side, zed_camera_ur_side]
+      crop_lower_xyz: [0.2, -0.25, 0.015]
+      crop_upper_xyz: [0.7, 0.25, 0.11]
+      voxel_size: 0.005
   # Joint defaults are q_init_franka / q_init_franka_hand (round_belt_simulation_params.yaml).
   - add_model:
       name: panda_arm                   # Drake: panda

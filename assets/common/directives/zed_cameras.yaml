@@ -1,0 +1,35 @@
+# The two ZED Mini RGBD cameras of magna's round-belt scene.
+# zed_camera is the optical frame (+Z forward, +Y down).
+directives:
+  - add_model:
+      name: zed_camera_franka_side
+      file: ../zed_camera/zed_camera.urdf
+      static: true
+  - add_weld:
+      parent: world
+      child: zed_camera_franka_side::zed_camera
+      X_PC:
+        translation: [-0.23254929, 0.78334317, 0.37133233]
+        rotation: !Rpy { deg: [-115.7028203, 0.7562726, -122.0758236] }
+  - add_model:
+      name: zed_camera_ur_side
+      file: ../zed_camera/zed_camera.urdf
+      static: true
+  - add_weld:
+      parent: world
+      child: zed_camera_ur_side::zed_camera
+      X_PC:
+        translation: [0.92596044, -0.73487673, 0.40356498]
+        rotation: !Rpy { deg: [-118.9944391, 0.53362, 34.3510054] }
+  - add_rgbd_camera:
+      name: zed_camera_franka_side
+      base_frame: zed_camera_franka_side::zed_camera
+      width: 640
+      height: 480
+      fps: 20
+  - add_rgbd_camera:
+      name: zed_camera_ur_side
+      base_frame: zed_camera_ur_side::zed_camera
+      width: 640
+      height: 480
+      fps: 20

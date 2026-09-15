@@ -473,7 +473,7 @@ BOARD_WELD_TRANSLATION = (0.64483928, -0.19718233, 0.01076393)
 @check("7. Real scene smoke (round_belt_task.make_builder/build_scene)")
 def check_real_scene_smoke() -> None:
     _, info = _real_scene()
-    for attr, want in (("static_shapes", 50), ("robot_bodies", 36), ("belt_bodies", 48),
+    for attr, want in (("static_shapes", 52), ("robot_bodies", 36), ("belt_bodies", 48),
                        ("gripper_pad_bodies", 2), ("gripper_pad_shapes", 2)):
         got = len(getattr(info, attr))
         _require(got == want, f"len(info.{attr}) = {got}, expected {want}")
@@ -490,7 +490,10 @@ def check_real_scene_smoke() -> None:
                  f"gripper_pad_shapes entry {shape} ({label!r}) is not the finger collider on "
                  f"body {body}")
     extension = sorted(EXTENSION_DIRECTIVES)
-    expected_extension = ["add_ground_plane", "add_rod_ellipse", "add_tabletop_collision"]
+    expected_extension = [
+        "add_cropped_point_cloud", "add_ground_plane", "add_rgbd_camera", "add_rod_ellipse",
+        "add_tabletop_collision",
+    ]
     _require(extension == expected_extension,
              f"EXTENSION_DIRECTIVES = {extension}, expected {expected_extension}")
 
@@ -612,26 +615,26 @@ def check_board_colors() -> None:
              f"link_colors {probe} painted {painted}, expected exactly {small}")
 
 
-@check("11. Ordering guard: tabletop after the holder raises")
+@check("11. Ordering guard: tabletop after the last static model raises")
 def check_ordering_guard() -> None:
-    def tabletop_after_holder(entries: list[str]) -> None:
+    def tabletop_after_statics(entries: list[str]) -> None:
         tabletop = entries.pop(_pick(
             entries, lambda c: c.startswith("  - add_tabletop_collision:"), "tabletop"
         ))
-        holder = _pick(
-            entries, lambda c: c.startswith("  - add_weld:") and "belt_chain_holder::" in c,
-            "holder add_weld",
+        cameras = _pick(
+            entries, lambda c: c.startswith("  - add_directives:") and "zed_cameras.yaml" in c,
+            "ZED cameras add_directives",
         )
-        entries.insert(holder + 1, tabletop)
+        entries.insert(cameras + 1, tabletop)
 
     with _tmpdir() as tmp:
         control = _build_scene(_scene_copy(tmp / "control"))
-        _require(len(control.static_shapes) == 50,
+        _require(len(control.static_shapes) == 52,
                  f"fixture: unedited copy has {len(control.static_shapes)} static shapes, "
-                 "expected 50")
-        moved = _scene_copy(tmp / "moved", edit_scene=tabletop_after_holder)
+                 "expected 52")
+        moved = _scene_copy(tmp / "moved", edit_scene=tabletop_after_statics)
         _expect_error(functools.partial(_build_scene, moved),
-                      "add_tabletop_collision after the holder weld", "static shape range",
+                      "add_tabletop_collision after the ZED cameras", "static shape range",
                       error=RuntimeError)
 
 

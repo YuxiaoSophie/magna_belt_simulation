@@ -40,7 +40,7 @@ assets/
 
 - A task's own scene lives at `assets/<task>/<task>_scene.yaml` (the current example:
   `assets/round_belt_task/round_belt_scene.yaml`).
-- Anything shared across tasks (currently just the UR10 + Robotiq 2F-85 rig) lives under
+- Anything shared across tasks (the UR10 + Robotiq 2F-85 rig, the two ZED cameras) lives under
   `assets/common/directives/` and is pulled in with `add_directives`, mirroring how Drake's
   task scenes include `ur.dmd.yaml`.
 - `file:` on any directive resolves one of three ways (`utils/directives/schema.py::_resolve`):
@@ -213,6 +213,8 @@ The Robotiq's ALOHA fingers are not a directive: they are geoms in `2f85.xml`'s 
 |---|---|---|---|---|
 | `add_tabletop_collision` | `table_visual`, `top_z`, `thickness`, `color` | `name` (`"tabletop_collision"`) | `{"shape": int, "aabb": (lo, hi)}` | must sit inside the static shape range, between the model owning `table_visual` and whatever comes after it (order is load-bearing for `task_common/scene.py`'s contiguous static-shape check) |
 | `add_ground_plane` | exactly one of `height` or `height_from_aabb_min_z_of` | `name` (`"ground"`) | `{"shape": int, "height": float}` | by convention last — not enforced by the loader, just kept out of any model's contiguous shape range |
+| `add_rgbd_camera` | `name`, `base_frame` (`world`, an `add_frame` name, or a static model's weld child) | `width`/`height` (`640`/`480`), `fps` (`20`), `fov_y_deg` (`45`) or `focal_x`+`focal_y` [px], `center_x`/`center_y` (image centre, `(w - 1) / 2`), `z_near`/`z_far` (`0.1`/`5.0`) | `task_common.cameras.CameraSpec` | anywhere after its `base_frame`; adds nothing to the builder. `base_frame` is the OpenCV optical frame (+Z forward, +Y down) and must be world-fixed; defaults are Drake's `CameraConfig` |
+| `add_cropped_point_cloud` | `name`, `cameras` (list of earlier `add_rgbd_camera` names), `crop_lower_xyz`, `crop_upper_xyz` [m, world] | `voxel_size` [m] (`0.0`, no downsample) | `task_common.point_cloud.PointCloudSpec` | after the cameras it names; adds nothing to the builder. Evaluated by `task_common.point_cloud.CroppedPointCloud`: Drake's `DepthImageToPointCloud` + `Concatenate` + `Crop` + `VoxelizedDownSample` |
 | `add_rod_ellipse` | `name`, `center`, `semi_axes`, `radius`, `num_elements`, `color`, `stretch_stiffness`, `stretch_damping`, `bend_stiffness`, `bend_damping` | `twist_total` (`0.0`), `closed` (`true`), `body_frame_origin` (`"com"`), `margin` (`0.0`), `gap` (`0.001`), `density`/`ke`/`kd`/`mu` (fall back to `round_belt`'s belt-density estimate and cable-contact constants) | `{"bodies": [...], "joints": [...], "shapes": [...]}` | by convention after all robot models — required in practice because `task_common/scene.py`'s `span` helper needs each robot model's body/joint/shape ranges to be mutually contiguous, which a rod inserted in between would break; not checked by the loader itself |
 
 ## 6. What is NOT data and why

@@ -20,6 +20,8 @@ import newton
 from newton.solvers import SolverMuJoCo, SolverVBD
 
 import round_belt
+from task_common.cameras import CameraSpec
+from task_common.point_cloud import PointCloudSpec
 from utils.directives import DirectiveFn, ModelRecord, load_directives
 
 
@@ -66,6 +68,8 @@ class SceneInfo:
     ur10_joints: list[int] = field(default_factory=list)
     gripper_joints: list[int] = field(default_factory=list)
     ground_shape: int = -1
+    cameras: list[CameraSpec] = field(default_factory=list)
+    point_clouds: list[PointCloudSpec] = field(default_factory=list)
     joint_config: JointConfig = field(default_factory=JointConfig)
 
 
@@ -196,4 +200,6 @@ def build_task_scene(
         tabletop_collision_shape=tabletop_collision_shape,
         ground_shape=int(ground["shape"]), ground_height=ground_height,
         table_visual_aabb=(table_aabb[0], table_aabb[1]),
+        cameras=[e for e in scene.extras.values() if isinstance(e, CameraSpec)],
+        point_clouds=[e for e in scene.extras.values() if isinstance(e, PointCloudSpec)],
     )

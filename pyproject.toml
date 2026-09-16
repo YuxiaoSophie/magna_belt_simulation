@@ -6,6 +6,7 @@ requires-python = ">=3.10"
 
 dependencies = [
     "evdev>=1.9.3",
+    "lcm>=1.5.2",
     "loguru>=0.7.3",
     "newton[examples]",
     "pyyaml>=6.0.3",

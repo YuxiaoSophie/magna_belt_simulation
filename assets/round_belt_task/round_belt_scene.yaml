@@ -89,7 +89,7 @@ directives:
   - add_rod_ellipse:
       name: flexible_ellipse_cable
       center: [0.4736603358808432, 0.3520562100563749, 0.0]
-      semi_axes: [0.084, 0.124]
+      semi_axes: [0.0807, 0.1207]         # centreline: Drake mesh outer extent - tube radius
       radius: 0.0033
       num_elements: 48
       color: [1.0, 0.5, 0.0]

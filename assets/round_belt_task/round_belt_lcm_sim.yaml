@@ -1,0 +1,22 @@
+# Round-belt LCM simulation (round_belt_lcm_simulation.py); every LCM-sim number lives here.
+# substeps must be even: the captured CUDA graph only returns the newest state for even counts.
+solver: {substeps: 2, vbd_iterations: 10}
+# 2F-85 driver position PD for the LCM sim only (effort limit unchanged); open/close <= 1 s.
+# stop [rad]: driver upper limit where the finger colliders meet (the real gripper's empty close).
+gripper_drive: {ke: 400.0, kd: 80.0, stop: 0.648}
+# Panda finger drive: Drake OSC gains, effort = URDF limit, stale rule = ShunkCommandToTrajectory.
+# armature [kg] stabilises the lagged proxy finger-belt contact on the 0.1 kg finger; Drake: none.
+# max_speed [m/s]: per-finger target slew; a faster impact kicks the belt off the holder.
+# limit_ke/kd: critically damped finger stops; the default 1e4/10 lets a squeeze pass 13 mm.
+hand_drive:
+  {ke: 1000.0, kd: 100.0, effort_limit: 20.0, stale_timeout: 1.0, armature: 0.5, max_speed: 0.1,
+   limit_ke: 1.0e+5, limit_kd: 500.0}
+# Drake robotiq_arg85 fingertip along the URDF wrist_3_link z; magna tracking_frame 0.194.
+ur_gripper_tip_z: 0.197
+# magna_simulation.cc: the belt is placed once finger_tip is within tolerance of point.
+belt_trigger:
+  body: panda_hand/finger_tip
+  point: [0.482235, 0.166332, 0.039995]
+  tolerance: 0.005                   # predefined_motion_position_tolerance
+  grasp_depth: 0.010                 # anchor centre inside finger_tip along hand z, mid-pad
+  nearest_body_radius: 0.03          # snap to the nearest belt body within this radius

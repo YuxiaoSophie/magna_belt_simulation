@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import warp as wp
+import yaml
 
 from task_common.joint_state import (  # noqa: F401
     ARM_TARGET_KD,
@@ -21,6 +22,7 @@ ASSETS_DIR = REPO_ROOT / "assets"
 COMMON_ASSETS_DIR = ASSETS_DIR / "common"
 ROUND_BELT_ASSETS_DIR = ASSETS_DIR / "round_belt_task"
 SCENE_DIRECTIVES = ROUND_BELT_ASSETS_DIR / "round_belt_scene.yaml"
+LCM_SIM_PARAMS = ROUND_BELT_ASSETS_DIR / "round_belt_lcm_sim.yaml"
 
 _D = parse_directives(SCENE_DIRECTIVES)
 
@@ -118,3 +120,26 @@ PULLEY_MOUNT_COLOR = _MOUNT.color
 SMALL_PULLEY_MOUNT_LOCAL_XY = _MOUNT.near_local_xy
 SMALL_PULLEY_MOUNT_RADIUS = _MOUNT.radius
 BOARD_PANEL_MIN_SPAN = _MOUNT.max_span
+
+_LCM = yaml.safe_load(LCM_SIM_PARAMS.read_text())
+LCM_SOLVER_SUBSTEPS = int(_LCM["solver"]["substeps"])
+LCM_SOLVER_VBD_ITERATIONS = int(_LCM["solver"]["vbd_iterations"])
+LCM_GRIPPER_DRIVE_KE = float(_LCM["gripper_drive"]["ke"])
+LCM_GRIPPER_DRIVE_KD = float(_LCM["gripper_drive"]["kd"])
+LCM_GRIPPER_DRIVE_STOP = float(_LCM["gripper_drive"]["stop"])
+LCM_HAND_DRIVE_KE = float(_LCM["hand_drive"]["ke"])
+LCM_HAND_DRIVE_KD = float(_LCM["hand_drive"]["kd"])
+LCM_HAND_DRIVE_EFFORT_LIMIT = float(_LCM["hand_drive"]["effort_limit"])
+LCM_HAND_DRIVE_STALE_TIMEOUT = float(_LCM["hand_drive"]["stale_timeout"])
+LCM_HAND_DRIVE_ARMATURE = float(_LCM["hand_drive"]["armature"])
+LCM_HAND_DRIVE_MAX_SPEED = float(_LCM["hand_drive"]["max_speed"])
+LCM_HAND_DRIVE_LIMIT_KE = float(_LCM["hand_drive"]["limit_ke"])
+LCM_HAND_DRIVE_LIMIT_KD = float(_LCM["hand_drive"]["limit_kd"])
+LCM_UR_GRIPPER_TIP_Z = float(_LCM["ur_gripper_tip_z"])
+BELT_TRIGGER_BODY = str(_LCM["belt_trigger"]["body"])
+BELT_TRIGGER_POINT = tuple(float(v) for v in _LCM["belt_trigger"]["point"])
+BELT_TRIGGER_TOLERANCE = float(_LCM["belt_trigger"]["tolerance"])
+BELT_TRIGGER_GRASP_DEPTH = float(_LCM["belt_trigger"]["grasp_depth"])
+BELT_TRIGGER_NEAREST_RADIUS = float(_LCM["belt_trigger"]["nearest_body_radius"])
+if len(BELT_TRIGGER_POINT) != 3:
+    raise ValueError(f"{LCM_SIM_PARAMS}: belt_trigger.point must be a 3-vector")

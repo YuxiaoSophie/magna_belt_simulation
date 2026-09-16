@@ -189,6 +189,22 @@ place of the original pad geoms:
   quat Rz(+90 deg). Drake's `left_finger` mesh rides `right_pad`, and vice versa.
 * Mass: `*_silicone_pad` keeps the inertial its removed mesh used to give it.
 
+## LCM message types (`lcmtypes/`)
+
+- **Source:** `magna/bazel-magna/external/dairlib+/lcmtypes/lcmt_robot_{input,output}.lcm`,
+  `magna/bazel-magna/external/drake+/lcmtypes/lcmt_{schunk_wsg_status,schunk_wsg_command,
+  viewer_link_data,viewer_geometry_data}.lcm`, `magna/bazel-magna/external/robotiq-driver+/lcmtypes/
+  lcmt_robotiq_{command,status}.lcm`
+- **Copies:** byte-identical.
+- **Regenerated with:** `scripts/gen_lcmtypes.sh` (emits the `dairlib/`, `drake/`, `robotiq/`
+  Python packages at the repo root via the venv's `lcm-gen`).
+
+## LCM simulation parameters (`round_belt_task/round_belt_lcm_sim.yaml`)
+
+- **`belt_trigger`:** transcribed from `magna/systems/simulation/magna_simulation.cc` (target
+  point) and `round_belt_controller_params_sim.yaml` `predefined_motion_position_tolerance`
+  (0.005 m); `grasp_depth` and `nearest_body_radius` are Newton-side anchor choices.
+
 ## Table and task board — not copied here
 
 The table and task board models are not part of this port. The Newton scene

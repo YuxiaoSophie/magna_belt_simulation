@@ -1,0 +1,133 @@
+{
+ "FRANKA_STATE": {
+  "position_names": [
+   "panda_joint1",
+   "panda_joint2",
+   "panda_joint3",
+   "panda_joint4",
+   "panda_joint5",
+   "panda_joint6",
+   "panda_joint7"
+  ],
+  "velocity_names": [
+   "panda_joint1dot",
+   "panda_joint2dot",
+   "panda_joint3dot",
+   "panda_joint4dot",
+   "panda_joint5dot",
+   "panda_joint6dot",
+   "panda_joint7dot"
+  ],
+  "effort_names": [
+   "panda_motor1",
+   "panda_motor2",
+   "panda_motor3",
+   "panda_motor4",
+   "panda_motor5",
+   "panda_motor6",
+   "panda_motor7"
+  ],
+  "utime": 1044999
+ },
+ "FRANKA_HAND_ROBOT_OUTPUT": {
+  "position_names": [
+   "panda_finger_joint1",
+   "panda_finger_joint2"
+  ],
+  "velocity_names": [
+   "panda_finger_joint1dot",
+   "panda_finger_joint2dot"
+  ],
+  "effort_names": [
+   "panda_finger_motor1",
+   "panda_finger_motor2"
+  ],
+  "utime": 1044999
+ },
+ "PANDA_HAND_STATUS": {
+  "utime": 1044999,
+  "pos_mm": 45.0,
+  "force": 0.0,
+  "speed": -5.796907987031896e-14
+ },
+ "UR_STATE_SIM": {
+  "position_names": [
+   "shoulder_pan_joint",
+   "shoulder_lift_joint",
+   "elbow_joint",
+   "wrist_1_joint",
+   "wrist_2_joint",
+   "wrist_3_joint"
+  ],
+  "velocity_names": [
+   "shoulder_pan_jointdot",
+   "shoulder_lift_jointdot",
+   "elbow_jointdot",
+   "wrist_1_jointdot",
+   "wrist_2_jointdot",
+   "wrist_3_jointdot"
+  ],
+  "effort_names": [
+   "shoulder_pan_joint_actuator",
+   "shoulder_lift_joint_actuator",
+   "elbow_joint_actuator",
+   "wrist_1_joint_actuator",
+   "wrist_2_joint_actuator",
+   "wrist_3_joint_actuator"
+  ],
+  "utime": 1044999
+ },
+ "ROBOTIQ_ROBOT_OUTPUT": {
+  "position_names": [
+   "left_finger_joint",
+   "right_finger_joint"
+  ],
+  "velocity_names": [
+   "left_finger_jointdot",
+   "right_finger_jointdot"
+  ],
+  "effort_names": [
+   "left_finger_joint",
+   "right_finger_joint"
+  ],
+  "utime": 1044999
+ },
+ "DRAKE_VIEWER_DEFORMABLE": {
+  "link": "deformable_geometries",
+  "robot_num": 0,
+  "num_geom": 1,
+  "geom_type": 4,
+  "position": [
+   0.0,
+   0.0,
+   0.0
+  ],
+  "quaternion": [
+   1.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  "color": [
+   1.0,
+   0.5,
+   0.0,
+   1.0
+  ],
+  "string_data": "round_belt::round_belt",
+  "num_float_data": 1352,
+  "fd0_num_verts": 150,
+  "fd1": 300,
+  "expected_len_tris": 1352,
+  "first_vert": [
+   0.5287610292434692,
+   0.2659454345703125,
+   -0.01275996770709753
+  ],
+  "first_tri": [
+   0.0,
+   64.0,
+   83.0
+  ]
+ }
+}

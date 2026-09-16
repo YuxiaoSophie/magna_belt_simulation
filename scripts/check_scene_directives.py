@@ -489,6 +489,17 @@ def check_real_scene_smoke() -> None:
                  and label.endswith(f"/{pad}/{side}_aloha_finger_collision"),
                  f"gripper_pad_shapes entry {shape} ({label!r}) is not the finger collider on "
                  f"body {body}")
+    for attr in ("franka_finger_bodies", "franka_finger_shapes"):
+        got = len(getattr(info, attr))
+        _require(got == 2, f"len(info.{attr}) = {got}, expected 2")
+    fingers = {str(builder.body_label[b]).rsplit("/", 1)[-1] for b in info.franka_finger_bodies}
+    _require(fingers == {"panda_leftfinger", "panda_rightfinger"},
+             f"info.franka_finger_bodies leaves = {sorted(fingers)}, expected "
+             "['panda_leftfinger', 'panda_rightfinger']")
+    for body, shape in zip(info.franka_finger_bodies, info.franka_finger_shapes):
+        label = str(builder.shape_label[shape])
+        _require(int(builder.shape_body[shape]) == body and label.endswith("/collision0"),
+                 f"franka_finger_shapes entry {shape} ({label!r}) is not collision0 on body {body}")
     extension = sorted(EXTENSION_DIRECTIVES)
     expected_extension = [
         "add_cropped_point_cloud", "add_ground_plane", "add_rgbd_camera", "add_rod_ellipse",

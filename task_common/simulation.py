@@ -13,6 +13,7 @@ installed by the entry script's ``__main__`` alone.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 
 import numpy as np
 import warp as wp
@@ -39,16 +40,21 @@ class BeltTaskSimulation:
 
     belt_center: tuple[float, float, float]
     table_top_z: float
+    frame_rate: int = 60
 
     def __init__(self, viewer: newton.viewer.ViewerBase, args: argparse.Namespace) -> None:
         self.viewer = viewer
         self.args = args
 
-        self.fps = 60
+        self.fps = self.frame_rate
         self.frame_dt = 1.0 / self.fps
         self.sim_time = 0.0
-        self.sim_substeps = 10
+        # Odd counts leave the newest state in state_1 after a graph replay (ping-pong swap).
+        self.sim_substeps = int(getattr(args, "substeps", 10))
+        if self.sim_substeps < 2 or self.sim_substeps % 2 != 0:
+            raise ValueError(f"substeps must be even and >= 2, got {self.sim_substeps}")
         self.sim_dt = self.frame_dt / self.sim_substeps
+        self.vbd_iterations = int(getattr(args, "vbd_iterations", round_belt.VBD_ITERATIONS))
         self.frame_id = 0
 
         builder = make_builder()
@@ -70,6 +76,8 @@ class BeltTaskSimulation:
         self.control = self.model.control()
         self._seed_control_targets(info.joint_config)
         self.solver = self._build_solver(info)
+        proxy_labels = [str(self.model.body_label[b]) for b in info.proxy_bodies]
+        logger.info(f"[PROXY] mjc->vbd bodies: {proxy_labels}")
 
         self.state_0 = self.model.state()
         self.state_1 = self.model.state()
@@ -107,14 +115,12 @@ class BeltTaskSimulation:
             names = [spec.name for spec in info.cameras]
             logger.info(f"[CAMERAS] {names} at {1.0 / self.cameras.period:g} fps")
 
-        # Performance only: the frame is a fixed 10-substep sequence of the same kernels,
-        # so it is captured once and replayed as round_belt.py:1522-1528, 1604-1648,
-        # 1726-1730 does.  No solver setting, substep count or dt changes.
+        # Performance only: the frame is a fixed sim_substeps sequence of the same kernels,
+        # so it is captured once (after the first uncaptured frame, see _step_physics) and
+        # replayed.  No solver setting, substep count or dt changes.
         self.physics_graph = None
         self.use_cuda_graph = bool(getattr(self.args, "cuda_graph", True)) and self.device.is_cuda
-        if self.use_cuda_graph:
-            self._capture_physics_graph()
-        else:
+        if not self.use_cuda_graph:
             logger.info(f"[CUDA GRAPH] disabled (device={self.device})")
 
     def _build_scene(self, builder: newton.ModelBuilder) -> SceneInfo:
@@ -124,13 +130,13 @@ class BeltTaskSimulation:
         raise NotImplementedError
 
     def _apply_contact_materials(self, info: SceneInfo) -> None:
-        """Global cable material for every shape (as round_belt.py), then the pad override."""
+        """Global cable material for every shape (as round_belt.py), then the proxy override."""
         self.model.shape_material_ke.fill_(round_belt.CABLE_CONTACT_KE)
         self.model.shape_material_kd.fill_(round_belt.CABLE_CONTACT_KD)
         self.model.shape_material_mu.fill_(round_belt.CABLE_CONTACT_MU)
-        if not info.gripper_pad_shapes:
+        if not info.contact_override_shapes:
             return
-        pad_idx = np.asarray(info.gripper_pad_shapes, dtype=np.int32)
+        pad_idx = np.asarray(info.contact_override_shapes, dtype=np.int32)
         for array, value in (
             (self.model.shape_material_mu, round_belt.GRIPPER_CONTACT_MU),
             (self.model.shape_material_ke, round_belt.GRIPPER_CONTACT_KE),
@@ -141,7 +147,7 @@ class BeltTaskSimulation:
             array.assign(values)
 
     def _build_solver(self, info: SceneInfo) -> SolverCoupledProxy:
-        """MuJoCo (robots) + VBD (belt) with the gripper pads proxied into the VBD entry."""
+        """MuJoCo (robots) + VBD (belt) with the pads and Franka fingers proxied into VBD."""
         return SolverCoupledProxy(
             model=self.model,
             entries=[
@@ -157,19 +163,20 @@ class BeltTaskSimulation:
                 SolverCoupled.Entry(
                     name="vbd",
                     solver=lambda v: SolverVBD(
-                        model=v, iterations=round_belt.VBD_ITERATIONS,
+                        model=v, iterations=self.vbd_iterations,
                         rigid_avbd_beta=round_belt.VBD_RIGID_AVBD_BETA,
                         rigid_contact_k_start=round_belt.VBD_RIGID_CONTACT_K_START,
-                        rigid_contact_history=False,
+                        rigid_contact_history=True,
                         rigid_body_contact_buffer_size=round_belt.VBD_RIGID_CONTACT_BUFFER_SIZE),
                     bodies=self.vbd_bodies, joints=self.vbd_joints, shapes=self.vbd_shapes),
             ],
             coupling=SolverCoupledProxy.Config(
                 proxies=[SolverCoupledProxy.Proxy(
-                    source="mjc", destination="vbd", bodies=list(info.gripper_pad_bodies),
+                    source="mjc", destination="vbd", bodies=list(info.proxy_bodies),
                     mass_scale=round_belt.PROXY_MASS_SCALE, mode=round_belt.PROXY_COUPLING_MODE,
+                    # Sticky matching keeps friction anchors across steps: static grip.
                     collision_pipeline=lambda model: newton.examples.create_collision_pipeline(
-                        model, broad_phase="explicit"),
+                        model, broad_phase="explicit", contact_matching="sticky"),
                     collide_interval=1)],
                 iterations=round_belt.PROXY_ITERATIONS),
         )
@@ -290,16 +297,49 @@ class BeltTaskSimulation:
             self.use_cuda_graph = False
             logger.warning(f"[CUDA GRAPH] capture failed; running uncaptured physics: {exc}")
         finally:
-            # sim_substeps is even so the swap normally restores the original
-            # ordering anyway, but restore explicitly so capture cannot perturb it.
+            # sim_substeps is even so the swap restores the original ordering anyway,
+            # but restore explicitly so capture cannot perturb it.
             self.state_0, self.state_1 = saved_state_0, saved_state_1
 
-    def step(self) -> None:
+    def reset_body_poses(self, bodies: Sequence[int], positions: np.ndarray) -> None:
+        """Teleport ``bodies`` to world ``positions`` (orientation kept, velocities zeroed).
+
+        ``solver.reset(flags=0)`` keeps the authored pose and only rebaselines solver history;
+        it may reallocate entry caches, so the CUDA graph is dropped and re-captured after the
+        next (uncaptured) frame.
+        """
+        idx = np.asarray(bodies, dtype=np.int64)
+        body_q = self.state_0.body_q.numpy()
+        body_qd = self.state_0.body_qd.numpy()
+        body_q[idx, :3] = np.asarray(positions, dtype=np.float64).reshape(len(idx), 3)
+        body_qd[idx] = 0.0
+        self.state_0.body_q.assign(body_q)
+        self.state_0.body_qd.assign(body_qd)
+
+        q_start = self.model.joint_q_start.numpy()
+        robot_end = self.info.robot_joints[-1] + 1
+        n_coords = int(self.model.joint_coord_count)
+        coord_end = int(q_start[robot_end]) if robot_end < len(q_start) else n_coords
+        robot_coords = slice(int(q_start[self.info.robot_joints[0]]), coord_end)
+        joint_q_before = self.state_0.joint_q.numpy()[robot_coords]
+        self.solver.reset(self.state_0, flags=0)
+        moved = float(np.abs(self.state_0.joint_q.numpy()[robot_coords] - joint_q_before).max())
+        assert moved < 1e-6, f"solver.reset moved the robots' joint_q by {moved:.3g}"
+        self.physics_graph = None
+
+    def _step_physics(self) -> None:
+        """Replay the captured frame, or run it uncaptured and then capture it."""
         if self.physics_graph is not None:
             with wp.ScopedDevice(self.device):
                 wp.capture_launch(self.physics_graph)
-        else:
-            self._simulate_physics()
+            return
+        self._simulate_physics()
+        # VBD contact history must be allocated by a real frame before capture.
+        if self.use_cuda_graph:
+            self._capture_physics_graph()
+
+    def step(self) -> None:
+        self._step_physics()
         self.sim_time += self.frame_dt
         self.frame_id += 1
         self._update_cameras()
@@ -332,6 +372,14 @@ class BeltTaskSimulation:
         parser.add_argument(
             "--no-cuda-graph", action="store_false", dest="cuda_graph", default=True,
             help="disable CUDA graph capture (A/B testing); solver settings are unchanged",
+        )
+        parser.add_argument(
+            "--substeps", type=int, default=10,
+            help="physics substeps per frame; must be even (CUDA graph state ping-pong)",
+        )
+        parser.add_argument(
+            "--vbd-iterations", type=int, default=round_belt.VBD_ITERATIONS,
+            help="VBD solver iterations per substep",
         )
         parser.add_argument(
             "--no-cameras", action="store_false", dest="cameras", default=True,

@@ -71,6 +71,18 @@ class SceneInfo:
     cameras: list[CameraSpec] = field(default_factory=list)
     point_clouds: list[PointCloudSpec] = field(default_factory=list)
     joint_config: JointConfig = field(default_factory=JointConfig)
+    franka_finger_bodies: list[int] = field(default_factory=list)
+    franka_finger_shapes: list[int] = field(default_factory=list)
+
+    @property
+    def proxy_bodies(self) -> list[int]:
+        """Robot bodies proxied into the belt's VBD entry: 2F-85 pads, then Franka fingers."""
+        return self.gripper_pad_bodies + self.franka_finger_bodies
+
+    @property
+    def contact_override_shapes(self) -> list[int]:
+        """Colliders of :attr:`proxy_bodies` that get the gripper contact material."""
+        return self.gripper_pad_shapes + self.franka_finger_shapes
 
 
 def make_builder() -> newton.ModelBuilder:
@@ -111,6 +123,16 @@ def span(records: Sequence[ModelRecord], what: str) -> tuple[list[int], list[int
 FINGER_COLLIDER_SUFFIX = "_aloha_finger_collision"
 UR10_BASE_LABEL = "/ur10/base_link"
 UR10_WRIST3_LABEL = "/ur10/wrist_3_link"
+FRANKA_FINGER_LEAVES = ("panda_rightfinger", "panda_leftfinger")
+
+
+def body_colliders(builder: newton.ModelBuilder, body: int) -> list[int]:
+    """Shapes on ``body`` that collide with other shapes."""
+    flag = int(newton.ShapeFlags.COLLIDE_SHAPES)
+    return [
+        s for s in range(builder.shape_count)
+        if int(builder.shape_body[s]) == int(body) and int(builder.shape_flags[s]) & flag
+    ]
 
 
 def finger_colliders(
@@ -179,6 +201,21 @@ def build_task_scene(
     if len(pad_bodies) != 2:
         raise RuntimeError(f"gripper contact needs exactly 2 pad bodies; got {pad_bodies}")
     pad_shapes = finger_colliders(builder, gripper, pad_bodies)
+    finger_bodies = [
+        b for b in models["panda_hand"].bodies
+        if str(builder.body_label[b]).rsplit("/", 1)[-1] in FRANKA_FINGER_LEAVES
+    ]
+    if len(finger_bodies) != 2:
+        raise RuntimeError(f"Franka hand needs exactly 2 finger bodies; got {finger_bodies}")
+    finger_shapes = []
+    for body in finger_bodies:
+        hits = body_colliders(builder, body)
+        if len(hits) != 1:
+            raise RuntimeError(
+                f"Franka finger {builder.body_label[body]!r} has {len(hits)} colliders, "
+                "expected exactly 1"
+            )
+        finger_shapes.append(hits[0])
 
     table_aabb = scene.aabbs[table_visual_label]
     ground_height = float(ground["height"])
@@ -186,7 +223,8 @@ def build_task_scene(
         f"Scene: {len(static_shapes)} static shapes, {len(robot_bodies)} robot bodies, "
         f"{len(belt['bodies'])} belt bodies; table AABB z = [{table_aabb[0][2]:.5f}, "
         f"{table_aabb[1][2]:.5f}], ground z = {ground_height:.5f}, "
-        f"tabletop_collision top z = {table_top_z:.5f}."
+        f"tabletop_collision top z = {table_top_z:.5f}, franka finger colliders "
+        f"{finger_shapes}."
     )
 
     return SceneInfo(
@@ -202,4 +240,5 @@ def build_task_scene(
         table_visual_aabb=(table_aabb[0], table_aabb[1]),
         cameras=[e for e in scene.extras.values() if isinstance(e, CameraSpec)],
         point_clouds=[e for e in scene.extras.values() if isinstance(e, PointCloudSpec)],
+        franka_finger_bodies=[int(b) for b in finger_bodies], franka_finger_shapes=finger_shapes,
     )

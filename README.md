@@ -7,13 +7,21 @@ This project develops a Newton/Warp belt simulation.
 ```text
 my_projects/
 ├── round_belt_task_simulation.py   # entry point: parser, logging, run
+├── round_belt_lcm_simulation.py    # LCM entry point: speaks magna's contract (docs/lcm-simulation.md)
 ├── round_belt_task/                # the round-belt task (built from directives)
-│   ├── constants.py                #   typed view over round_belt_scene.yaml
-│   ├── directives.py               #   custom directives (belt rod, tabletop, ground)
+│   ├── constants.py                #   typed view over round_belt_scene.yaml + round_belt_lcm_sim.yaml
+│   ├── directives.py               #   custom directives (belt rod only; tabletop/ground are
+│   │                                #   task-agnostic, see task_common/directives.py)
 │   ├── scene.py                    #   build_scene: load directives -> SceneInfo
 │   ├── joint_state.py              #   seeds joint values on the finalized Model
-│   └── simulation.py               #   RoundBeltTaskSimulation: solver, stepping
+│   ├── simulation.py               #   RoundBeltTaskSimulation: solver, stepping
+│   └── lcm_simulation.py           #   RoundBeltLcmSimulation: belt trigger over LCM
 ├── task_common/                    # task-agnostic scene/joint/simulation scaffolding, RGBD cameras
+│   ├── directives.py               #   task-agnostic custom directives (tabletop, ground)
+│   ├── lcm_contract.py             #   the Drake magna_simulation LCM contract (channels, messages)
+│   ├── lcm_bridge.py               #   non-blocking LCM I/O (latest-message inputs, publishes)
+│   ├── lcm_simulation.py           #   LcmBeltTaskSimulation: task-agnostic LCM control-step loop
+│   └── belt_mesh_lcm.py            #   optional DRAKE_VIEWER_DEFORMABLE tube-mesh publish
 │
 ├── utils/                          # task-agnostic Newton helpers
 │   ├── directives/                 #   Drake-style scene directives loader
@@ -30,14 +38,27 @@ my_projects/
 │   │   └── table/  franka_mount/  scene.urdf
 │   └── round_belt_task/
 │       ├── round_belt_scene.yaml   # THE SCENE (schema: docs/scene-directives.md)
+│       ├── round_belt_lcm_sim.yaml # LCM sim params: solver, drive gains, belt trigger (docs/lcm-simulation.md)
 │       ├── round_belt_task_board.urdf
 │       └── round_belt_task_board/  #   board + small/large pulleys
 │
+├── lcmtypes/                       # vendored .lcm sources (dairlib/drake/robotiq), byte-identical to magna
+├── dairlib/  drake/  robotiq/      # generated Python LCM types (scripts/gen_lcmtypes.sh), checked in
+├── procman/                        # newton_assembly_sim.pmd + run_in_magna.sh / run_newton_sim.sh wrappers
+│
 ├── scripts/
 │   ├── check_round_belt_task_poses.py   # independent-FK pose check vs the Drake yaml
-│   └── check_scene_directives.py        # directives loader / scene checks
+│   ├── check_scene_directives.py        # directives loader / scene checks
+│   ├── check_lcmtypes.py                # vendored LCM types vs magna's generated modules
+│   ├── check_lcm_contract.py            # 11 checks against a live LCM sim (docs/lcm-simulation.md)
+│   ├── bench_lcm_sim_settings.py        # measures/picks the LCM sim's solver settings
+│   ├── summarize_e2e_logs.py            # summarizes a sim log + controller log from an E2E run
+│   ├── gen_lcmtypes.sh                  # regenerates dairlib/ drake/ robotiq/ from lcmtypes/*/*.lcm
+│   └── lcm_peer_utils.py                # shared LCM peer tooling for the checks/bench above
 │
-├── docs/scene-directives.md        # directive schema + how to add a task
+├── docs/
+│   ├── scene-directives.md         # directive schema + how to add a task
+│   └── lcm-simulation.md           # the LCM contract, running, CLI, tuning, divergences
 ├── 2f85.xml                        # Robotiq 2F-85 MJCF (shared with the other sims)
 ├── external/newton/                # Newton source (git submodule)
 ├── task_board_urdf/                # optional submodule; no longer needed by this task
@@ -128,8 +149,9 @@ The scene is authored as data, not code: `assets/round_belt_task/round_belt_scen
 (plus the shared `assets/common/directives/ur10_2f85.yaml` for the UR10 + Robotiq 2F-85) is
 a Drake-shaped directives file — `add_model` / `add_weld` / `add_frame` / `add_directives`
 with `X_PC` + `!Rpy { deg: ... }` poses transcribed verbatim from the Drake yaml, plus the
-Newton-native custom directives in `round_belt_task/directives.py` (`add_tabletop_collision`,
-`add_rod_ellipse`, `add_ground_plane`). It is loaded onto the
+Newton-native custom directives: `add_tabletop_collision` and `add_ground_plane`
+(task-agnostic, `task_common/directives.py`) and `add_rod_ellipse` (belt-specific,
+`round_belt_task/directives.py`). It is loaded onto the
 `ModelBuilder` by `utils/directives/`, and `round_belt_task/constants.py` reads its numbers
 from the parsed file, so every scene number lives once, in the
 YAML. Directive order is load-bearing: it fixes every body and shape index. Schema
@@ -222,6 +244,31 @@ uv run python round_belt_task_simulation.py --viewer null --num-frames 200 --no-
 
 The script prints a world-pose table for the key robot frames on startup, which
 is the quickest way to confirm the scene matches Drake.
+
+---
+
+#### `round_belt_lcm_simulation.py`
+
+##### Current setup
+
+Same scene as `round_belt_task_simulation.py`, but driven over LCM instead of a viewer loop: it
+speaks magna's `magna_simulation` LCM contract, so the unchanged magna round-belt controllers
+(`franka_cartesian_osc_controller`, `ur_cartesian_trajectory_controller`,
+`run_round_belt_assembly_controller`) can run against this repo's Newton sim in place of Drake.
+It replaces magna's own `franka_hand_simulation` and `robotiq_control_simulation`: this sim
+drives the Panda hand and the 2F-85 gripper itself from `PANDA_HAND_COMMAND` /
+`ROBOTIQ_COMMAND`. Full contract, CLI, tuning numbers and known divergences from Drake:
+`docs/lcm-simulation.md`.
+
+##### Run
+
+```bash
+# smoke check (publishes on whatever --lcm-url is; use a private group, not the shared default)
+uv run python round_belt_lcm_simulation.py --test --lcm-url "udpm://239.255.76.68:7668?ttl=0"
+
+# real-time, default LCM group, ready for the magna controllers
+uv run python round_belt_lcm_simulation.py
+```
 
 ---
 

@@ -269,8 +269,9 @@ read-only reference outside this repo):
    `EXTENSION_DIRECTIVES` does today, following §8.
 6. Add a `bike_chain_task/` package mirroring `round_belt_task/`: a `constants.py` that
    calls `parse_directives` on the new scene file, and a `scene.py` whose `build_scene`
-   calls `load_directives(builder, directives_path, directives=...)` and maps the resulting
-   `LoadedScene` into a task-specific `SceneInfo`-shaped dataclass (in this repo,
+   calls `task_common.scene.build_task_scene(builder, directives_path, directives=...)`,
+   which is what actually calls `load_directives(builder, directives_path, directives=...)`
+   and maps the resulting `LoadedScene` into `SceneInfo` (in this repo,
    `round_belt_task/scene.py`'s `build_scene` is the pattern to follow, though it is closer
    to 60 lines than 30 once the static/robot bookkeeping is included).
 

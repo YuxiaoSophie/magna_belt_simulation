@@ -1,0 +1,52 @@
+group "simulation subsystems" {
+    cmd "ur-control-simulation" {
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_in_magna.sh bazel-bin/systems/simulation/ur_control_simulation";
+        host = "localhost";
+    }
+    cmd "ur_trajectory_cartesian_osc" {
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_in_magna.sh bazel-bin/systems/controllers/ur_cartesian_trajectory_controller --ur_input_mode=1";
+        host = "localhost";
+    }
+    cmd "franka_trajectory_cartesian_osc" {
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_in_magna.sh bazel-bin/systems/controllers/franka_cartesian_osc_controller --input_mode=1";
+        host = "localhost";
+    }
+}
+
+group "newton round-belt task" {
+    cmd "newton-round-belt-simulation" {
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_newton_sim.sh --publish-belt-mesh --viewer viser --render-every 20";
+        host = "localhost";
+    }
+    cmd "round-belt-visualizer" {
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_in_magna.sh bazel-bin/systems/visualization/magna_visualization --visualization_params_file=systems/parameters/assembly_visualization_params.yaml --assembly_controller_params_file=systems/parameters/round_belt_controller_params_sim.yaml";
+        host = "localhost";
+    }
+    cmd "round-belt-assembly-controller" {
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_in_magna.sh bazel-bin/systems/controllers/run_round_belt_assembly_controller --assembly_controller_params=systems/parameters/round_belt_controller_params_sim.yaml --lcm_url=udpm://239.255.76.67:7667?ttl=0";
+        host = "localhost";
+    }
+}
+
+group "debug" {
+    cmd "lcm-spy" {
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_in_magna.sh bazel-bin/lcmtypes/dair-lcm-spy";
+        host = "localhost";
+    }
+}
+
+script "run_newton_round_belt_sim" {
+    stop everything;
+    wait ms 1000;
+    start cmd "newton-round-belt-simulation";
+    wait ms 15000;
+    start group "simulation subsystems";
+    start cmd "round-belt-visualizer";
+    start cmd "round-belt-assembly-controller";
+}
+
+script "end_experiment" {
+    stop group "simulation subsystems";
+    stop group "newton round-belt task";
+    stop group "debug";
+}

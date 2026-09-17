@@ -18,6 +18,8 @@ from round_belt_task.constants import (
     BELT_TRIGGER_NEAREST_RADIUS,
     BELT_TRIGGER_POINT,
     BELT_TRIGGER_TOLERANCE,
+    LCM_GRIPPER_DRIVE_DAMPING,
+    LCM_GRIPPER_DRIVE_EFFORT_LIMIT,
     LCM_GRIPPER_DRIVE_KD,
     LCM_GRIPPER_DRIVE_KE,
     LCM_GRIPPER_DRIVE_STOP,
@@ -62,6 +64,8 @@ class RoundBeltLcmSimulation(LcmBeltTaskSimulation):
     gripper_drive_ke = LCM_GRIPPER_DRIVE_KE
     gripper_drive_kd = LCM_GRIPPER_DRIVE_KD
     gripper_drive_stop = LCM_GRIPPER_DRIVE_STOP
+    gripper_drive_effort_limit = LCM_GRIPPER_DRIVE_EFFORT_LIMIT
+    gripper_drive_damping = LCM_GRIPPER_DRIVE_DAMPING
     hand_drive = HandDrive(
         ke=LCM_HAND_DRIVE_KE, kd=LCM_HAND_DRIVE_KD, effort_limit=LCM_HAND_DRIVE_EFFORT_LIMIT,
         stale_timeout=LCM_HAND_DRIVE_STALE_TIMEOUT, armature=LCM_HAND_DRIVE_ARMATURE,

@@ -95,6 +95,8 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
     gripper_drive_ke: float | None = None
     gripper_drive_kd: float | None = None
     gripper_drive_stop: float | None = None
+    gripper_drive_effort_limit: float | None = None
+    gripper_drive_damping: float | None = None
     belt_radius: float | None = None
     hand_drive: HandDrive | None = None
 
@@ -222,11 +224,16 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         self._driver_dofs = np.asarray(dofs, dtype=np.int64)
         self._driver_open = np.asarray(cfg["gripper_open_values"], dtype=np.float64)
         self._driver_span = model.joint_limit_upper.numpy()[self._driver_dofs] - self._driver_open
-        if self.gripper_drive_stop is not None:
-            # A mechanical stop, not a target clamp: the span (status fraction, grip force) is kept.
-            upper = model.joint_limit_upper.numpy().copy()
-            upper[self._driver_dofs] = self.gripper_drive_stop
-            model.joint_limit_upper.assign(upper)
+        # A mechanical stop, not a target clamp: the span (status fraction, grip force) is kept.
+        # Damping is passive so it still acts while the PD torque is clamped on a stalled grip.
+        for array, value in ((model.joint_limit_upper, self.gripper_drive_stop),
+                             (model.joint_effort_limit, self.gripper_drive_effort_limit),
+                             (model.joint_damping, self.gripper_drive_damping)):
+            if value is None:
+                continue
+            values = array.numpy().copy()
+            values[self._driver_dofs] = value
+            array.assign(values)
 
     def _couple_hand_fingers(self, builder: newton.ModelBuilder) -> None:
         """With ``hand_drive``: ``panda_finger_joint2 = -panda_finger_joint1``, before finalize."""
@@ -291,7 +298,9 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
                 f"closed {self._driver_open[i] + self._driver_span[i]:.4f}, "
                 f"stop {self.model.joint_limit_upper.numpy()[self._driver_dofs[i]]:.4f}, "
                 f"ke {self.model.joint_target_ke.numpy()[self._driver_dofs[i]]:g} "
-                f"kd {self.model.joint_target_kd.numpy()[self._driver_dofs[i]]:g}"
+                f"kd {self.model.joint_target_kd.numpy()[self._driver_dofs[i]]:g}, "
+                f"effort {self.model.joint_effort_limit.numpy()[self._driver_dofs[i]]:g} "
+                f"damping {self.model.joint_damping.numpy()[self._driver_dofs[i]]:g}"
             )
         c = self.channels
         drive = self.hand_drive

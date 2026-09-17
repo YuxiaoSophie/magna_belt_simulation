@@ -1,9 +1,11 @@
 # Round-belt LCM simulation (round_belt_lcm_simulation.py); every LCM-sim number lives here.
 # substeps must be even: the captured CUDA graph only returns the newest state for even counts.
 solver: {substeps: 2, vbd_iterations: 10}
-# 2F-85 driver position PD for the LCM sim only (effort limit unchanged); open/close <= 1 s.
+# 2F-85 driver position PD for the LCM sim only; open/close <= 1 s.
 # stop [rad]: driver upper limit where the finger colliders meet (the real gripper's empty close).
-gripper_drive: {ke: 400.0, kd: 80.0, stop: 0.648}
+# effort_limit [N m]: the clamped PD torque on a stall = grip, ~30-45 N per pad on the belt.
+# damping [N m s/rad]: passive, outside the clamp; without it a stalled grip rings at ~2.5 Hz.
+gripper_drive: {ke: 400.0, kd: 80.0, stop: 0.648, effort_limit: 2.0, damping: 1.0}
 # Panda finger drive: Drake OSC gains, effort = URDF limit, stale rule = ShunkCommandToTrajectory.
 # armature [kg] stabilises the lagged proxy finger-belt contact on the 0.1 kg finger; Drake: none.
 # max_speed [m/s]: per-finger target slew; a faster impact kicks the belt off the holder.

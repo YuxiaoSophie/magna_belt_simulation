@@ -1,0 +1,158 @@
+"""Round-belt scene constants, read from ``assets/round_belt_task/round_belt_scene.yaml``."""
+
+from __future__ import annotations
+
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+import warp as wp
+import yaml
+
+from task_common import REPO_ROOT
+from task_common.joint_state import (  # noqa: F401
+    ARM_TARGET_KD,
+    ARM_TARGET_KE,
+    FINGER_TARGET_KD,
+    FINGER_TARGET_KE,
+    GRIPPER_OPEN_MARGIN,
+)
+from task_common.scene import UR10_BASE_LABEL, UR10_WRIST3_LABEL  # noqa: F401
+from utils.directives import Directive, parse_directives
+
+ASSETS_DIR = REPO_ROOT / "assets"
+COMMON_ASSETS_DIR = ASSETS_DIR / "common"
+ROUND_BELT_ASSETS_DIR = ASSETS_DIR / "round_belt_task"
+SCENE_DIRECTIVES = ROUND_BELT_ASSETS_DIR / "round_belt_scene.yaml"
+LCM_SIM_PARAMS = ROUND_BELT_ASSETS_DIR / "round_belt_lcm_sim.yaml"
+
+_D = parse_directives(SCENE_DIRECTIVES)
+
+
+def _source(directive: Directive) -> Path:
+    """The yaml that authored ``directive``; its relative paths resolve against it."""
+    return next(source for entry, source in _D.entries if entry is directive)
+
+
+def _model_file(name: str) -> Path:
+    model = _D.model(name)
+    return _D.resolve_path(model.file, _source(model))
+
+
+TABLE_VISUAL_LABEL = "table/scene/visual0"
+PANDA_JOINT_LABELS = [f"panda_arm/panda_joint{i}" for i in range(1, 8)]
+PANDA_FINGER_LABELS = ["panda_hand/panda_finger_joint1", "panda_hand/panda_finger_joint2"]
+UR10_JOINT_LABELS = [
+    "/ur10/base_link/shoulder_pan_joint",
+    "/ur10/shoulder_link/shoulder_lift_joint",
+    "/ur10/upper_arm_link/elbow_joint",
+    "/ur10/forearm_link/wrist_1_joint",
+    "/ur10/wrist_1_link/wrist_2_joint",
+    "/ur10/wrist_2_link/wrist_3_joint",
+]
+
+TABLE_URDF = _model_file("table")
+BOARD_URDF = _model_file("board")
+HOLDER_URDF = _model_file("belt_chain_holder")
+PANDA_ARM_URDF = _model_file("panda_arm")
+PANDA_HAND_URDF = _model_file("panda_hand")
+ROBOTIQ_MJCF = _model_file("robotiq_2f85")
+# FK reference for scripts/checks/check_round_belt_task_poses.py; the scene builds the USD UR10.
+UR10_URDF = COMMON_ASSETS_DIR / "ur10" / "ur10.urdf"
+
+X_W_TABLE = _D.weld("table::scene").X_PC.to_transform()
+X_W_BOARD = _D.weld("board::board").X_PC.to_transform()
+X_W_HOLDER = _D.weld("belt_chain_holder::belt_chain_holder_first_half").X_PC.to_transform()
+X_W_PANDA = _D.weld("panda_arm::panda_link0").X_PC.to_transform()
+X_LINK8_HAND = _D.weld("panda_hand::panda_hand").X_PC.to_transform()
+X_W_UR10 = _D.weld("ur10::base_link").X_PC.to_transform()
+X_USDWRIST3_URDFWRIST3 = _D.frame("ur10_wrist_3_link_drake").X_PF.to_transform()
+X_WRIST3_GRIPPER = _D.weld("robotiq_2f85").X_PC.to_transform()
+X_USDWRIST3_GRIPPER = X_USDWRIST3_URDFWRIST3 * X_WRIST3_GRIPPER
+
+# wrist_3_joint origin offset; must match the ur10_wrist_3_link_drake frame.
+UR10_WRIST3_D6 = 0.0922
+if abs(float(wp.transform_get_translation(X_USDWRIST3_URDFWRIST3)[1]) - UR10_WRIST3_D6) >= 1e-6:
+    raise AssertionError(
+        f"ur10_wrist_3_link_drake translation {X_USDWRIST3_URDFWRIST3} does not carry "
+        f"d6 = UR10_WRIST3_D6 = {UR10_WRIST3_D6} on +Y"
+    )
+
+
+def _joint_defaults(model: str, labels: list[str]) -> list[float]:
+    """``model``'s ``default_joint_positions``, ordered by the leaf names of ``labels``."""
+    positions = _D.model(model).default_joint_positions
+    leaves = [label.rsplit("/", 1)[-1] for label in labels]
+    if sorted(positions) != sorted(leaves) or any(len(v) != 1 for v in positions.values()):
+        raise ValueError(
+            f"{SCENE_DIRECTIVES}: {model} default_joint_positions {positions} must give "
+            f"exactly one value for each of {leaves}"
+        )
+    return [positions[leaf][0] for leaf in leaves]
+
+
+PANDA_DEFAULT_Q = _joint_defaults("panda_arm", PANDA_JOINT_LABELS)
+PANDA_FINGER_DEFAULT_Q = _joint_defaults("panda_hand", PANDA_FINGER_LABELS)
+UR10_DEFAULT_Q = _joint_defaults("ur10", UR10_JOINT_LABELS)
+
+_TABLETOP = _D.custom("add_tabletop_collision").params
+_GROUND = _D.custom("add_ground_plane").params
+_TABLE_REFS = (_TABLETOP.get("table_visual"), _GROUND.get("height_from_aabb_min_z_of"))
+if any(ref != TABLE_VISUAL_LABEL for ref in _TABLE_REFS):
+    raise ValueError(
+        f"{SCENE_DIRECTIVES}: tabletop and ground must both reference {TABLE_VISUAL_LABEL!r}, "
+        f"got {_TABLE_REFS}"
+    )
+TABLE_TOP_Z = float(_TABLETOP["top_z"])
+TABLETOP_COLLISION_THICKNESS = float(_TABLETOP["thickness"])
+
+_BELT = _D.custom("add_rod_ellipse", "flexible_ellipse_cable").params
+BELT_CENTER = tuple(float(v) for v in _BELT["center"])
+BELT_SEMI_AXIS_X, BELT_SEMI_AXIS_Y = (float(v) for v in _BELT["semi_axes"])
+BELT_RADIUS = float(_BELT["radius"])
+BELT_NUM_ELEMENTS = int(_BELT["num_elements"])
+BELT_COLOR = tuple(float(v) for v in _BELT["color"])
+
+_BOARD = _D.model("board")
+_MOUNT = _BOARD.component_colors[0]
+BOARD_COLOR = _BOARD.color
+SMALL_PULLEY_COLOR = _BOARD.link_colors["small_round_pulley"]
+LARGE_PULLEY_COLOR = _BOARD.link_colors["large_round_pulley"]
+PULLEY_MOUNT_COLOR = _MOUNT.color
+PULLEY_JOINT_LABELS = ["board/small_round_pulley_joint", "board/large_round_pulley_joint"]
+_BOARD_JOINTS = {j.get("name"): j for j in ET.parse(BOARD_URDF).getroot().iter("joint")}
+PULLEY_CENTERS_LOCAL = tuple(
+    tuple(float(v) for v in _BOARD_JOINTS[leaf].find("origin").get("xyz").split())
+    for leaf in (label.rsplit("/", 1)[-1] for label in PULLEY_JOINT_LABELS)
+)
+SMALL_PULLEY_MOUNT_LOCAL_XY = _MOUNT.near_local_xy
+SMALL_PULLEY_MOUNT_RADIUS = _MOUNT.radius
+BOARD_PANEL_MIN_SPAN = _MOUNT.max_span
+
+_LCM = yaml.safe_load(LCM_SIM_PARAMS.read_text())
+LCM_SOLVER_SUBSTEPS = int(_LCM["solver"]["substeps"])
+LCM_SOLVER_VBD_ITERATIONS = int(_LCM["solver"]["vbd_iterations"])
+LCM_GRIPPER_DRIVE_KE = float(_LCM["gripper_drive"]["ke"])
+LCM_GRIPPER_DRIVE_KD = float(_LCM["gripper_drive"]["kd"])
+LCM_GRIPPER_DRIVE_STOP = float(_LCM["gripper_drive"]["stop"])
+LCM_GRIPPER_DRIVE_EFFORT_LIMIT = float(_LCM["gripper_drive"]["effort_limit"])
+LCM_GRIPPER_DRIVE_DAMPING = float(_LCM["gripper_drive"]["damping"])
+LCM_GRIPPER_DRIVE_WIDTH_CALIBRATION = tuple(
+    (float(angle), float(gap)) for angle, gap in _LCM["gripper_drive"]["width_calibration"]
+)
+LCM_HAND_DRIVE_KE = float(_LCM["hand_drive"]["ke"])
+LCM_HAND_DRIVE_KD = float(_LCM["hand_drive"]["kd"])
+LCM_HAND_DRIVE_EFFORT_LIMIT = float(_LCM["hand_drive"]["effort_limit"])
+LCM_HAND_DRIVE_STALE_TIMEOUT = float(_LCM["hand_drive"]["stale_timeout"])
+LCM_HAND_DRIVE_ARMATURE = float(_LCM["hand_drive"]["armature"])
+LCM_HAND_DRIVE_MAX_SPEED = float(_LCM["hand_drive"]["max_speed"])
+LCM_HAND_DRIVE_LIMIT_KE = float(_LCM["hand_drive"]["limit_ke"])
+LCM_HAND_DRIVE_LIMIT_KD = float(_LCM["hand_drive"]["limit_kd"])
+LCM_UR_GRIPPER_TIP_Z = float(_LCM["ur_gripper_tip_z"])
+LCM_PULLEY_STATE_OBJECT_NAME = str(_LCM["pulley_state"]["object_name"])
+BELT_TRIGGER_BODY = str(_LCM["belt_trigger"]["body"])
+BELT_TRIGGER_POINT = tuple(float(v) for v in _LCM["belt_trigger"]["point"])
+BELT_TRIGGER_TOLERANCE = float(_LCM["belt_trigger"]["tolerance"])
+BELT_TRIGGER_GRASP_DEPTH = float(_LCM["belt_trigger"]["grasp_depth"])
+BELT_TRIGGER_NEAREST_RADIUS = float(_LCM["belt_trigger"]["nearest_body_radius"])
+if len(BELT_TRIGGER_POINT) != 3:
+    raise ValueError(f"{LCM_SIM_PARAMS}: belt_trigger.point must be a 3-vector")

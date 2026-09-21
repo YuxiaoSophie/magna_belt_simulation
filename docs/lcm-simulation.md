@@ -1,12 +1,12 @@
 # LCM simulation
 
-`round_belt_lcm_simulation.py` speaks magna's `magna_simulation` LCM contract, so the unchanged
+`scripts/round_belt_lcm_simulation.py` speaks magna's `magna_simulation` LCM contract, so the unchanged
 magna round-belt controllers can drive this repo's Newton sim in place of Drake. Where this doc
 and the code disagree, the code wins — file an issue against this doc, not the code.
 
 ## 1. What this is
 
-For the round-belt task, `round_belt_lcm_simulation.py` replaces magna's `magna_simulation`
+For the round-belt task, `scripts/round_belt_lcm_simulation.py` replaces magna's `magna_simulation`
 process: it subscribes the same input channels, publishes the same six state channels at the
 same 5 ms cadence, and the magna controllers
 (`franka_cartesian_osc_controller --input_mode=1`, `ur_cartesian_trajectory_controller
@@ -16,17 +16,18 @@ Panda fingers itself, see §2/§7) and `robotiq_control_simulation` (this sim is
 driver directly). Drake (`magna_simulation`) stays the sim of record for every other task; this
 is a Newton-only alternative for the round-belt task.
 
-Entry point: `round_belt_lcm_simulation.py`. Everything it wires up lives in
-`task_common/lcm_simulation.py` (`LcmBeltTaskSimulation`, task-agnostic control-step loop),
-`round_belt_task/lcm_simulation.py` (`RoundBeltLcmSimulation`, the belt trigger), and
-`task_common/lcm_contract.py` / `task_common/lcm_bridge.py` (the wire contract and the non-
+Entry point: `scripts/round_belt_lcm_simulation.py`. Everything it wires up lives in
+`src/task_common/lcm_simulation.py` (`LcmBeltTaskSimulation`, task-agnostic control-step loop),
+`src/round_belt_task/lcm_simulation.py` (`RoundBeltLcmSimulation`, the belt trigger), and
+`src/task_common/lcm_contract.py` / `src/task_common/lcm_bridge.py` (the wire contract and the non-
 blocking LCM I/O).
 
 ## 2. Contract table
 
-All channels are `dairlib`/`drake`/`robotiq` LCM types vendored under `lcmtypes/` (see §8,
-`scripts/check_lcmtypes.py`). Every output publishes once per 5 ms control step (200 Hz) unless
-noted.
+All channels are `dairlib`/`drake`/`robotiq` LCM types vendored under `lcmtypes/`, `.lcm`
+sources and generated Python side by side (`import task_common` puts `lcmtypes/` on `sys.path`;
+see §8, `scripts/checks/check_lcmtypes.py`). Every output publishes once per 5 ms control step (200 Hz)
+unless noted.
 `utime = step_index * 5000` (µs) on every message.
 
 | channel | type | dir | names | formula |
@@ -78,7 +79,7 @@ everything above ~byte 160 into the last few millimetres of travel: the hardware
 5.8 mm here, so the UR never released the 6.6 mm belt. Byte 0 and byte 255 are exact endpoints by
 construction — 0 is the open value, 255 keeps the full-close target (0.8 rad, well past the
 0.648 rad stop) because that overdrive against the stop is what produces the grip force.
-`scripts/check_robotiq_width.py` re-measures the jaw and holds the sweep to 1 mm (§8).
+`scripts/checks/check_robotiq_width.py` re-measures the jaw and holds the sweep to 1 mm (§8).
 
 ## 3. Running
 
@@ -154,7 +155,7 @@ Not modelled in this mode (it is the *parameters* that are hardware's, not the p
 1. This repo, sim first (it owns gravity compensation and the default closed-hand/torque-mode
    arm targets the OSC controllers expect to find):
    ```bash
-   uv run python round_belt_lcm_simulation.py
+   uv run python scripts/round_belt_lcm_simulation.py
    ```
 2. In the magna checkout: `ur_control_simulation`, `ur_cartesian_trajectory_controller
    --ur_input_mode=1`, `franka_cartesian_osc_controller --input_mode=1` (all under
@@ -188,11 +189,11 @@ procman `exec` lines, or the private-URL recipe below for a manual run).
 - `export LCM_DEFAULT_URL=<private-url>` as a belt-and-braces extra: it only matters for a
   process invoked with no `--lcm_url` of its own (e.g. the debug group's `lcm-spy`, which is not
   one of magna's gflags binaries).
-- The Newton sim: `--lcm-url <private-url>` (`round_belt_lcm_simulation.py`'s own flag).
+- The Newton sim: `--lcm-url <private-url>` (`scripts/round_belt_lcm_simulation.py`'s own flag).
 - Known leak: `run_round_belt_assembly_controller` also publishes a handful of C3 debug channels
   on a hard-coded shared group, independent of `--lcm_url` — a private-URL run is isolated for
   the contract channels but not perfectly silent on that debug group.
-- `scripts/check_lcm_contract.py` and `scripts/debug/bench_lcm_sim_settings.py` use their own private
+- `scripts/checks/check_lcm_contract.py` and `scripts/debug/bench_lcm_sim_settings.py` use their own private
   group `udpm://239.255.76.68:7668?ttl=0` internally; they never touch a running stack.
 
 ### Viewer options
@@ -213,9 +214,9 @@ viewer shows the actual simulated 2F-85 linkage and belt rod (plus collision geo
 measured) `DRAKE_VIEWER_DEFORMABLE` publish at 20 Hz so an
 external Drake-protocol viewer can render the belt without running this sim's own viewer.
 
-## 4. CLI reference (`round_belt_lcm_simulation.py --help`)
+## 4. CLI reference (`scripts/round_belt_lcm_simulation.py --help`)
 
-Task/Newton-inherited flags (`task_common/simulation.py`, Newton's `newton.examples.init`):
+Task/Newton-inherited flags (`src/task_common/simulation.py`, Newton's `newton.examples.init`):
 
 | flag | default | what |
 |---|---|---|
@@ -233,7 +234,7 @@ Task/Newton-inherited flags (`task_common/simulation.py`, Newton's `newton.examp
 | `--no-cameras` | cameras off (this script overrides the base parser's `cameras=True` default) | do not render the scene's RGBD cameras; redundant here, see `--cameras` below |
 | `--show-collision` | off | draw collision geometry in every viewer |
 
-This script's own flags (`round_belt_lcm_simulation.py` / `LcmBeltTaskSimulation.create_parser`),
+This script's own flags (`scripts/round_belt_lcm_simulation.py` / `LcmBeltTaskSimulation.create_parser`),
 which also override some of the above defaults (`viewer=null`, `substeps`/`vbd_iterations` from
 the YAML, `cameras=False`):
 
@@ -294,7 +295,7 @@ run variation is real, not just noise: the second run's belt caught on a pulley 
 ## 6. Belt initial condition
 
 The belt starts resting in the holder (`add_rod_ellipse` in
-`assets/round_belt_task/round_belt_scene.yaml`); `round_belt_task/lcm_simulation.py` reproduces
+`assets/round_belt_task/round_belt_scene.yaml`); `src/round_belt_task/lcm_simulation.py` reproduces
 magna's own "place the belt into the hand" trigger from `magna_simulation.cc`
 (`assets/round_belt_task/round_belt_lcm_sim.yaml` `belt_trigger:`): once
 `panda_hand/finger_tip` comes within `tolerance` (0.005 m) of `point` (a fixed world point), the
@@ -360,7 +361,7 @@ but **the trigger does not fire with the current magna compiled trajectory, in e
 or the Newton sim** (no `Set belt position` / `[BELT] placed` line appears in either baseline
 run); the belt is instead already resting in the fingers' reach by the time the controller closes
 the hand at the holder. See §8 (check 9) for a synthetic reproduction of the trigger + grasp via
-`scripts/lcm_peer_utils.py`.
+`scripts/checks/lcm_peer_utils.py`.
 
 ## 7. Divergences from Drake
 
@@ -384,22 +385,22 @@ the hand at the holder. See §8 (check 9) for a synthetic reproduction of the tr
 
 ## 8. Checks and scripts
 
-Every script below runs as `uv run python <script>` (bash for `scripts/gen_lcmtypes.sh`) from
+Every script below runs as `uv run python <script>` (bash for `lcmtypes/gen_lcmtypes.sh`) from
 the repo root; the "extra args" column is what follows the script path.
 
 | script | checks | extra args |
 |---|---|---|
-| `scripts/check_lcmtypes.py` | 9 vendored LCM types: fingerprint match against magna's own generated modules (skipped if that bazel tree is absent) + an encode/decode round trip | none |
-| `scripts/check_lcm_contract.py` | 12 checks against a live, non-realtime `RoundBeltLcmSimulation` on a private LCM group: (1) layouts vs `scripts/data/drake_lcm_layouts.json`, (2) utime monotonic, (3) gravity hold + default (closed) hand, (4) Franka torque sign, (5) Franka stale damping, (6) UR torque sign (no stale rule), (7) hand command open/close/squeeze/stale timing, (8) Robotiq round trip, (9) belt trigger + Franka grasp + a 50 mm lift, (10) `LcmChannels.from_yaml` against magna's own `/home/hienbui/git/magna/systems/parameters/lcm_channels.yaml`, (11) belt tube mesh geometry + wire layout, (12) `ROUND_BELT_PULLEY_STATE` once per step with the names, utime and the simulated pulley `joint_q`/`joint_qd` | none |
-| `scripts/check_pulleys.py` | the free pulley axles in the position-PD `RoundBeltTaskSimulation`: (T0) 2 VBD bodies on world revolute joints at the board weld composed with the joint origins, axis = board normal, (T1) 2 s zero-torque hold (angle < 0.005 rad, centre drift/sag < 0.5 mm), (T2/T3) 2e-3 N m `joint_f` for 0.5 s drives each pulley to torque/damping (2 rad/s, +-15 %) and the damped-rigid angle (+-20 %) without moving its centre or the other pulley, then after release it spins down with the time constant Izz/damping | none |
-| `scripts/check_robotiq_width.py` | the `ROBOTIQ_COMMAND` byte to jaw width map (§2) against a live `RoundBeltLcmSimulation` on a private LCM group: (T0) the 256-entry byte -> driver target table (byte 0 at the open value, 255 at the full-close target, monotone, calibration spanning open to `gripper_drive.stop`), (T1) a 10-byte free-air sweep whose measured pad gap (minimum distance between the two pad collision meshes) is within 1 mm of `open_gap * (1 - byte/255)`, endpoints included, (T2) the `ROBOTIQ_STATUS` position echoes each reached byte to within 3 counts | none |
+| `scripts/checks/check_lcmtypes.py` | the three packages resolve to `lcmtypes/<pkg>/`; then 9 vendored LCM types: fingerprint match against magna's own generated modules (skipped if that bazel tree is absent) + an encode/decode round trip | none |
+| `scripts/checks/check_lcm_contract.py` | 12 checks against a live, non-realtime `RoundBeltLcmSimulation` on a private LCM group: (1) layouts vs `scripts/checks/data/drake_lcm_layouts.json`, (2) utime monotonic, (3) gravity hold + default (closed) hand, (4) Franka torque sign, (5) Franka stale damping, (6) UR torque sign (no stale rule), (7) hand command open/close/squeeze/stale timing, (8) Robotiq round trip, (9) belt trigger + Franka grasp + a 50 mm lift, (10) `LcmChannels.from_yaml` against magna's own `/home/hienbui/git/magna/systems/parameters/lcm_channels.yaml`, (11) belt tube mesh geometry + wire layout, (12) `ROUND_BELT_PULLEY_STATE` once per step with the names, utime and the simulated pulley `joint_q`/`joint_qd` | none |
+| `scripts/checks/check_pulleys.py` | the free pulley axles in the position-PD `RoundBeltTaskSimulation`: (T0) 2 VBD bodies on world revolute joints at the board weld composed with the joint origins, axis = board normal, (T1) 2 s zero-torque hold (angle < 0.005 rad, centre drift/sag < 0.5 mm), (T2/T3) 2e-3 N m `joint_f` for 0.5 s drives each pulley to torque/damping (2 rad/s, +-15 %) and the damped-rigid angle (+-20 %) without moving its centre or the other pulley, then after release it spins down with the time constant Izz/damping | none |
+| `scripts/checks/check_robotiq_width.py` | the `ROBOTIQ_COMMAND` byte to jaw width map (§2) against a live `RoundBeltLcmSimulation` on a private LCM group: (T0) the 256-entry byte -> driver target table (byte 0 at the open value, 255 at the full-close target, monotone, calibration spanning open to `gripper_drive.stop`), (T1) a 10-byte free-air sweep whose measured pad gap (minimum distance between the two pad collision meshes) is within 1 mm of `open_gap * (1 - byte/255)`, endpoints included, (T2) the `ROBOTIQ_STATUS` position echoes each reached byte to within 3 counts | none |
 | `scripts/debug/bench_lcm_sim_settings.py` | rest bench (speed + stability) + the diagnostic grasp-and-drag, per `substeps/vbd_iterations` pair; picks and can write the YAML (§5) | `--settings 2/5,2/10 --write-yaml` |
-| `scripts/gen_lcmtypes.sh` | not a check — regenerates `dairlib/`, `drake/`, `robotiq/` from `lcmtypes/*/*.lcm` with the venv's `lcm-gen`; idempotent (re-running produces byte-identical output) | none |
+| `lcmtypes/gen_lcmtypes.sh` | not a check — regenerates the `dairlib`/`drake`/`robotiq` Python packages in place in `lcmtypes/<pkg>/` (beside the `.lcm` sources, which it never deletes) with the venv's `lcm-gen`; idempotent (re-running produces byte-identical output) | none |
 | `scripts/debug/summarize_e2e_logs.py` | not a check — parses a sim log + a controller log from an end-to-end run (procman or manual) into rate, phase-marker, `[BELT]`/`[GRASP]` (incl. per-pulley unwrapped rotation, >= 3 deg/sample turning windows and the final pulley drift) and error-line summaries; works on either sim's log (Drake fields read `n/a`) | `<sim.log> <controller.log>` |
 
-`scripts/lcm_peer_utils.py` is shared tooling (not a script to run directly): a finger-tip IK,
+`scripts/checks/lcm_peer_utils.py` is shared tooling (not a script to run directly): a finger-tip IK,
 an in-script Franka joint PD + hand-command peer (`StatePeer`, `pd_step`), and `grasp_sequence`
-(approach, trigger, close) used by both `scripts/check_lcm_contract.py` and
+(approach, trigger, close) used by both `scripts/checks/check_lcm_contract.py` and
 `scripts/debug/bench_lcm_sim_settings.py`.
 
 **Regenerating the magna trajectory this sim's trigger targets.** The assembly controller refuses

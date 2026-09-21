@@ -1,4 +1,4 @@
-# Round-belt LCM simulation (round_belt_lcm_simulation.py); every LCM-sim number lives here.
+# Round-belt LCM simulation (scripts/round_belt_lcm_simulation.py); every LCM-sim number lives here.
 # substeps must be even: the captured CUDA graph only returns the newest state for even counts.
 solver: {substeps: 2, vbd_iterations: 10}
 # 2F-85 driver position PD for the LCM sim only; open/close <= 1 s.

@@ -30,17 +30,19 @@ import warp as wp
 from loguru import logger
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+# The task packages live under src/; make them importable regardless of CWD.
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import newton.examples
 
+import task_common  # noqa: F401  (puts lcmtypes/ on sys.path)
 from drake import lcmt_schunk_wsg_status
 from round_belt_task.constants import BELT_TRIGGER_BODY, LCM_SIM_PARAMS
 from round_belt_task.lcm_simulation import RoundBeltLcmSimulation
 from utils.labels import body_index
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # lcm_peer_utils
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "checks"))  # lcm_peer_utils
 from lcm_peer_utils import HAND_CLOSED_WIDTH, StatePeer, grasp_sequence, pd_step
 
 PRIVATE_LCM_URL = "udpm://239.255.76.68:7668?ttl=0"

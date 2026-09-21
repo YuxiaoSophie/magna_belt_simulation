@@ -22,7 +22,7 @@ directives:
         rotation: !Rpy { deg: [-90.0, 0.0, 0.0] }
   - add_model:
       name: robotiq_2f85
-      file: ../../../2f85.xml
+      file: ../robotiq_2f85/2f85.xml
       gravity_compensation: true
       importer_options: {enable_self_collisions: false}
   - add_weld:

@@ -1,5 +1,5 @@
 # Round-belt task scene; port of magna round-belt-scene.dmd.yaml. Schema: docs/scene-directives.md.
-# World frame is Drake's (origin at panda_link0, table top z = -0.02858), not round_belt.py's.
+# World frame is Drake's (origin at panda_link0, table top z = -0.02858).
 # Order fixes body/shape indices; keep the tabletop collider between table and board.
 directives:
   - add_model:
@@ -14,7 +14,7 @@ directives:
       top_z: -0.02858
       thickness: 0.04
       color: [0.55, 0.35, 0.14]
-  # Colours follow round_belt.py, not the Drake SDF (which inverts pulley/mount colours).
+  # Colours deliberately differ from the Drake SDF, which inverts pulley/mount colours.
   - add_model:
       name: board                       # Drake: nist_board
       file: round_belt_task_board.urdf
@@ -87,7 +87,7 @@ directives:
         translation: [1.33235648, -0.15491427, 0.03076191]
         rotation: !Rpy { deg: [-0.35720724, 0.72781324, 179.78723941] }
   # Drake round_belt.sdf ellipse (0.168 x 0.248, yawed 90 deg), resized to rest on the holder's
-  # outer rim; unset params use round_belt.py defaults.
+  # outer rim; unset params use add_rod_ellipse's defaults (round_belt_task/directives.py).
   - add_rod_ellipse:
       name: flexible_ellipse_cable
       center: [0.4736603358808432, 0.3520562100563749, -0.0152]  # on the rim (top z -0.01858)

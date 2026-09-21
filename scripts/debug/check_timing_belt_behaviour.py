@@ -28,13 +28,14 @@ import numpy as np
 import warp as wp
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+# The task packages live under src/; make them importable regardless of CWD.
+if str(REPO_ROOT / "src") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import newton
 from newton.solvers import SolverMuJoCo, SolverVBD
 
-import round_belt
+from task_common import defaults
 from timing_belt_task.belt import (
     BeltMaterial,
     BeltSection,
@@ -99,9 +100,9 @@ def make_builder(gravity: float) -> newton.ModelBuilder:
     builder = newton.ModelBuilder(up_axis=newton.Axis.Z, gravity=(0.0, 0.0, -gravity))
     builder.rigid_gap = 0.001
     SolverMuJoCo.register_custom_attributes(builder)
-    builder.default_shape_cfg.ke = round_belt.CABLE_CONTACT_KE
-    builder.default_shape_cfg.kd = round_belt.CABLE_CONTACT_KD
-    builder.default_shape_cfg.mu = round_belt.CABLE_CONTACT_MU
+    builder.default_shape_cfg.ke = defaults.CABLE_CONTACT_KE
+    builder.default_shape_cfg.kd = defaults.CABLE_CONTACT_KD
+    builder.default_shape_cfg.mu = defaults.CABLE_CONTACT_MU
     builder.default_shape_cfg.gap = 0.001
     return builder
 
@@ -128,7 +129,7 @@ def straight_points(num: int, seg: float) -> list[wp.vec3]:
 
 
 class BeltSim:
-    """SolverMuJoCo stepping with Newton contacts (belt-vs-static pairs only), as task_common/simulation.py."""
+    """SolverMuJoCo stepping with Newton contacts (belt-vs-static pairs only), as src/task_common/simulation.py."""
 
     def __init__(self, builder, bodies, joints, *, contacts: bool = False, use_graph: bool = True):
         self.model = model = builder.finalize()
@@ -139,7 +140,7 @@ class BeltSim:
         self.root_start = self.state_0.body_q.numpy()[bodies[0], :3].astype(np.float64)
         self.solver = SolverMuJoCo(
             model, solver="newton", integrator="implicitfast", cone="elliptic",
-            iterations=round_belt.MUJOCO_ITERATIONS, ls_iterations=round_belt.MUJOCO_LS_ITERATIONS,
+            iterations=defaults.MUJOCO_ITERATIONS, ls_iterations=defaults.MUJOCO_LS_ITERATIONS,
             use_mujoco_contacts=False, njmax=MUJOCO_NJMAX, nconmax=MUJOCO_NCONMAX)
         self.sim_dt = FRAME_DT / SUBSTEPS
         self.pipeline = newton.CollisionPipeline(
@@ -652,9 +653,9 @@ def predicted_ei_lat(mat: StripMaterial) -> float:
 
 def make_strip_builder(gravity: float) -> newton.ModelBuilder:
     builder = newton.ModelBuilder(up_axis=newton.Axis.Z, gravity=(0.0, 0.0, -gravity))
-    builder.default_shape_cfg.ke = round_belt.CABLE_CONTACT_KE
-    builder.default_shape_cfg.kd = round_belt.CABLE_CONTACT_KD
-    builder.default_shape_cfg.mu = round_belt.CABLE_CONTACT_MU
+    builder.default_shape_cfg.ke = defaults.CABLE_CONTACT_KE
+    builder.default_shape_cfg.kd = defaults.CABLE_CONTACT_KD
+    builder.default_shape_cfg.mu = defaults.CABLE_CONTACT_MU
     builder.default_shape_cfg.has_particle_collision = True
     return builder
 
@@ -677,9 +678,9 @@ class StripSim:
                 builder.particle_mass[p0 + r * self.rows[1] + k] = 0.0
         builder.color()
         self.model = model = builder.finalize()
-        model.soft_contact_ke = round_belt.CABLE_CONTACT_KE
-        model.soft_contact_kd = round_belt.CABLE_CONTACT_KD
-        model.soft_contact_mu = round_belt.CABLE_CONTACT_MU
+        model.soft_contact_ke = defaults.CABLE_CONTACT_KE
+        model.soft_contact_kd = defaults.CABLE_CONTACT_KD
+        model.soft_contact_mu = defaults.CABLE_CONTACT_MU
         self.control = model.control()
         self.state_0, self.state_1 = model.state(), model.state()
         self.solver = SolverVBD(model, iterations=iterations or prof.iterations, particle_enable_self_contact=True,

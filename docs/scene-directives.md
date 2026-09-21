@@ -1,9 +1,9 @@
 # Scene directives
 
 A reference for authoring or reading a scene YAML without reading the loader source. The
-loader itself is `utils/directives/` (`schema.py` — parsing, no builder; `runtime.py` —
+loader itself is `src/utils/directives/` (`schema.py` — parsing, no builder; `runtime.py` —
 execution onto a `newton.ModelBuilder`); the round-belt extensions are
-`round_belt_task/directives.py`.
+`src/round_belt_task/directives.py`.
 Where this doc and the code disagree, the code wins — file an issue against this doc, not
 the code.
 
@@ -43,7 +43,7 @@ assets/
 - Anything shared across tasks (the UR10 + Robotiq 2F-85 rig, the two ZED cameras) lives under
   `assets/common/directives/` and is pulled in with `add_directives`, mirroring how Drake's
   task scenes include `ur.dmd.yaml`.
-- `file:` on any directive resolves one of three ways (`utils/directives/schema.py::_resolve`):
+- `file:` on any directive resolves one of three ways (`src/utils/directives/schema.py::_resolve`):
   1. `newton_asset://<asset>/<relative/path>` — downloaded/cached via
      `newton.utils.download_asset` (used for the UR10 USD:
      `newton_asset://universal_robots_ur10/usd/ur10_instanceable.usda`).
@@ -56,7 +56,7 @@ assets/
   `_load_model`, via `DirectiveContext.resolve_path`), so `parse_directives` never
   downloads a model's asset — it reads the YAML files (including everything reachable
   through `add_directives`), and touches the asset cache only if an include is itself a
-  `newton_asset://` path. That is what lets `round_belt_task/constants.py` call
+  `newton_asset://` path. That is what lets `src/round_belt_task/constants.py` call
   `parse_directives` at import time with no side effects (its includes are relative).
   `add_directives` file paths, by contrast, resolve **and get read** at *parse* time,
   because the included entries must be flattened into the same list before anything else
@@ -96,7 +96,7 @@ inferred from the file suffix (`.urdf` → `urdf`, `.xml` → `mjcf`, `.usd`/`.u
 `usd`). `static: true` forces `kind: static` (and conflicts with any other explicit
 `kind:`); a static model's file must be a `.urdf`.
 
-Allowed keys by kind (`utils/directives/schema.py::_MODEL_KEYS`, beyond the shared
+Allowed keys by kind (`src/utils/directives/schema.py::_MODEL_KEYS`, beyond the shared
 `name`/`file`/`kind`/`static`):
 
 | kind     | extra keys |
@@ -111,13 +111,12 @@ Any other key raises `ValueError` naming the unknown key(s) and what's allowed.
 - **`static: true`.** Imports a fixed-only URDF as world shapes (body `-1`) via
   `utils.urdf.add_urdf_as_static_shapes`, *not* `builder.add_urdf`. **Why:** the VBD half of
   the coupled solver must own the table/board/holder, so they have to be plain world shapes
-  rather than a (zero-mass) articulation sitting inside the MuJoCo entry — exactly what
-  `round_belt.py`'s `add_table`/`add_board` do by hand. A link on a `continuous`/`revolute`
-  joint whose parent is the root link is the one exception: it becomes a body (URDF inertial)
-  on a world revolute joint at the joint origin (URDF `<dynamics damping>` -> `joint_damping`;
-  the task layer mirrors it into a zero-stiffness drive for VBD), carrying that link's shapes,
-  with collisions against the model's other links filtered (as `round_belt.py`'s
-  `add_dynamic_pulley`). The task layer puts these bodies/joints in the VBD entry
+  rather than a (zero-mass) articulation sitting inside the MuJoCo entry. A link on a
+  `continuous`/`revolute` joint whose parent is the root link is the one exception: it becomes
+  a body (URDF inertial) on a world revolute joint at the joint origin (URDF
+  `<dynamics damping>` -> `joint_damping`; the task layer mirrors it into a zero-stiffness drive
+  for VBD), carrying that link's shapes, with collisions against the model's other links
+  filtered. The task layer puts these bodies/joints in the VBD entry
   (`SceneInfo.pulley_bodies/joints`); any other non-fixed joint raises.
 - **`importer_options`** is a verbatim kwargs pass-through to `builder.add_urdf` /
   `add_mjcf` / `add_usd` (e.g. `enable_self_collisions`, `collapse_fixed_joints`,
@@ -139,7 +138,7 @@ Any other key raises `ValueError` naming the unknown key(s) and what's allowed.
   `{color, max_span, near_local_xy, radius}` rules, first match wins. For each split mesh
   component: skip it if its XY bbox span is `>= max_span`; otherwise colour it `color` if
   its XY-bbox centre is within `radius` of `near_local_xy`. Components matching no rule
-  take the normal order (`utils/urdf.py::_mesh_color`): white if textured, else the
+  take the normal order (`src/utils/urdf.py::_mesh_color`): white if textured, else the
   asset-authored colour, else the model's `color`. This is how the round-belt board's
   pulley mounting plate gets painted black without its own mesh file — **the pulley
   colours themselves are this built-in mechanism, not a separate directive.**
@@ -210,7 +209,7 @@ shared UR10 + Robotiq rig:
 
 ## 5. Extension directives
 
-Registered as `EXTENSION_DIRECTIVES` in `round_belt_task/directives.py`, passed to
+Registered as `EXTENSION_DIRECTIVES` in `src/round_belt_task/directives.py`, passed to
 `load_directives(..., directives=EXTENSION_DIRECTIVES)`. Each validates its own keys
 strictly (the shared `task_common.directives.params` helper: unknown key → `ValueError`, missing required key →
 `ValueError`) and, by convention (not enforced by the loader), stores its output in
@@ -225,14 +224,14 @@ The Robotiq's ALOHA fingers are not a directive: they are geoms in `2f85.xml`'s 
 | `add_ground_plane` | exactly one of `height` or `height_from_aabb_min_z_of` | `name` (`"ground"`) | `{"shape": int, "height": float}` | by convention last — not enforced by the loader, just kept out of any model's contiguous shape range |
 | `add_rgbd_camera` | `name`, `base_frame` (`world`, an `add_frame` name, or a static model's weld child) | `width`/`height` (`640`/`480`), `fps` (`20`), `fov_y_deg` (`45`) or `focal_x`+`focal_y` [px], `center_x`/`center_y` (image centre, `(w - 1) / 2`), `z_near`/`z_far` (`0.1`/`5.0`) | `task_common.cameras.CameraSpec` | anywhere after its `base_frame`; adds nothing to the builder. `base_frame` is the OpenCV optical frame (+Z forward, +Y down) and must be world-fixed; defaults are Drake's `CameraConfig` |
 | `add_cropped_point_cloud` | `name`, `cameras` (list of earlier `add_rgbd_camera` names), `crop_lower_xyz`, `crop_upper_xyz` [m, world] | `voxel_size` [m] (`0.0`, no downsample) | `task_common.point_cloud.PointCloudSpec` | after the cameras it names; adds nothing to the builder. Evaluated by `task_common.point_cloud.CroppedPointCloud`: Drake's `DepthImageToPointCloud` + `Concatenate` + `Crop` + `VoxelizedDownSample` |
-| `add_rod_ellipse` | `name`, `center`, `semi_axes`, `radius`, `num_elements`, `color`, `stretch_stiffness`, `stretch_damping`, `bend_stiffness`, `bend_damping` | `twist_total` (`0.0`), `closed` (`true`), `body_frame_origin` (`"com"`), `margin` (`0.0`), `gap` (`0.001`), `density`/`ke`/`kd`/`mu` (fall back to `round_belt`'s belt-density estimate and cable-contact constants) | `{"bodies": [...], "joints": [...], "shapes": [...]}` | by convention after all robot models — required in practice because `task_common/scene.py`'s `span` helper needs each robot model's body/joint/shape ranges to be mutually contiguous, which a rod inserted in between would break; not checked by the loader itself |
+| `add_rod_ellipse` | `name`, `center`, `semi_axes`, `radius`, `num_elements`, `color`, `stretch_stiffness`, `stretch_damping`, `bend_stiffness`, `bend_damping` | `twist_total` (`0.0`), `closed` (`true`), `body_frame_origin` (`"com"`), `margin` (`0.0`), `gap` (`0.001`), `density`/`ke`/`kd`/`mu` (fall back to `round_belt_task.directives.estimate_belt_density()` and `task_common.defaults.CABLE_CONTACT_*`) | `{"bodies": [...], "joints": [...], "shapes": [...]}` | by convention after all robot models — required in practice because `task_common/scene.py`'s `span` helper needs each robot model's body/joint/shape ranges to be mutually contiguous, which a rod inserted in between would break; not checked by the loader itself |
 
 ## 6. What is NOT data and why
 
 - **The belt is procedural.** `add_rod_ellipse` takes an ellipse's parameters (`center`,
   `semi_axes`, `radius`, `num_elements`, stiffnesses, ...), but the point sampling around
   the ellipse and the rod construction itself (`builder.add_rod` with parallel-transported
-  edge quaternions) are plain Python in `round_belt_task/directives.py`; no vertex data lives in
+  edge quaternions) are plain Python in `src/round_belt_task/directives.py`; no vertex data lives in
   the YAML.
 - **The tabletop collider is sized from the table's AABB.** `add_tabletop_collision` only
   takes `top_z`/`thickness`/`color`; its XY footprint comes from the table visual shape's
@@ -277,12 +276,12 @@ read-only reference outside this repo):
    whatever a chain needs — it will not be a closed elliptical rod, so it does not belong in
    `add_rod_ellipse`'s parameter set. Register it in a `directives={...}` mapping the way
    `EXTENSION_DIRECTIVES` does today, following §8.
-6. Add a `bike_chain_task/` package mirroring `round_belt_task/`: a `constants.py` that
+6. Add a `src/bike_chain_task/` package mirroring `src/round_belt_task/`: a `constants.py` that
    calls `parse_directives` on the new scene file, and a `scene.py` whose `build_scene`
    calls `task_common.scene.build_task_scene(builder, directives_path, directives=...)`,
    which is what actually calls `load_directives(builder, directives_path, directives=...)`
    and maps the resulting `LoadedScene` into `SceneInfo` (in this repo,
-   `round_belt_task/scene.py`'s `build_scene` is the pattern to follow, though it is closer
+   `src/round_belt_task/scene.py`'s `build_scene` is the pattern to follow, though it is closer
    to 60 lines than 30 once the static/robot bookkeeping is included).
 
 **Honest caveat:** none of this can run today. The bike-chain board asset in `magna` is
@@ -318,11 +317,11 @@ top-to-bottom recipe.
 | `visual_cfg` / `collision_cfg` | the shared `ModelBuilder.ShapeConfig`s used everywhere else in the scene |
 | `resolve_path(file)` | resolves a `file:`-style string exactly like `add_model` does |
 
-Rules, from the `round_belt_task/directives.py` module docstring and the three existing
+Rules, from the `src/round_belt_task/directives.py` module docstring and the three existing
 directives:
 - **Validate your own keys strictly.** The loader does not check a custom directive's
   `params` at all — unknown keys, missing required keys, and type coercion are entirely
-  the directive's job. `task_common/directives.py::params` is the pattern the three
+  the directive's job. `src/task_common/directives.py::params` is the pattern the three
   existing directives use (merge over a spec dict where `REQUIRED` marks no default,
   raise on anything unknown or still-`REQUIRED`).
 - **Coerce numbers with the loader's own helpers** (`utils.directives.as_float` /

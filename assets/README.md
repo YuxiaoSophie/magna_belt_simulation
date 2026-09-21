@@ -52,17 +52,17 @@ below). The vendored copies are byte-identical to their sources except for the e
     keep resolving correctly because the `ur10/` subfolder layout was preserved
     verbatim; no path rewrite was needed.
   - Everything else is byte-identical to the source.
-- **NOT used by `round_belt_task_simulation.py` any more (appearance).** The scene now
+- **NOT used by the round-belt scene any more (appearance).** The scene now
   builds the UR10 from the textured NVIDIA USD asset
-  (`newton.utils.download_asset("universal_robots_ur10")/usd/ur10_instanceable.usda`,
-  the same one `round_belt.py` uses). Reason, measured: all 7 Drake
+  (`newton.utils.download_asset("universal_robots_ur10")/usd/ur10_instanceable.usda`).
+  Reason, measured: all 7 Drake
   `ur10/visual/*.gltf` files contain **zero images**. They carry only
   `baseColorFactor` values -- greys `0.223 / 0.371 / 0.464 / 0.656` plus the pale
   UR blue `(0.392, 0.543, 0.640)` linear -- so Newton imports them correctly and
   the arm still renders flat grey/white. That is the asset, not the pipeline.
-  This URDF stays on disk and stays under `scripts/check_round_belt_task_poses.py`
+  This URDF stays on disk and stays under `scripts/checks/check_round_belt_task_poses.py`
   because it remains the **kinematic source of truth**:
-  `scripts/check_round_belt_task_poses.py` check 7 walks it with an independent numpy
+  `scripts/checks/check_round_belt_task_poses.py` check 7 walks it with an independent numpy
   FK and asserts the USD arm lands in the same world pose.
 - **USD vs URDF frame conventions (measured, both at `UR10_DEFAULT_Q`):**
   - `base_link`: the USD root frame is **identical** to the URDF `base_link`
@@ -181,8 +181,7 @@ they now live in `common/robotiq_2f85/` (its `meshdir`).
 
 ### ALOHA-style fingers, baked into `2f85.xml`
 
-`2f85.xml` is shared (`round_belt.py`, `round_belt_two_arms.py`, `timing_belt.py` and
-`ur10_2f85.yaml` all load it). Each pad body carries a black finger visual and collider in
+`2f85.xml` is loaded by `ur10_2f85.yaml`. Each pad body carries a black finger visual and collider in
 place of the original pad geoms:
 
 * Meshes: `common/robotiq_2f85/fingers/{left,right}_finger.obj`, from the Drake Robotiq SDF.
@@ -199,8 +198,10 @@ place of the original pad geoms:
   viewer_link_data,viewer_geometry_data}.lcm`, `magna/bazel-magna/external/robotiq-driver+/lcmtypes/
   lcmt_robotiq_{command,status}.lcm`
 - **Copies:** byte-identical.
-- **Regenerated with:** `scripts/gen_lcmtypes.sh` (emits the `dairlib/`, `drake/`, `robotiq/`
-  Python packages at the repo root via the venv's `lcm-gen`).
+- **Regenerated with:** `lcmtypes/gen_lcmtypes.sh` (emits the `dairlib`, `drake`, `robotiq`
+  Python packages in place, next to the `.lcm` sources in `lcmtypes/<pkg>/`, via the venv's
+  `lcm-gen`). They import as top-level packages: `src/task_common/__init__.py` puts `lcmtypes/` on
+  `sys.path`, so anything importing them imports `task_common` first.
 
 ## LCM simulation parameters (`round_belt_task/round_belt_lcm_sim.yaml`)
 
@@ -211,7 +212,7 @@ place of the original pad geoms:
 ## Table and task board — not copied here
 
 The table and task board models are not part of this port. The Newton scene
-uses the copies already present in `task_board_urdf/` (`common/scene.urdf`,
+uses the copies already present in `external/task_board_urdf/` (`common/scene.urdf`,
 `round_belt_task/round_belt_task_board.urdf`).
 
 `round_belt_task/round_belt_task_board.urdf` edit: the two pulley joints are `continuous` axles

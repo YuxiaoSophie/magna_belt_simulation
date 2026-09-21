@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import warp as wp
@@ -117,6 +118,12 @@ BOARD_COLOR = _BOARD.color
 SMALL_PULLEY_COLOR = _BOARD.link_colors["small_round_pulley"]
 LARGE_PULLEY_COLOR = _BOARD.link_colors["large_round_pulley"]
 PULLEY_MOUNT_COLOR = _MOUNT.color
+PULLEY_JOINT_LABELS = ["board/small_round_pulley_joint", "board/large_round_pulley_joint"]
+_BOARD_JOINTS = {j.get("name"): j for j in ET.parse(BOARD_URDF).getroot().iter("joint")}
+PULLEY_CENTERS_LOCAL = tuple(
+    tuple(float(v) for v in _BOARD_JOINTS[leaf].find("origin").get("xyz").split())
+    for leaf in (label.rsplit("/", 1)[-1] for label in PULLEY_JOINT_LABELS)
+)
 SMALL_PULLEY_MOUNT_LOCAL_XY = _MOUNT.near_local_xy
 SMALL_PULLEY_MOUNT_RADIUS = _MOUNT.radius
 BOARD_PANEL_MIN_SPAN = _MOUNT.max_span
@@ -129,6 +136,9 @@ LCM_GRIPPER_DRIVE_KD = float(_LCM["gripper_drive"]["kd"])
 LCM_GRIPPER_DRIVE_STOP = float(_LCM["gripper_drive"]["stop"])
 LCM_GRIPPER_DRIVE_EFFORT_LIMIT = float(_LCM["gripper_drive"]["effort_limit"])
 LCM_GRIPPER_DRIVE_DAMPING = float(_LCM["gripper_drive"]["damping"])
+LCM_GRIPPER_DRIVE_WIDTH_CALIBRATION = tuple(
+    (float(angle), float(gap)) for angle, gap in _LCM["gripper_drive"]["width_calibration"]
+)
 LCM_HAND_DRIVE_KE = float(_LCM["hand_drive"]["ke"])
 LCM_HAND_DRIVE_KD = float(_LCM["hand_drive"]["kd"])
 LCM_HAND_DRIVE_EFFORT_LIMIT = float(_LCM["hand_drive"]["effort_limit"])
@@ -138,6 +148,7 @@ LCM_HAND_DRIVE_MAX_SPEED = float(_LCM["hand_drive"]["max_speed"])
 LCM_HAND_DRIVE_LIMIT_KE = float(_LCM["hand_drive"]["limit_ke"])
 LCM_HAND_DRIVE_LIMIT_KD = float(_LCM["hand_drive"]["limit_kd"])
 LCM_UR_GRIPPER_TIP_Z = float(_LCM["ur_gripper_tip_z"])
+LCM_PULLEY_STATE_OBJECT_NAME = str(_LCM["pulley_state"]["object_name"])
 BELT_TRIGGER_BODY = str(_LCM["belt_trigger"]["body"])
 BELT_TRIGGER_POINT = tuple(float(v) for v in _LCM["belt_trigger"]["point"])
 BELT_TRIGGER_TOLERANCE = float(_LCM["belt_trigger"]["tolerance"])

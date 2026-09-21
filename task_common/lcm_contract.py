@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from dairlib import lcmt_robot_input, lcmt_robot_output
+from dairlib import lcmt_object_state, lcmt_robot_input, lcmt_robot_output
 from drake import lcmt_schunk_wsg_status
 from robotiq import lcmt_robotiq_status
 
@@ -59,6 +59,7 @@ class LcmChannels:
     robotiq_status_channel: str = "ROBOTIQ_STATUS"
     robotiq_command_channel: str = "ROBOTIQ_COMMAND"
     deformable_geometry_channel: str = "DRAKE_VIEWER_DEFORMABLE"
+    round_belt_pulley_state_channel: str = "ROUND_BELT_PULLEY_STATE"
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> LcmChannels:
@@ -163,6 +164,24 @@ def robot_output_msg(
     msg.effort_names = list(effort_names)
     msg.effort = [float(v) for v in efforts]
     msg.imu_accel = [0.0, 0.0, 0.0]
+    return msg
+
+
+def object_state_msg(
+    utime: int, object_name: str,
+    position_names: Sequence[str], position: Sequence[float],
+    velocity_names: Sequence[str], velocity: Sequence[float],
+) -> lcmt_object_state:
+    """dairlib ``ObjectStateSender`` layout: one name per joint position / velocity."""
+    msg = lcmt_object_state()
+    msg.utime = int(utime)
+    msg.object_name = str(object_name)
+    msg.num_positions = len(position_names)
+    msg.num_velocities = len(velocity_names)
+    msg.position_names = list(position_names)
+    msg.position = [float(v) for v in position]
+    msg.velocity_names = list(velocity_names)
+    msg.velocity = [float(v) for v in velocity]
     return msg
 
 

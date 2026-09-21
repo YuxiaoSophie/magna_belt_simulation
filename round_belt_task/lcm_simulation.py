@@ -23,6 +23,7 @@ from round_belt_task.constants import (
     LCM_GRIPPER_DRIVE_KD,
     LCM_GRIPPER_DRIVE_KE,
     LCM_GRIPPER_DRIVE_STOP,
+    LCM_GRIPPER_DRIVE_WIDTH_CALIBRATION,
     LCM_HAND_DRIVE_ARMATURE,
     LCM_HAND_DRIVE_EFFORT_LIMIT,
     LCM_HAND_DRIVE_KD,
@@ -31,6 +32,7 @@ from round_belt_task.constants import (
     LCM_HAND_DRIVE_LIMIT_KE,
     LCM_HAND_DRIVE_MAX_SPEED,
     LCM_HAND_DRIVE_STALE_TIMEOUT,
+    LCM_PULLEY_STATE_OBJECT_NAME,
     LCM_SOLVER_SUBSTEPS,
     LCM_SOLVER_VBD_ITERATIONS,
     LCM_UR_GRIPPER_TIP_Z,
@@ -66,12 +68,14 @@ class RoundBeltLcmSimulation(LcmBeltTaskSimulation):
     gripper_drive_stop = LCM_GRIPPER_DRIVE_STOP
     gripper_drive_effort_limit = LCM_GRIPPER_DRIVE_EFFORT_LIMIT
     gripper_drive_damping = LCM_GRIPPER_DRIVE_DAMPING
+    gripper_drive_width_calibration = LCM_GRIPPER_DRIVE_WIDTH_CALIBRATION
     hand_drive = HandDrive(
         ke=LCM_HAND_DRIVE_KE, kd=LCM_HAND_DRIVE_KD, effort_limit=LCM_HAND_DRIVE_EFFORT_LIMIT,
         stale_timeout=LCM_HAND_DRIVE_STALE_TIMEOUT, armature=LCM_HAND_DRIVE_ARMATURE,
         max_speed=LCM_HAND_DRIVE_MAX_SPEED, limit_ke=LCM_HAND_DRIVE_LIMIT_KE,
         limit_kd=LCM_HAND_DRIVE_LIMIT_KD,
     )
+    pulley_state_object_name = LCM_PULLEY_STATE_OBJECT_NAME
 
     def __init__(self, viewer: newton.viewer.ViewerBase, args: argparse.Namespace) -> None:
         self.belt_trigger_point = np.asarray(BELT_TRIGGER_POINT, dtype=np.float64)
@@ -96,7 +100,7 @@ class RoundBeltLcmSimulation(LcmBeltTaskSimulation):
         return info
 
     def _apply_task_joint_state(self, model: newton.Model, info: SceneInfo) -> None:
-        apply_default_joint_state(model, info)
+        apply_default_joint_state(model, info, getattr(self.args, "initial_state", None))
 
     def _robot_specs(self):
         return [

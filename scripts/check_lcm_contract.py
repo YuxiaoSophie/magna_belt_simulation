@@ -2,8 +2,8 @@
 """Headless, in-process check that the Newton LCM sim speaks Drake's ``magna_simulation``
 LCM contract: message names/layouts, utime, torque sign and units, gravity compensation
 under zero torque, the Franka stale-input damping, the Panda hand command drive, the Robotiq
-command -> status round trip, the belt trigger + Franka grasp and lift, and the belt tube mesh
-message.
+command -> status round trip, the belt trigger + Franka grasp and lift, the belt tube mesh
+message and the task-board pulley state.
 
 Builds ``RoundBeltLcmSimulation`` exactly as ``round_belt_lcm_simulation.py`` does (but
 non-realtime, null viewer, cameras off) and drives it with ``sim.control_step()`` only. A
@@ -39,7 +39,7 @@ if str(REPO_ROOT) not in sys.path:
 import lcm
 import newton.examples
 
-from dairlib import lcmt_robot_input, lcmt_robot_output
+from dairlib import lcmt_object_state, lcmt_robot_input, lcmt_robot_output
 from drake import lcmt_schunk_wsg_command, lcmt_schunk_wsg_status
 from robotiq import lcmt_robotiq_command, lcmt_robotiq_status
 from round_belt_task.lcm_simulation import RoundBeltLcmSimulation
@@ -79,6 +79,11 @@ HAND_MOVE_TIME_LIMIT = 0.5
 HAND_MOVE_HOLD_STEPS = 150  # 0.75 s: clears the limit with margin so settle_time is never clipped
 LIFT_HEIGHT = 0.05
 LIFT_TIME = 1.0
+PULLEY_STATE_STEPS = 50
+PULLEY_OBJECT_NAME = "nist_board"
+PULLEY_POSITION_NAMES = ["small_round_pulley_joint", "large_round_pulley_joint"]
+PULLEY_VELOCITY_NAMES = ["small_round_pulley_jointdot", "large_round_pulley_jointdot"]
+PULLEY_JOINT_LABELS = ["board/small_round_pulley_joint", "board/large_round_pulley_joint"]
 
 # Robot-output channels: (drake_lcm_layouts.json key, LcmChannels attribute).
 ROBOT_OUTPUT_CHANNELS = [
@@ -95,6 +100,7 @@ DECODERS = {
     "robotiq_robot_output_channel": lcmt_robot_output,
     "franka_hand_state_channel": lcmt_schunk_wsg_status,
     "robotiq_status_channel": lcmt_robotiq_status,
+    "round_belt_pulley_state_channel": lcmt_object_state,
 }
 
 # Check 11's own synthetic belt-mesh fixture.
@@ -116,7 +122,7 @@ class Skipped(Exception):
 
 
 class Recorder:
-    """A peer ``lcm.LCM`` handle: records every message on the sim's six output channels."""
+    """A peer ``lcm.LCM`` handle: records every message on the sim's seven output channels."""
 
     def __init__(self, channels: LcmChannels) -> None:
         self.peer = lcm.LCM(PRIVATE_LCM_URL)
@@ -586,7 +592,7 @@ def check_channel_override(ctx: SimpleNamespace) -> None:
     if not MAGNA_LCM_CHANNELS_YAML.is_file():
         raise Skipped(f"{MAGNA_LCM_CHANNELS_YAML} not found")
     n_fields = len(fields(LcmChannels))
-    _require(n_fields == 12, f"LcmChannels has {n_fields} fields, expected 12")
+    _require(n_fields == 13, f"LcmChannels has {n_fields} fields, expected 13")
     overridden = LcmChannels.from_yaml(MAGNA_LCM_CHANNELS_YAML)
     _require(overridden == LcmChannels(), f"LcmChannels.from_yaml(magna) = {overridden} != "
               f"defaults {LcmChannels()}")
@@ -630,6 +636,51 @@ def check_belt_mesh(ctx: SimpleNamespace) -> None:
               f"float_data[0] {geom.float_data[0]} != {vertices.shape[0]}")
     _require(geom.float_data[1] == float(triangles.shape[0]),
               f"float_data[1] {geom.float_data[1]} != {triangles.shape[0]}")
+
+
+@check("12. Pulley state")
+def check_pulley_state(ctx: SimpleNamespace) -> None:
+    sim, recorder = ctx.sim, ctx.recorder
+    channel = sim.channels.round_belt_pulley_state_channel
+    labels = [str(label) for label in sim.model.joint_label]
+    joints = [labels.index(label) for label in PULLEY_JOINT_LABELS]
+    coords = [int(sim.model.joint_q_start.numpy()[j]) for j in joints]
+    dofs = [int(sim.model.joint_qd_start.numpy()[j]) for j in joints]
+    recorder.drain()
+    recorder.messages[channel].clear()
+    for _ in range(PULLEY_STATE_STEPS):
+        before = len(recorder.messages[channel])
+        sim.control_step()
+        deadline = time.monotonic() + LAYOUT_WAIT_S
+        while len(recorder.messages[channel]) == before and time.monotonic() < deadline:
+            recorder.peer.handle_timeout(LAYOUT_POLL_MS)
+        msgs = recorder.messages[channel][before:]
+        _require(len(msgs) == 1, f"{channel}: {len(msgs)} messages after step {sim.step_index}, "
+                 "expected 1")
+        msg = msgs[0]
+        _require(msg.utime == sim.step_index * CONTROL_DT_UTIME,
+                 f"{channel}: utime {msg.utime} != {sim.step_index * CONTROL_DT_UTIME}")
+        _require(msg.object_name == PULLEY_OBJECT_NAME,
+                 f"{channel}: object_name {msg.object_name!r} != {PULLEY_OBJECT_NAME!r}")
+        _require(msg.num_positions == 2 and msg.num_velocities == 2,
+                 f"{channel}: num_positions/num_velocities {msg.num_positions}/"
+                 f"{msg.num_velocities}, expected 2/2")
+        _require(list(msg.position_names) == PULLEY_POSITION_NAMES,
+                 f"{channel}: position_names {list(msg.position_names)}")
+        _require(list(msg.velocity_names) == PULLEY_VELOCITY_NAMES,
+                 f"{channel}: velocity_names {list(msg.velocity_names)}")
+        position, velocity = np.array(msg.position), np.array(msg.velocity)
+        _require(np.isfinite(position).all() and np.isfinite(velocity).all(),
+                 f"{channel}: non-finite values {position.tolist()} / {velocity.tolist()}")
+        want_q = sim.state_0.joint_q.numpy()[coords].astype(np.float64)
+        want_qd = sim.state_0.joint_qd.numpy()[dofs].astype(np.float64)
+        _require(np.allclose(position, want_q, atol=1e-9, rtol=0.0)
+                 and np.allclose(velocity, want_qd, atol=1e-9, rtol=0.0),
+                 f"{channel}: {position.tolist()} / {velocity.tolist()} != state joint_q "
+                 f"{want_q.tolist()} / joint_qd {want_qd.tolist()}")
+    last = recorder.messages[channel][-1]
+    print(f"[INFO] 12. {PULLEY_STATE_STEPS} messages; last q {np.round(last.position, 5).tolist()} "
+          f"rad, qd {np.round(last.velocity, 5).tolist()} rad/s")
 
 
 def main() -> int:

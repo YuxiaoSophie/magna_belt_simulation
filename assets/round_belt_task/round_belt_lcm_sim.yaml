@@ -5,7 +5,15 @@ solver: {substeps: 2, vbd_iterations: 10}
 # stop [rad]: driver upper limit where the finger colliders meet (the real gripper's empty close).
 # effort_limit [N m]: the clamped PD torque on a stall = grip, ~30-45 N per pad on the belt.
 # damping [N m s/rad]: passive, outside the clamp; without it a stalled grip rings at ~2.5 Hz.
-gripper_drive: {ke: 400.0, kd: 80.0, stop: 0.648, effort_limit: 2.0, damping: 1.0}
+# width_calibration [driver angle rad, free-air pad gap m], measured on a 0.02 rad grid: the
+# command byte is quasi-linear in jaw WIDTH, not in this angle (2F-85 manual, POSITION REQUEST:
+# 0x00 open, 0xFF closed, 0.4 mm per count of the 85 mm stroke). Our ALOHA fingertips stroke
+# 69.2 mm and the four-bar spreads 87 mm/rad open against 121 mm/rad at the stop (last row).
+gripper_drive:
+  {ke: 400.0, kd: 80.0, stop: 0.648, effort_limit: 2.0, damping: 1.0,
+   width_calibration: [[0.005, 0.069200], [0.085, 0.061930], [0.165, 0.054196],
+                       [0.245, 0.046081], [0.325, 0.037631], [0.405, 0.028888],
+                       [0.485, 0.019688], [0.565, 0.010106], [0.648, 0.000094]]}
 # Panda finger drive: Drake OSC gains, effort = URDF limit, stale rule = ShunkCommandToTrajectory.
 # armature [kg] stabilises the lagged proxy finger-belt contact on the 0.1 kg finger; Drake: none.
 # max_speed [m/s]: per-finger target slew; a faster impact kicks the belt off the holder.
@@ -13,8 +21,10 @@ gripper_drive: {ke: 400.0, kd: 80.0, stop: 0.648, effort_limit: 2.0, damping: 1.
 hand_drive:
   {ke: 1000.0, kd: 100.0, effort_limit: 20.0, stale_timeout: 1.0, armature: 0.5, max_speed: 0.1,
    limit_ke: 1.0e+5, limit_kd: 500.0}
-# Drake robotiq_arg85 fingertip along the URDF wrist_3_link z; magna tracking_frame 0.194.
-ur_gripper_tip_z: 0.197
+# ROUND_BELT_PULLEY_STATE object_name: Drake's board model instance name.
+pulley_state: {object_name: nist_board}
+# Drake robotiq_arg85 fingertip along the URDF wrist_3_link z; == magna tracking_frame 0.194.
+ur_gripper_tip_z: 0.194
 # magna_simulation.cc: the belt is placed once finger_tip is within tolerance of point.
 belt_trigger:
   body: panda_hand/finger_tip

@@ -4,8 +4,9 @@
 torque mode: the arm joints take ``control.joint_f`` from LCM (MuJoCo gravity compensation
 holds them), while the 2F-85 drivers and (with ``hand_drive``) the Panda fingers keep a
 position drive and follow ``ROBOTIQ_COMMAND`` / ``PANDA_HAND_COMMAND``.  Every step publishes
-the six state messages.  Subclasses supply the scene hooks, ``_robot_specs``,
-``_reflected_inertia`` and ``_after_control_step``.
+the six state messages, plus the pulley state when ``pulley_state_object_name`` is set.
+Subclasses supply the scene hooks, ``_robot_specs``, ``_reflected_inertia`` and
+``_after_control_step``.
 """
 
 from __future__ import annotations
@@ -40,6 +41,7 @@ from task_common.lcm_contract import (
     LcmChannels,
     RobotIoSpec,
     hand_targets,
+    object_state_msg,
     robot_output_msg,
     robotiq_status_msg,
     schunk_status_msg,
@@ -97,8 +99,10 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
     gripper_drive_stop: float | None = None
     gripper_drive_effort_limit: float | None = None
     gripper_drive_damping: float | None = None
+    gripper_drive_width_calibration: Sequence[tuple[float, float]] | None = None
     belt_radius: float | None = None
     hand_drive: HandDrive | None = None
+    pulley_state_object_name: str | None = None
 
     def __init__(self, viewer: newton.viewer.ViewerBase, args: argparse.Namespace) -> None:
         self.lcm_url = str(getattr(args, "lcm_url", DEFAULT_LCM_URL))
@@ -121,6 +125,7 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         self._utime_per_step = round(1e6 * self.frame_dt)
         self._grasp_log_every = max(1, round(GRASP_LOG_PERIOD / self.frame_dt))
         self._io_by_name = {io.spec.name: io for io in self._robot_io}
+        self._resolve_pulleys()
         self._reset_stats(time.perf_counter())
         self._resyncs = 0
         self.bridge = LcmBridge(self.lcm_url, self.channels, self.robot_specs)
@@ -128,6 +133,20 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
 
     def _robot_specs(self) -> Sequence[RobotIoSpec]:
         raise NotImplementedError
+
+    def _resolve_pulleys(self) -> None:
+        """Coords/dofs and dairlib names of ``info.pulley_joints``, and their initial centres."""
+        joints = list(self.info.pulley_joints)
+        q_start = self.model.joint_q_start.numpy()
+        qd_start = self.model.joint_qd_start.numpy()
+        leaves = [str(self.model.joint_label[j]).rsplit("/", 1)[-1] for j in joints]
+        self._pulley_coords = np.asarray([int(q_start[j]) for j in joints], dtype=np.int64)
+        self._pulley_dofs = np.asarray([int(qd_start[j]) for j in joints], dtype=np.int64)
+        self._pulley_position_names = leaves
+        self._pulley_velocity_names = [f"{leaf}dot" for leaf in leaves]
+        bodies = np.asarray(self.info.pulley_bodies, dtype=np.int64)
+        self._pulley_bodies = bodies
+        self._pulley_initial_centres = self.state_0.body_q.numpy()[bodies, :3].astype(np.float64)
 
     def _apply_task_joint_state(self, model: newton.Model, info: SceneInfo) -> None:
         raise NotImplementedError
@@ -234,6 +253,42 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
             values = array.numpy().copy()
             values[self._driver_dofs] = value
             array.assign(values)
+        self._build_robotiq_width_map(model)
+
+    def _build_robotiq_width_map(self, model: newton.Model) -> None:
+        """Byte <-> driver angle through the measured jaw width, per the 2F-85 manual.
+
+        The POSITION REQUEST register is quasi-linear in jaw WIDTH (0x00 open, 0xFF closed,
+        0.4 mm per count of the 85 mm stroke), while the four-bar driver angle is not, so a
+        byte commands ``open_gap * (1 - byte / 255)`` of pad gap and the calibration
+        ``[driver angle, free-air pad gap]`` inverts that.  Without a calibration the two-point
+        default reproduces the old linear-in-angle map.
+        """
+        cal = self.gripper_drive_width_calibration
+        if cal is None:
+            angles = self._driver_open[0] + np.array([0.0, self._driver_span[0]])
+            fractions = np.array([0.0, 1.0])
+        else:
+            angles, gaps = (np.asarray(v, dtype=np.float64) for v in zip(*cal))
+            if not (np.all(np.diff(angles) > 0.0) and np.all(np.diff(gaps) < 0.0)):
+                raise RuntimeError(f"gripper_drive.width_calibration {cal} must rise in angle "
+                                   "and fall in gap")
+            if not np.allclose(angles[0], self._driver_open):
+                raise RuntimeError(f"width_calibration opens at {angles[0]} rad but the drivers "
+                                   f"open at {self._driver_open.tolist()}")
+            stop = float(model.joint_limit_upper.numpy()[self._driver_dofs].max())
+            if angles[-1] < stop - 1e-6:
+                raise RuntimeError(f"width_calibration ends at {angles[-1]} rad, short of the "
+                                   f"driver's upper limit {stop} (gripper_drive.stop)")
+            fractions = 1.0 - gaps / gaps[0]
+        self._robotiq_cal_angles = angles
+        self._robotiq_cal_fractions = fractions
+        self._robotiq_cal_slopes = np.gradient(fractions, angles)
+        self._robotiq_open_gap = None if cal is None else float(cal[0][1])
+        targets = np.interp(np.arange(256) / 255.0, fractions, angles) - angles[0]
+        self._robotiq_targets = self._driver_open + targets[:, None]
+        # 0xFF keeps the full-close target: the overdrive past the stop is what makes the grip.
+        self._robotiq_targets[255] = self._driver_open + self._driver_span
 
     def _couple_hand_fingers(self, builder: newton.ModelBuilder) -> None:
         """With ``hand_drive``: ``panda_finger_joint2 = -panda_finger_joint1``, before finalize."""
@@ -278,7 +333,8 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         lines = [
             (f"[LCM] {self.lcm_url}: control dt {self.frame_dt * 1e3:g} ms, "
              f"{self.sim_substeps} substeps (dt {self.sim_dt * 1e3:g} ms), "
-             f"vbd_iterations={self.vbd_iterations}, realtime={realtime}"),
+             f"vbd_iterations={self.vbd_iterations}, realtime={realtime}, "
+             f"initial state {getattr(self.args, 'initial_state', None) or '(scene defaults)'}"),
             (f"{'robot':<12}{'lcm name':<24}{'newton joint':<42}{'coord':>6}{'dof':>6}"
              f"{'armature':>10}"),
         ]
@@ -302,6 +358,15 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
                 f"effort {self.model.joint_effort_limit.numpy()[self._driver_dofs[i]]:g} "
                 f"damping {self.model.joint_damping.numpy()[self._driver_dofs[i]]:g}"
             )
+        if self._robotiq_open_gap is None:
+            lines.append("robotiq: byte -> driver angle is linear (no width calibration)")
+        else:
+            samples = " ".join(f"{b}:{self._robotiq_targets[b, 0]:.4f}"
+                               for b in (0, 63, 127, 191, 255))
+            lines.append(f"robotiq: byte -> jaw width is linear over a "
+                         f"{self._robotiq_open_gap * 1e3:.2f} mm open gap "
+                         f"({len(self._robotiq_cal_angles)}-point width_calibration); "
+                         f"byte -> target [rad] {samples}")
         c = self.channels
         drive = self.hand_drive
         for io in self._robot_io:
@@ -333,6 +398,16 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
             f"{c.robotiq_command_channel} -> {c.robotiq_status_channel}, "
             f"{c.robotiq_robot_output_channel}"
         )
+        if self.pulley_state_object_name is not None:
+            joints = ", ".join(
+                f"{name} (coord {coord}, dof {dof})" for name, coord, dof in zip(
+                    self._pulley_position_names, self._pulley_coords, self._pulley_dofs
+                )
+            )
+            lines.append(
+                f"pulleys: {c.round_belt_pulley_state_channel} object_name "
+                f"{self.pulley_state_object_name!r}: {joints or 'none'}"
+            )
         logger.info("\n".join(lines))
 
     def control_step(self) -> None:
@@ -382,7 +457,7 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
             self._publish_belt_mesh(body_q)
         self._after_control_step(body_q)
         if self.step_index % self._grasp_log_every == 0:
-            self._log_grasp(body_q)
+            self._log_grasp(body_q, joint_q)
 
         compute = time.perf_counter() - t_start
         self._stats_steps += 1
@@ -398,8 +473,7 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         if position == self.robotiq_position_byte:
             return False
         self.robotiq_position_byte = position
-        targets = self._driver_open + position / 255.0 * self._driver_span
-        self._target_q_host.reshape(-1)[self._driver_target_slots] = targets
+        self._target_q_host.reshape(-1)[self._driver_target_slots] = self._robotiq_targets[position]
         return True
 
     def _apply_hand_command(self) -> bool:
@@ -454,10 +528,12 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         publish(self.channels.franka_hand_state_channel,
                 schunk_status_msg(utime, hand.positions, hand.velocities))
 
-        span = self._driver_span
-        fraction = float(np.clip(np.mean((joint_q[self._driver_coords] - self._driver_open) / span),
-                                 0.0, 1.0))
-        speed = float(np.mean(joint_qd[self._driver_dofs] / span)) * ROBOTIQ_PRISMATIC_RANGE
+        # Reported on the same width scale the command byte uses, so a reached command echoes.
+        angle = float(np.mean(joint_q[self._driver_coords]))
+        cal_angles, cal_fractions = self._robotiq_cal_angles, self._robotiq_cal_fractions
+        fraction = float(np.clip(np.interp(angle, cal_angles, cal_fractions), 0.0, 1.0))
+        speed = float(np.interp(angle, cal_angles, self._robotiq_cal_slopes)
+                      * np.mean(joint_qd[self._driver_dofs])) * ROBOTIQ_PRISMATIC_RANGE
         opening = fraction * ROBOTIQ_PRISMATIC_RANGE
         publish(self.channels.robotiq_robot_output_channel, robot_output_msg(
             utime, ROBOTIQ_POSITION_NAMES, (opening, opening), ROBOTIQ_VELOCITY_NAMES,
@@ -467,13 +543,20 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         self.robotiq_status_byte = int(status.position)
         publish(self.channels.robotiq_status_channel, status)
 
+        if self.pulley_state_object_name is not None:
+            publish(self.channels.round_belt_pulley_state_channel, object_state_msg(
+                utime, self.pulley_state_object_name,
+                self._pulley_position_names, joint_q[self._pulley_coords],
+                self._pulley_velocity_names, joint_qd[self._pulley_dofs],
+            ))
+
     def _publish_belt_mesh(self, body_q: np.ndarray) -> None:
         centres = body_q[self.info.belt_bodies, :3].astype(np.float64)
         vertices, triangles = tube_mesh(centres, self.belt_radius)
         msg = deformable_mesh_msg(vertices, triangles, BELT_MESH_NAME, BELT_MESH_COLOR)
         self.bridge.publish(self.channels.deformable_geometry_channel, msg)
 
-    def _log_grasp(self, body_q: np.ndarray) -> None:
+    def _log_grasp(self, body_q: np.ndarray, joint_q: np.ndarray) -> None:
         belt = body_q[self.info.belt_bodies, :3].astype(np.float64)
 
         def point_gap_mm(point: np.ndarray | None) -> str:
@@ -489,19 +572,24 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         pads = "/".join(gap_mm(b) for b in self.info.gripper_pad_bodies)
         tip = point_gap_mm(self._grasp_ur_tip_point(body_q))
         command = "none" if self.robotiq_position_byte is None else self.robotiq_position_byte
+        pulleys = " / ".join(f"{np.degrees(q):.1f}" for q in joint_q[self._pulley_coords])
         logger.info(
             f"[GRASP] t {self.sim_time:.1f} s: hand width {width:.1f} mm, belt->finger_tip "
             f"{gap_mm(self._grasp_tip_body())} mm, belt->2f85 pads {pads} mm, belt->2f85 tip "
             f"{tip} mm, robotiq byte {command} (status {self.robotiq_status_byte}), "
-            f"placed {self.belt_placed}"
+            f"placed {self.belt_placed}, pulleys {pulleys or 'n/a'} deg"
         )
 
     def _log_belt_final(self) -> None:
-        belt = self.state_0.body_q.numpy()[self.info.belt_bodies, :3].astype(np.float64)
+        body_q = self.state_0.body_q.numpy()
+        belt = body_q[self.info.belt_bodies, :3].astype(np.float64)
         centroid = ", ".join(f"{v:.4f}" for v in belt.mean(axis=0))
+        centres = body_q[self._pulley_bodies, :3].astype(np.float64)
+        drift = np.linalg.norm(centres - self._pulley_initial_centres, axis=1)
         logger.info(
             f"[BELT] final centroid ({centroid}), min z {belt[:, 2].min():.4f}, "
-            f"placed {self.belt_placed}, step {self.step_index}"
+            f"placed {self.belt_placed}, step {self.step_index}, pulleys drift "
+            f"{'/'.join(f'{1e3 * d:.3f}' for d in drift) or 'n/a'} mm"
         )
 
     def _reset_stats(self, now: float) -> None:
@@ -590,6 +678,11 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         parser.add_argument(
             "--publish-belt-mesh", action="store_true",
             help="publish a 20 Hz belt tube mesh on DRAKE_VIEWER_DEFORMABLE",
+        )
+        parser.add_argument(
+            "--initial-state", default=None,
+            help="magna *_initial_state.yaml whose q_init_* lists replace the scene's "
+                 "default joint positions (default: the scene defaults)",
         )
         # Newton's own --realtime (benchmark priority) shares the dest; this default wins.
         parser.set_defaults(

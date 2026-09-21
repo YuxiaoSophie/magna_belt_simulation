@@ -39,22 +39,29 @@ my_projects/
 │   └── round_belt_task/
 │       ├── round_belt_scene.yaml   # THE SCENE (schema: docs/scene-directives.md)
 │       ├── round_belt_lcm_sim.yaml # LCM sim params: solver, drive gains, belt trigger (docs/lcm-simulation.md)
-│       ├── round_belt_task_board.urdf
+│       ├── round_belt_task_board.urdf  # board + two free-spinning pulley axles
 │       └── round_belt_task_board/  #   board + small/large pulleys
 │
 ├── lcmtypes/                       # vendored .lcm sources (dairlib/drake/robotiq), byte-identical to magna
 ├── dairlib/  drake/  robotiq/      # generated Python LCM types (scripts/gen_lcmtypes.sh), checked in
-├── procman/                        # newton_assembly_sim.pmd + run_in_magna.sh / run_newton_sim.sh wrappers
+├── procman/                        # newton_assembly_sim.pmd / _hw.pmd + run_in_magna.sh / run_newton_sim.sh wrappers
 │
 ├── scripts/
 │   ├── check_round_belt_task_poses.py   # independent-FK pose check vs the Drake yaml
 │   ├── check_scene_directives.py        # directives loader / scene checks
+│   ├── check_scene_cameras.py           # ZED intrinsics/extrinsics + cropped point cloud
 │   ├── check_lcmtypes.py                # vendored LCM types vs magna's generated modules
-│   ├── check_lcm_contract.py            # 11 checks against a live LCM sim (docs/lcm-simulation.md)
-│   ├── bench_lcm_sim_settings.py        # measures/picks the LCM sim's solver settings
-│   ├── summarize_e2e_logs.py            # summarizes a sim log + controller log from an E2E run
+│   ├── check_lcm_contract.py            # 12 checks against a live LCM sim (docs/lcm-simulation.md)
+│   ├── check_pulleys.py                 # the task-board pulleys spin freely on fixed axles
+│   ├── check_robotiq_width.py           # Robotiq command byte -> jaw width calibration
 │   ├── gen_lcmtypes.sh                  # regenerates dairlib/ drake/ robotiq/ from lcmtypes/*/*.lcm
-│   └── lcm_peer_utils.py                # shared LCM peer tooling for the checks/bench above
+│   ├── lcm_peer_utils.py                # shared LCM peer tooling for the checks
+│   ├── data/                            # reference data for the checks
+│   └── debug/                           # tuning and analysis tools, not checks:
+│       ├── bench_lcm_sim_settings.py    #   measures/picks the LCM sim's solver settings
+│       ├── summarize_e2e_logs.py        #   summarizes a sim log + controller log from an E2E run
+│       ├── check_timing_belt_behaviour.py  # timing-belt model spike (belt.py / belt_strip.py)
+│       └── view_timing_belt.py          #   views that spike's scenes
 │
 ├── docs/
 │   ├── scene-directives.md         # directive schema + how to add a task
@@ -160,13 +167,13 @@ reference: `docs/scene-directives.md`.
 It reproduces, with the Drake world-frame poses and default joint angles:
 
 * table + Franka mount (`assets/common/scene.urdf`)
-* round-belt task board with its two fixed pulleys
+* round-belt task board with its two free-spinning pulleys
   (`assets/round_belt_task/round_belt_task_board.urdf`)
 * belt chain holder (`assets/common/belt_chain_holder/belt_chain_holder.urdf`)
 * Franka Panda arm + long-finger hand (`assets/common/franka/urdf/`)
 * UR10 -- the textured NVIDIA `universal_robots_ur10` USD (same asset as
   `round_belt.py`), **not** `assets/common/ur10/ur10.urdf` -- + Robotiq 2F-85 (`2f85.xml`)
-* the deformable round belt (48-element closed rod, resting in the holder)
+* the deformable round belt (48-element closed rod, resting on the holder's slotted outer rim)
 
 Key points:
 
@@ -268,6 +275,11 @@ uv run python round_belt_lcm_simulation.py --test --lcm-url "udpm://239.255.76.6
 
 # real-time, default LCM group, ready for the magna controllers
 uv run python round_belt_lcm_simulation.py
+
+# hardware-parameter mode: start from the joint positions a hardware run starts from
+# (procman/newton_assembly_hw.pmd points the magna binaries at ..._params_hw.yaml)
+uv run python round_belt_lcm_simulation.py \
+    --initial-state /home/hienbui/git/magna/python/data/generated/hw_initial_state.yaml
 ```
 
 ---

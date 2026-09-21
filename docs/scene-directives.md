@@ -101,7 +101,7 @@ Allowed keys by kind (`utils/directives/schema.py::_MODEL_KEYS`, beyond the shar
 
 | kind     | extra keys |
 |----------|------------|
-| `static` | `color`, `link_colors`, `split_components`, `component_colors` |
+| `static` | `color`, `link_colors`, `split_components`, `component_colors`, `keep_visual_material` |
 | `urdf`   | `urdf_fixups`, `default_joint_positions`, `gravity_compensation`, `importer_options` |
 | `mjcf`   | `default_joint_positions`, `gravity_compensation`, `importer_options` |
 | `usd`    | `default_joint_positions`, `gravity_compensation`, `importer_options` |
@@ -112,7 +112,13 @@ Any other key raises `ValueError` naming the unknown key(s) and what's allowed.
   `utils.urdf.add_urdf_as_static_shapes`, *not* `builder.add_urdf`. **Why:** the VBD half of
   the coupled solver must own the table/board/holder, so they have to be plain world shapes
   rather than a (zero-mass) articulation sitting inside the MuJoCo entry — exactly what
-  `round_belt.py`'s `add_table`/`add_board` do by hand.
+  `round_belt.py`'s `add_table`/`add_board` do by hand. A link on a `continuous`/`revolute`
+  joint whose parent is the root link is the one exception: it becomes a body (URDF inertial)
+  on a world revolute joint at the joint origin (URDF `<dynamics damping>` -> `joint_damping`;
+  the task layer mirrors it into a zero-stiffness drive for VBD), carrying that link's shapes,
+  with collisions against the model's other links filtered (as `round_belt.py`'s
+  `add_dynamic_pulley`). The task layer puts these bodies/joints in the VBD entry
+  (`SceneInfo.pulley_bodies/joints`); any other non-fixed joint raises.
 - **`importer_options`** is a verbatim kwargs pass-through to `builder.add_urdf` /
   `add_mjcf` / `add_usd` (e.g. `enable_self_collisions`, `collapse_fixed_joints`,
   `hide_collision_shapes` — see the UR10 and Franka entries in the example files).
@@ -124,7 +130,11 @@ Any other key raises `ValueError` naming the unknown key(s) and what's allowed.
   body the model added. Done on the builder (not later on the finalized `Model`) because
   `mujoco:gravcomp` is a builder-only custom attribute.
 - **`link_colors`** (static only): `{link_name: [r, g, b]}`; recolours every visual shape
-  whose label starts with `<model>/<link>/visual`.
+  whose label starts with `<model>/<link>/visual`, except those kept by
+  `keep_visual_material`.
+- **`keep_visual_material`** (static only, default `[]`): URDF `<visual name=...>` names whose
+  URDF `<material>` colour `link_colors` must not repaint (the round-belt pulleys' rotation
+  marker strips).
 - **`component_colors`** (static only, requires `split_components: true`): a list of
   `{color, max_span, near_local_xy, radius}` rules, first match wins. For each split mesh
   component: skip it if its XY bbox span is `>= max_span`; otherwise colour it `color` if
@@ -335,7 +345,9 @@ directives:
 | `package://...` URIs | relative paths / `newton_asset://` | no `package://` map here |
 | Robotiq SDF (`robotiq_arg85_parallel_grippers.sdf`) | `2f85.xml` MJCF | Newton has no SDF importer |
 | board via SDF | board via URDF | same reason; the board was ported SDF → URDF |
+| `nist_board` pulleys: `revolute` joints (magna `2d9b0ca`; fixed on the local magna branch) | `continuous` joints at the pulley centres inside the `static` board; the loader turns them into world-revolute VBD bodies | URDF `continuous` = an unlimited revolute; a static model has no articulation root to hang them off |
 | UR10 glTF-textureless URDF | NVIDIA `universal_robots_ur10` USD | the Drake glTFs carry no images; see `assets/README.md` |
 | (no equivalent) | `ur10_wrist_3_link_drake` frame | absorbs the USD-vs-URDF `wrist_3_link` frame difference so every weld/frame downstream of it stays at the Drake numbers |
+| `ur.dmd.yaml` welds the 2F-85 flush on the flange face | the same weld 3 mm back along the flange axis (`translation: [0.0, 0.0, -0.003]`) | the UR10 flange boss seats in the Robotiq GRP-CPL-062 coupling's 3 mm pocket, and Menagerie's `base_mount` mesh is a plain 13.9 mm disc with no pocket; flush would put the gripper seat at 13.9 mm and the fingertips at 197.1 mm from the flange face instead of the measured 10.9/194.1 mm (magna's `finger_tip_frame` 0.194, `ur_gripper_tip_z` in `round_belt_lcm_sim.yaml`) |
 | Franka starts at `franka.dmd.yaml`'s "ready" pose | starts at `q_init_franka`/`q_init_franka_hand` | this scene never loads `franka.dmd.yaml`; it reproduces what the Drake *simulation* actually seeds (`round_belt_simulation_params.yaml`), not the directives file's own default |
-| n/a | `static`, `kind`, `color`/`link_colors`/`component_colors`/`split_components`, `importer_options`, `urdf_fixups`, `gravity_compensation` on `add_model`; `add_tabletop_collision`, `add_rod_ellipse`, `add_ground_plane` as directives | Newton-native extensions with no Drake equivalent (§1, §4, §5) |
+| n/a | `static`, `kind`, `color`/`link_colors`/`component_colors`/`split_components`/`keep_visual_material`, `importer_options`, `urdf_fixups`, `gravity_compensation` on `add_model`; `add_tabletop_collision`, `add_rod_ellipse`, `add_ground_plane` as directives | Newton-native extensions with no Drake equivalent (§1, §4, §5) |

@@ -126,9 +126,12 @@ asset or import problem, and no URDF was edited:
   `quarter_ellipse_top.obj`)
 - **Upstream project:** authored in-repo for the `magna` round-belt task
 - **License:** none provided upstream (project-internal asset)
-- **Edits applied:** none. Copied verbatim — mesh paths are already relative and
-  all meshes are `.obj`, so no glTF up-axis fix is needed. `<robot name>` was
-  already `belt_chain_holder`.
+- **Edits applied:** added `quarter_ellipse_rim.obj` (collisions `quarter_ellipse_rim_1` /
+  `_2` on each half, placed like `quarter_ellipse_bottom_*`, z 0.005-0.010): a closed slab of
+  the visual mesh's z 0.010 rim outline for one quarter, cornered at (-0.02, 0.02), so the
+  rim's four 4 cm slots (|x| < 0.02, |y| < 0.02) stay open. Everything else copied verbatim —
+  mesh paths are already relative and all meshes are `.obj`, so no glTF up-axis fix is needed.
+  `<robot name>` was already `belt_chain_holder`.
 
 ## ZED camera (`assets/common/zed_camera/`)
 
@@ -210,3 +213,8 @@ place of the original pad geoms:
 The table and task board models are not part of this port. The Newton scene
 uses the copies already present in `task_board_urdf/` (`common/scene.urdf`,
 `round_belt_task/round_belt_task_board.urdf`).
+
+`round_belt_task/round_belt_task_board.urdf` edit: the two pulley joints are `continuous` axles
+at the pulley centres (link frames and geometry re-expressed there) with a thin
+`rotation_marker_strip` visual each, as magna commit `2d9b0ca` does to the SDF; unlike that
+commit the axles carry `damping="0.001"` (N m s/rad) so a kicked pulley does not spin forever.

@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """Summarize one end-to-end round-belt run from its sim log and assembly-controller log.
 
-Works on the Newton LCM sim log (``[STATS]``, ``[BELT]``, ``[GRASP]`` lines) and on the Drake
-``magna_simulation`` log (those fields print ``n/a``).  Lines may carry a ``[<unix seconds>] ``
-prefix added by the launcher; wall times are then relative to the controller log's first line.
+Works on the Newton LCM sim log (``[STATS]``, ``[BELT]``, ``[GRASP]`` lines; the pulley fields
+are optional) and on the Drake ``magna_simulation`` log (those fields print ``n/a``).  Lines may
+carry a ``[<unix seconds>] `` prefix added by the launcher; wall times are then relative to the
+controller log's first line.
 
 Run:
-    uv run python scripts/summarize_e2e_logs.py <sim.log> <controller.log>
+    uv run python scripts/debug/summarize_e2e_logs.py <sim.log> <controller.log>
 """
 
 from __future__ import annotations
 
 import argparse
+import itertools
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +26,8 @@ UR_HOLD_BYTE = 200
 UR_RELEASE_BYTE = 100
 MAX_LISTED = 20
 MAX_ERRORS = 5
+TURNING_DEG = 3.0
+PULLEY_NAMES = ("small", "large")
 
 STAMP = re.compile(r"^\[(\d+\.\d+)\] ?(.*)$")
 STATS = re.compile(
@@ -33,6 +37,8 @@ STALE = re.compile(r"\[LCM\] franka input: stale-damping")
 PLACED = re.compile(r"\[BELT\] placed at step (\d+) \(sim t=([\d.]+) s\)")
 DRAKE_PLACED = re.compile(r"Set belt position at robot EE position: \[(.*)\]")
 FINAL = re.compile(r"\[BELT\] final centroid \(([^)]*)\), min z (-?[\d.]+)")
+PULLEY_DRIFT = re.compile(r"pulleys drift ([\d.]+)/([\d.]+) mm")
+PULLEY_ANGLES = re.compile(r"pulleys (-?[\d.]+) / (-?[\d.]+) deg")
 GRASP = re.compile(
     r"\[GRASP\] t ([\d.]+) s: hand width (-?[\d.]+) mm, belt->finger_tip (\S+) mm, "
     r"belt->2f85 pads (\S+)/(\S+) mm,(?: belt->2f85 tip (\S+) mm,)? robotiq byte (\S+) "
@@ -68,6 +74,7 @@ class Grasp:
     ur_tip: float
     byte: int
     status: int
+    pulleys: tuple[float, float] | None = None
 
 
 def read_lines(path: Path) -> list[Line]:
@@ -115,6 +122,27 @@ def fmt_windows(spans: list[tuple[float, float]]) -> str:
     return ", ".join(f"{a:.0f}-{b:.0f} s" for a, b in spans)
 
 
+def summarize_pulleys(samples: list[Grasp]) -> None:
+    """Unwrapped rotation per pulley and the sample-to-sample windows turning >= TURNING_DEG."""
+    tracked = [s for s in samples if s.pulleys is not None]
+    if len(tracked) < 2:
+        print("pulleys: n/a")
+        return
+    for i, name in enumerate(PULLEY_NAMES):
+        pairs = list(itertools.pairwise(tracked))
+        steps = [(b.pulleys[i] - a.pulleys[i] + 180.0) % 360.0 - 180.0 for a, b in pairs]
+        spans: list[tuple[float, float]] = []
+        for (a, b), step in zip(pairs, steps):
+            if abs(step) < TURNING_DEG:
+                continue
+            if spans and spans[-1][1] == a.t:
+                spans[-1] = (spans[-1][0], b.t)
+            else:
+                spans.append((a.t, b.t))
+        print(f"pulley {name}: net {sum(steps):+.1f} deg, travelled {sum(map(abs, steps)):.1f} "
+              f"deg; turning (>= {TURNING_DEG:g} deg/sample): {fmt_windows(spans)}")
+
+
 def summarize_sim(lines: list[Line], origin: float | None) -> None:
     stats = [(line, STATS.search(line.text)) for line in lines]
     stats = [(line, m) for line, m in stats if m]
@@ -150,16 +178,22 @@ def summarize_sim(lines: list[Line], origin: float | None) -> None:
     final = next((m for line in reversed(lines) if (m := FINAL.search(line.text))), None)
     print(f"belt final: centroid ({final.group(1)}), min z {final.group(2)}" if final
           else "belt final: n/a")
+    drift = next((m for line in reversed(lines) if (m := PULLEY_DRIFT.search(line.text))), None)
+    print(f"pulley final drift: {drift.group(1)}/{drift.group(2)} mm (small/large)" if drift
+          else "pulley final drift: n/a")
 
     samples = [
         Grasp(float(m.group(1)), float(m.group(2)), _mm(m.group(3)),
               min(_mm(m.group(4)), _mm(m.group(5))), _mm(m.group(6) or "n/a"),
-              0 if m.group(7) == "none" else int(m.group(7)), int(m.group(8)))
+              0 if m.group(7) == "none" else int(m.group(7)), int(m.group(8)),
+              (float(p.group(1)), float(p.group(2)))
+              if (p := PULLEY_ANGLES.search(line.text)) else None)
         for line in lines if (m := GRASP.search(line.text))
     ]
     if not samples:
-        print("franka hold: n/a\nur hold: n/a\nur release events: n/a")
+        print("franka hold: n/a\nur hold: n/a\nur release events: n/a\npulleys: n/a")
         return
+    summarize_pulleys(samples)
     franka = [
         s.tip <= HOLD_GAP_MM and FRANKA_MIN_WIDTH_MM <= s.width <= FRANKA_HOLD_WIDTH_MM
         for s in samples

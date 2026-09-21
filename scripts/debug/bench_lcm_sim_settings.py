@@ -9,9 +9,9 @@ belt into the closed Franka fingers via the sim's own trigger, then ``panda_join
 iterations within the budget).
 
 Run:
-    uv run python scripts/bench_lcm_sim_settings.py
-    uv run python scripts/bench_lcm_sim_settings.py --settings 2/5,2/10 --write-yaml
-    uv run python scripts/bench_lcm_sim_settings.py --settings 2/5,2/10 --rest-only
+    uv run python scripts/debug/bench_lcm_sim_settings.py
+    uv run python scripts/debug/bench_lcm_sim_settings.py --settings 2/5,2/10 --write-yaml
+    uv run python scripts/debug/bench_lcm_sim_settings.py --settings 2/5,2/10 --rest-only
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ import numpy as np
 import warp as wp
 from loguru import logger
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -40,7 +40,7 @@ from round_belt_task.constants import BELT_TRIGGER_BODY, LCM_SIM_PARAMS
 from round_belt_task.lcm_simulation import RoundBeltLcmSimulation
 from utils.labels import body_index
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # lcm_peer_utils
 from lcm_peer_utils import HAND_CLOSED_WIDTH, StatePeer, grasp_sequence, pd_step
 
 PRIVATE_LCM_URL = "udpm://239.255.76.68:7668?ttl=0"

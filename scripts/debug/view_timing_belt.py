@@ -2,8 +2,8 @@
 """Preview the timing-belt prototype (belt + pulleys only, no robots) in a viewer.
 
 Run:
-    uv run python scripts/view_timing_belt.py --viewer viser
-    uv run python scripts/view_timing_belt.py --model chain --scene loop --num-elements 68
+    uv run python scripts/debug/view_timing_belt.py --viewer viser
+    uv run python scripts/debug/view_timing_belt.py --model chain --scene loop --num-elements 68
 """
 
 from __future__ import annotations

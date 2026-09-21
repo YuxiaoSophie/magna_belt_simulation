@@ -27,6 +27,7 @@ directives:
       link_colors:
         small_round_pulley: [0.80, 0.80, 0.80]
         large_round_pulley: [0.10, 0.10, 0.10]
+      keep_visual_material: [rotation_marker_strip]   # URDF marker colours, not link_colors
   - add_weld:
       parent: world
       child: board::board
@@ -85,15 +86,17 @@ directives:
       X_PC:
         translation: [1.33235648, -0.15491427, 0.03076191]
         rotation: !Rpy { deg: [-0.35720724, 0.72781324, 179.78723941] }
-  # Drake round_belt.sdf ellipse (0.168 x 0.248, yawed 90 deg); unset params use round_belt.py defaults.
+  # Drake round_belt.sdf ellipse (0.168 x 0.248, yawed 90 deg), resized to rest on the holder's
+  # outer rim; unset params use round_belt.py defaults.
   - add_rod_ellipse:
       name: flexible_ellipse_cable
-      center: [0.4736603358808432, 0.3520562100563749, 0.0]
-      semi_axes: [0.0807, 0.1207]         # centreline: Drake mesh outer extent - tube radius
+      center: [0.4736603358808432, 0.3520562100563749, -0.0152]  # on the rim (top z -0.01858)
+      semi_axes: [0.08558, 0.12066]       # tube against the middle-tier collision wall
       radius: 0.0033
       num_elements: 48
       color: [1.0, 0.5, 0.0]
-      stretch_stiffness: 2.0e+4
+      # MISUMI MBT6-640: 16.6 N gives 5% elongation -> EA 332 N.
+      stretch_stiffness: 2.44e+4
       stretch_damping: 1.0e-1
       bend_stiffness: 1.5e-1
       bend_damping: 1.0e-1

@@ -473,12 +473,18 @@ BOARD_WELD_TRANSLATION = (0.64483928, -0.19718233, 0.01076393)
 @check("7. Real scene smoke (round_belt_task.make_builder/build_scene)")
 def check_real_scene_smoke() -> None:
     _, info = _real_scene()
-    for attr, want in (("static_shapes", 52), ("robot_bodies", 36), ("belt_bodies", 48),
-                       ("gripper_pad_bodies", 2), ("gripper_pad_shapes", 2)):
+    for attr, want in (("static_shapes", 58), ("robot_bodies", 36), ("belt_bodies", 48),
+                       ("gripper_pad_bodies", 2), ("gripper_pad_shapes", 2),
+                       ("pulley_bodies", 2), ("pulley_joints", 2), ("pulley_shapes", 12)):
         got = len(getattr(info, attr))
         _require(got == want, f"len(info.{attr}) = {got}, expected {want}")
 
     builder = _real_scene()[0]
+    pulley_bodies = set(info.pulley_bodies)
+    on_pulleys = [s for s in range(builder.shape_count)
+                  if int(builder.shape_body[s]) in pulley_bodies]
+    _require(sorted(info.pulley_shapes) == on_pulleys,
+             f"info.pulley_shapes {info.pulley_shapes} != shapes on the pulley bodies {on_pulleys}")
     pads = [str(builder.body_label[b]).rsplit("/", 1)[-1] for b in info.gripper_pad_bodies]
     _require(pads == ["right_pad", "left_pad"],
              f"info.gripper_pad_bodies leaves = {pads}, expected ['right_pad', 'left_pad']")
@@ -571,6 +577,9 @@ def check_unsigned_exponent() -> None:
 # Independently transcribed from the board add_model in round_belt_scene.yaml (the colours,
 # and the component_colors rule's max_span / near_local_xy / radius).
 BOARD_WHITE, BOARD_BLACK = (0.8, 0.8, 0.8), (0.1, 0.1, 0.1)
+# keep_visual_material markers (URDF materials): dark on the small pulley, white on the large.
+MARKER_COLORS = {"small_round_pulley": (0.05, 0.05, 0.05), "large_round_pulley": (1.0, 1.0, 1.0)}
+MARKER_VISUAL = "visual2"
 MOUNT_MAX_SPAN, MOUNT_LOCAL_XY, MOUNT_RADIUS = 0.2, (0.3504, 0.1964), 0.05
 
 
@@ -586,9 +595,15 @@ def check_board_colors() -> None:
         return [(labels[s], rgb(builder, s)) for s in shapes if rgb(builder, s) != want]
 
     for link, want in (("small_round_pulley", BOARD_WHITE), ("large_round_pulley", BOARD_BLACK)):
-        shapes = [s for s, lbl in enumerate(labels) if lbl.startswith(f"board/{link}/visual")]
+        marker = f"board/{link}/{MARKER_VISUAL}"
+        shapes = [s for s, lbl in enumerate(labels)
+                  if lbl.startswith(f"board/{link}/visual") and lbl != marker]
         if not shapes or wrong(shapes, want):
             raise AssertionError(f"link_colors[{link}] != {want}: {wrong(shapes, want) or 'none'}")
+        markers = [s for s, lbl in enumerate(labels) if lbl == marker]
+        _require(len(markers) == 1 and not wrong(markers, MARKER_COLORS[link]),
+                 f"{marker}: {[(labels[s], rgb(builder, s)) for s in markers]}, expected one "
+                 f"shape coloured {MARKER_COLORS[link]}")
 
     # The mount rule, restated: a split board component narrower than max_span whose XY-bbox
     # centre is within radius of the mount point is black; every other component is white.
@@ -640,9 +655,9 @@ def check_ordering_guard() -> None:
 
     with _tmpdir() as tmp:
         control = _build_scene(_scene_copy(tmp / "control"))
-        _require(len(control.static_shapes) == 52,
+        _require(len(control.static_shapes) == 58,
                  f"fixture: unedited copy has {len(control.static_shapes)} static shapes, "
-                 "expected 52")
+                 "expected 58")
         moved = _scene_copy(tmp / "moved", edit_scene=tabletop_after_statics)
         _expect_error(functools.partial(_build_scene, moved),
                       "add_tabletop_collision after the ZED cameras", "static shape range",

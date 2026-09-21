@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check the vendored lcmtypes/ packages are wire-compatible with magna's generated modules.
 
-For each of the 8 vendored LCM types: compares the packed fingerprint against magna's own
+For each of the 9 vendored LCM types: compares the packed fingerprint against magna's own
 generated module (bazel-bin output, read-only), then round-trips a non-default instance
 through encode()/decode() and checks field equality. Skips the fingerprint half (not the
 round trip) if the magna reference tree is not present.
@@ -21,7 +21,7 @@ if str(REPO_ROOT) not in sys.path:
     # This script lives under scripts/; make the repo root importable regardless of CWD.
     sys.path.insert(0, str(REPO_ROOT))
 
-from dairlib import lcmt_robot_input, lcmt_robot_output
+from dairlib import lcmt_object_state, lcmt_robot_input, lcmt_robot_output
 from drake import (
     lcmt_schunk_wsg_command,
     lcmt_schunk_wsg_status,
@@ -141,6 +141,29 @@ def check_robot_output() -> None:
     print("[PASS] lcmt_robot_output")
 
 
+def check_object_state() -> None:
+    _check_fingerprint("dairlib", "lcmt_object_state", lcmt_object_state)
+    msg = lcmt_object_state()
+    msg.utime = 5000
+    msg.object_name = "nist_board"
+    msg.position_names = ["small_round_pulley_joint", "large_round_pulley_joint"]
+    msg.position = [0.25, -1.5]
+    msg.num_positions = len(msg.position)
+    msg.velocity_names = ["small_round_pulley_jointdot", "large_round_pulley_jointdot"]
+    msg.velocity = [0.5, -0.125]
+    msg.num_velocities = len(msg.velocity)
+    decoded = lcmt_object_state.decode(msg.encode())
+    _require(decoded.utime == msg.utime, "utime mismatch")
+    _require(decoded.object_name == msg.object_name, "object_name mismatch")
+    _require(decoded.num_positions == msg.num_positions, "num_positions mismatch")
+    _require(decoded.num_velocities == msg.num_velocities, "num_velocities mismatch")
+    _require(list(decoded.position_names) == msg.position_names, "position_names mismatch")
+    _require(list(decoded.position) == msg.position, "position mismatch")
+    _require(list(decoded.velocity_names) == msg.velocity_names, "velocity_names mismatch")
+    _require(list(decoded.velocity) == msg.velocity, "velocity mismatch")
+    print("[PASS] lcmt_object_state")
+
+
 def check_schunk_wsg_status() -> None:
     _check_fingerprint("drake", "lcmt_schunk_wsg_status", lcmt_schunk_wsg_status)
     msg = lcmt_schunk_wsg_status()
@@ -231,9 +254,9 @@ def check_robotiq_status() -> None:
 
 
 CHECKS = [
-    check_robot_input, check_robot_output, check_schunk_wsg_status, check_schunk_wsg_command,
-    check_viewer_geometry_data, check_viewer_link_data, check_robotiq_command,
-    check_robotiq_status,
+    check_robot_input, check_robot_output, check_object_state, check_schunk_wsg_status,
+    check_schunk_wsg_command, check_viewer_geometry_data, check_viewer_link_data,
+    check_robotiq_command, check_robotiq_status,
 ]
 
 

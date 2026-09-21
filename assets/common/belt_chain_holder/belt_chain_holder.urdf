@@ -16,6 +16,18 @@
             <mesh filename="bottom_plate.obj"/>
           </geometry>
         </collision>
+        <collision name="quarter_ellipse_rim_1">
+          <origin rpy="0 0 0" xyz="0 0 0.005"/>
+          <geometry>
+            <mesh filename="quarter_ellipse_rim.obj"/>
+          </geometry>
+        </collision>
+        <collision name="quarter_ellipse_rim_2">
+          <origin rpy="0 0 3.14159" xyz="0 0 0.005"/>
+          <geometry>
+            <mesh filename="quarter_ellipse_rim.obj"/>
+          </geometry>
+        </collision>
         <collision name="quarter_ellipse_bottom_1">
           <origin rpy="0 0 0" xyz="0 0 0.005"/>
           <geometry>
@@ -51,6 +63,18 @@
               <color rgba="0.2 0.6 1.0 1"/>
             </material>
         </visual>
+        <collision name="quarter_ellipse_rim_1">
+          <origin rpy="3.14159 0 0" xyz="0 0 0.010"/>
+          <geometry>
+            <mesh filename="quarter_ellipse_rim.obj"/>
+          </geometry>
+        </collision>
+        <collision name="quarter_ellipse_rim_2">
+          <origin rpy="3.14159 0 3.14159" xyz="0 0 0.010"/>
+          <geometry>
+            <mesh filename="quarter_ellipse_rim.obj"/>
+          </geometry>
+        </collision>
         <collision name="quarter_ellipse_bottom_1">
           <origin rpy="3.14159 0 0" xyz="0 0 0.015"/>
           <geometry>

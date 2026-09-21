@@ -64,15 +64,19 @@ class BeltTaskSimulation:
         self.model = builder.finalize()
         self.device = self.model.device
 
-        # The VBD entry owns everything that is not a robot shape (belt + statics).
+        # The VBD entry owns everything that is not a robot shape (belt, pulleys, statics).
         robot_shape_set = set(info.robot_shapes)
         self.vbd_shapes = [s for s in range(self.model.shape_count) if s not in robot_shape_set]
-        self.vbd_bodies = sorted(info.belt_bodies)
-        self.vbd_joints = sorted(info.belt_joints)
+        self.vbd_bodies = sorted(info.belt_bodies + info.pulley_bodies)
+        self.vbd_joints = sorted(info.belt_joints + info.pulley_joints)
+        assert not set(info.pulley_bodies) & set(info.robot_bodies), (
+            f"pulley bodies {info.pulley_bodies} overlap the robot bodies"
+        )
 
         self._apply_contact_materials(info)
 
         self._apply_default_joint_state(self.model, info)
+        self._apply_pulley_damping(info)
         self.control = self.model.control()
         self._seed_control_targets(info.joint_config)
         self.solver = self._build_solver(info)
@@ -128,6 +132,27 @@ class BeltTaskSimulation:
 
     def _apply_default_joint_state(self, model: newton.Model, info: SceneInfo) -> None:
         raise NotImplementedError
+
+    def _apply_pulley_damping(self, info: SceneInfo) -> None:
+        """The pulley axles' URDF damping as a zero-stiffness drive, after the default gains."""
+        if not info.pulley_joints:
+            return
+        # SolverVBD ignores joint_damping; a drive row with ke 0 / kd c is its viscous damper.
+        dofs = [int(self.model.joint_qd_start.numpy()[j]) for j in info.pulley_joints]
+        coords = [int(self.model.joint_q_start.numpy()[j]) for j in info.pulley_joints]
+        damping = self.model.joint_damping.numpy()[dofs]
+        layout = index_layout(
+            len(self.model.joint_target_kd.numpy()), int(self.model.joint_coord_count),
+            int(self.model.joint_dof_count), "model.joint_target_kd",
+        )
+        slots = coords if layout == "coord" else dofs
+        for array, values in ((self.model.joint_target_ke, 0.0),
+                              (self.model.joint_target_kd, damping)):
+            host = array.numpy().copy()
+            host[slots] = values
+            array.assign(host)
+        values = ", ".join(f"{float(d):g}" for d in damping)
+        logger.info(f"Pulley axle damping [{values}] N m s/rad (VBD drive kd, ke 0)")
 
     def _apply_contact_materials(self, info: SceneInfo) -> None:
         """Global cable material for every shape (as round_belt.py), then the proxy override."""

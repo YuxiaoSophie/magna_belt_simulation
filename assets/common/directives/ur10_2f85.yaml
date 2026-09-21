@@ -29,5 +29,6 @@ directives:
       parent: ur10_wrist_3_link_drake
       child: robotiq_2f85
       X_PC:
-        translation: [0.0, 0.0, 0.0]
+        # -3 mm: the UR flange boss seats in the GRP-CPL-062 coupling's 3 mm pocket, not flush.
+        translation: [0.0, 0.0, -0.003]
         rotation: !Rpy { deg: [0.0, 0.0, 90.0] }

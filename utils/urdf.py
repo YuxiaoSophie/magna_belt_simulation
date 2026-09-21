@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -17,6 +18,18 @@ from utils.transforms import quat_from_rpy
 
 Color = tuple[float, float, float]
 ColorFn = Callable[[newton.Mesh], Color | None]
+_IDENTITY = wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat_identity())
+_JOINTED_TYPES = ("continuous", "revolute")
+
+
+@dataclass
+class StaticUrdf:
+    """What :func:`add_urdf_as_static_shapes` added: shapes by label, plus any jointed links."""
+
+    labels: dict[str, int] = field(default_factory=dict)
+    bodies: list[int] = field(default_factory=list)
+    joints: list[int] = field(default_factory=list)
+    kept_visual_shapes: list[int] = field(default_factory=list)
 
 
 def _parse_vec(text: str | None, default: Color) -> Color:
@@ -51,6 +64,24 @@ def _material_color(elem: ET.Element, fallback: Color) -> Color:
     return fallback
 
 
+def _inertial(link: ET.Element) -> tuple[float, wp.vec3, wp.mat33]:
+    """``(mass, com, inertia about the com in the link frame)`` of a URDF ``<inertial>``."""
+    inertial = link.find("inertial")
+    if inertial is None:
+        return 0.0, wp.vec3(0.0, 0.0, 0.0), wp.mat33(np.zeros((3, 3), dtype=np.float32))
+    mass_elem = inertial.find("mass")
+    mass = 0.0 if mass_elem is None else float(mass_elem.get("value", 0.0))
+    X = _origin_xform(inertial)
+    tensor = np.zeros((3, 3), dtype=np.float64)
+    elem = inertial.find("inertia")
+    if elem is not None:
+        keys = (("ixx", "ixy", "ixz"), ("ixy", "iyy", "iyz"), ("ixz", "iyz", "izz"))
+        tensor = np.array([[float(elem.get(key, 0.0)) for key in row] for row in keys])
+    R = np.array(wp.quat_to_matrix(wp.transform_get_rotation(X)), dtype=np.float64).reshape(3, 3)
+    inertia = wp.mat33(*(R @ tensor @ R.T).reshape(-1).astype(np.float32))
+    return mass, wp.transform_get_translation(X), inertia
+
+
 def add_urdf_as_static_shapes(
     builder: newton.ModelBuilder,
     urdf_path: Path,
@@ -63,14 +94,17 @@ def add_urdf_as_static_shapes(
     collect_aabbs: dict[str, tuple[np.ndarray, np.ndarray]] | None = None,
     split_components: bool = False,
     color_fn: ColorFn | None = None,
-) -> dict[str, int]:
+    keep_visual_material: Sequence[str] = (),
+) -> StaticUrdf:
     """Add every <visual>/<collision> of a fixed-only URDF as world shapes (body -1).
 
     These have to be plain world shapes rather than an ``add_urdf`` articulation so the
     VBD entry of the coupled solver can own them (exactly what ``round_belt.add_table``
     / ``add_board`` do), and so no zero-mass articulation ends up inside the MuJoCo
-    entry. ``collect_aabbs`` optionally receives each mesh shape's world-space AABB,
-    keyed by shape label. Returns shape indices keyed by label.
+    entry. A link on a continuous/revolute joint to the root becomes a body on a world
+    revolute joint (as ``round_belt.add_dynamic_pulley``) carrying that link's shapes.
+    ``collect_aabbs`` optionally receives each mesh shape's world-space AABB (at q = 0),
+    keyed by shape label.
     """
     urdf_path = Path(urdf_path)
     root = ET.parse(str(urdf_path)).getroot()
@@ -79,22 +113,26 @@ def add_urdf_as_static_shapes(
     links = {link.get("name"): link for link in root.findall("link")}
     joints = list(root.findall("joint"))
 
-    children = set()
-    for joint in joints:
-        jtype = joint.get("type")
-        if jtype != "fixed":
-            raise ValueError(
-                f"{urdf_path.name}: joint {joint.get('name')!r} has type {jtype!r}; "
-                "add_urdf_as_static_shapes only supports all-fixed URDFs"
-            )
-        children.add(joint.find("child").get("link"))
-
+    children = {joint.find("child").get("link") for joint in joints}
     roots = [name for name in links if name not in children]
     if len(roots) != 1:
         raise ValueError(f"{urdf_path.name}: expected exactly one root link, got {roots}")
 
-    # Chain the fixed-joint origins to get X_root_link for every link.
-    X_root_link = {roots[0]: wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat_identity())}
+    jointed: dict[str, ET.Element] = {}
+    for joint in joints:
+        jtype = joint.get("type")
+        if jtype == "fixed":
+            continue
+        if jtype not in _JOINTED_TYPES or joint.find("parent").get("link") != roots[0]:
+            raise ValueError(
+                f"{urdf_path.name}: joint {joint.get('name')!r} has type {jtype!r}; "
+                "add_urdf_as_static_shapes only supports fixed joints and "
+                f"{'/'.join(_JOINTED_TYPES)} joints whose parent is the root link"
+            )
+        jointed[joint.find("child").get("link")] = joint
+
+    # Chain the joint origins to get X_root_link (at q = 0) for every link.
+    X_root_link = {roots[0]: wp.transform(_IDENTITY)}
     remaining = list(joints)
     while remaining:
         progressed = False
@@ -109,12 +147,58 @@ def add_urdf_as_static_shapes(
             raise ValueError(
                 f"{urdf_path.name}: disconnected links {[j.get('name') for j in remaining]}"
             )
+    for joint in joints:
+        if joint.find("parent").get("link") in jointed:
+            raise ValueError(
+                f"{urdf_path.name}: joint {joint.get('name')!r} hangs off jointed link "
+                f"{joint.find('parent').get('link')!r}; only root-parented joints are supported"
+            )
 
     default_color = visual_color if visual_color is not None else (0.8, 0.8, 0.8)
-    labels: dict[str, int] = {}
+    kept = set(keep_visual_material)
+    result = StaticUrdf()
+    shapes_by_link: dict[str, list[int]] = {}
 
     for link_name, link in links.items():
         X_wl = X_world_root * X_root_link[link_name]
+        body, X_wb = -1, wp.transform(_IDENTITY)
+        if link_name in jointed:
+            joint = jointed[link_name]
+            mass, com, inertia = _inertial(link)
+            if mass <= 0.0:
+                raise ValueError(
+                    f"{urdf_path.name}: jointed link {link_name!r} needs a positive-mass <inertial>"
+                )
+            body = builder.add_link(
+                xform=X_wl, com=com, inertia=inertia, mass=mass,
+                label=f"{label_prefix}/{link_name}",
+            )
+            axis_elem = joint.find("axis")
+            dynamics = joint.find("dynamics")
+            limit = joint.find("limit")
+            limits = {}
+            if joint.get("type") == "revolute" and limit is not None:
+                limits = {
+                    key: float(limit.get(attr))
+                    for key, attr in (("limit_lower", "lower"), ("limit_upper", "upper"))
+                    if limit.get(attr) is not None
+                }
+            joint_index = builder.add_joint_revolute(
+                parent=-1, child=body, parent_xform=X_wl, child_xform=wp.transform(_IDENTITY),
+                axis=wp.vec3(*_parse_vec(
+                    None if axis_elem is None else axis_elem.get("xyz"), (1.0, 0.0, 0.0)
+                )),
+                damping=0.0 if dynamics is None else float(dynamics.get("damping", 0.0)),
+                label=f"{label_prefix}/{joint.get('name')}",
+                **limits,
+            )
+            builder.add_articulation(
+                [joint_index], label=f"{label_prefix}/{joint.get('name')}_articulation"
+            )
+            result.bodies.append(body)
+            result.joints.append(joint_index)
+            X_wb = X_wl
+        link_shapes = shapes_by_link.setdefault(link_name, [])
         for kind, cfg in (("visual", visual_cfg), ("collision", collision_cfg)):
             is_visual = kind == "visual"
             for i, elem in enumerate(link.findall(kind)):
@@ -122,15 +206,19 @@ def add_urdf_as_static_shapes(
                 if geometry is None:
                     continue
                 label = f"{label_prefix}/{link_name}/{kind}{i}"
+                first = builder.shape_count
+                X_elem = _origin_xform(elem)
                 shape = _add_urdf_geometry(
                     builder,
                     geometry,
                     urdf_dir,
-                    X_wl * _origin_xform(elem),
+                    X_elem if body >= 0 else X_wl * X_elem,
                     cfg,
                     _material_color(elem, default_color) if is_visual else default_color,
                     label,
                     collect_aabbs,
+                    body=body,
+                    X_world_body=X_wb,
                     # Material/component splitting exists purely so parts can be coloured
                     # separately. Colliders must stay exactly as they were: splitting them
                     # yields degenerate pieces (small_round_pulley_half.obj's 27 mm cap is
@@ -139,10 +227,25 @@ def add_urdf_as_static_shapes(
                     split_components=split_components and is_visual,
                     color_fn=color_fn if is_visual else None,
                 )
+                added = list(range(first, builder.shape_count))
+                link_shapes.extend(added)
+                if is_visual and elem.get("name") in kept:
+                    result.kept_visual_shapes.extend(added)
                 if shape is not None:
-                    labels[label] = shape
+                    result.labels[label] = shape
 
-    return labels
+    # Jointed links sit in the root's geometry by design: filter them against the model's links.
+    fixed_shapes = [s for name, ss in shapes_by_link.items() if name not in jointed for s in ss]
+    jointed_links = list(jointed)
+    for i, name in enumerate(jointed_links):
+        others = fixed_shapes + [
+            s for other in jointed_links[i + 1:] for s in shapes_by_link.get(other, [])
+        ]
+        for a in shapes_by_link.get(name, []):
+            for b in others:
+                builder.add_shape_collision_filter_pair(a, b)
+
+    return result
 
 
 def _mesh_color(mesh: newton.Mesh, color_fn: ColorFn | None, fallback: wp.vec3) -> wp.vec3:
@@ -173,6 +276,8 @@ def _add_urdf_geometry(
     label: str,
     collect_aabbs: dict[str, tuple[np.ndarray, np.ndarray]] | None,
     *,
+    body: int = -1,
+    X_world_body: wp.transform = _IDENTITY,
     per_material: bool = True,
     split_components: bool = False,
     color_fn: ColorFn | None = None,
@@ -191,14 +296,15 @@ def _add_urdf_geometry(
         if collect_aabbs is not None:
             # Union over every material sub-mesh, so the AABB (and the floor height
             # derived from it) describes the whole visual, not just its first material.
-            lowers, uppers = zip(*(mesh_world_aabb(m, xform, scale) for m in meshes))
+            X_world_shape = X_world_body * xform
+            lowers, uppers = zip(*(mesh_world_aabb(m, X_world_shape, scale) for m in meshes))
             collect_aabbs[label] = (
                 np.min(np.stack(lowers), axis=0),
                 np.max(np.stack(uppers), axis=0),
             )
         shapes = [
             builder.add_shape_mesh(
-                body=-1,
+                body=body,
                 xform=xform,
                 mesh=mesh,
                 scale=wp.vec3(*scale),
@@ -214,21 +320,21 @@ def _add_urdf_geometry(
     if box_elem is not None:
         sx, sy, sz = _parse_vec(box_elem.get("size"), (1.0, 1.0, 1.0))
         return builder.add_shape_box(
-            body=-1, xform=xform, hx=0.5 * sx, hy=0.5 * sy, hz=0.5 * sz,
+            body=body, xform=xform, hx=0.5 * sx, hy=0.5 * sy, hz=0.5 * sz,
             cfg=cfg, color=wp_color, label=label,
         )
 
     sphere_elem = geometry.find("sphere")
     if sphere_elem is not None:
         return builder.add_shape_sphere(
-            body=-1, xform=xform, radius=float(sphere_elem.get("radius", 1.0)),
+            body=body, xform=xform, radius=float(sphere_elem.get("radius", 1.0)),
             cfg=cfg, color=wp_color, label=label,
         )
 
     cyl_elem = geometry.find("cylinder")
     if cyl_elem is not None:
         return builder.add_shape_cylinder(
-            body=-1, xform=xform, radius=float(cyl_elem.get("radius", 1.0)),
+            body=body, xform=xform, radius=float(cyl_elem.get("radius", 1.0)),
             half_height=0.5 * float(cyl_elem.get("length", 1.0)),
             cfg=cfg, color=wp_color, label=label,
         )

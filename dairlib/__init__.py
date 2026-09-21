@@ -4,5 +4,6 @@ DO NOT MODIFY BY HAND!!!!
 lcm-gen 1.5.2
 """
 
+from .lcmt_object_state import lcmt_object_state as lcmt_object_state
 from .lcmt_robot_input import lcmt_robot_input as lcmt_robot_input
 from .lcmt_robot_output import lcmt_robot_output as lcmt_robot_output

@@ -31,7 +31,9 @@ _EXTENSION_KINDS = {
     ".urdf": "urdf", ".xml": "mjcf", ".usd": "usd", ".usda": "usd", ".usdc": "usd",
 }
 _POSE_KEYS = frozenset({"translation", "rotation"})
-_STATIC_ONLY = {"color", "link_colors", "split_components", "component_colors"}
+_STATIC_ONLY = {
+    "color", "link_colors", "split_components", "component_colors", "keep_visual_material",
+}
 _ARTICULATED_ONLY = {"default_joint_positions", "gravity_compensation", "importer_options"}
 _MODEL_KEYS: dict[str, frozenset[str]] = {
     "static": frozenset({"name", "file", "static", "kind"} | _STATIC_ONLY),
@@ -149,6 +151,7 @@ class ModelDirective:
     link_colors: dict[str, Vec3] = field(default_factory=dict)
     split_components: bool = False
     component_colors: list[ComponentColorRule] = field(default_factory=list)
+    keep_visual_material: list[str] = field(default_factory=list)
     gravity_compensation: bool = False
     urdf_fixups: bool = True
     importer_options: dict[str, Any] = field(default_factory=dict)
@@ -248,6 +251,9 @@ def _parse_model(block: Mapping[str, Any], where: str) -> ModelDirective:
         )
     if rules and not split_components:
         _fail(where, "component_colors requires split_components: true")
+    keep = block.get("keep_visual_material", []) or []
+    if not isinstance(keep, (list, tuple)):
+        _fail(where, f"keep_visual_material must be a list of visual names, got {keep!r}")
 
     defaults: dict[str, list[float]] = {}
     for joint, values in _mapping(
@@ -269,6 +275,7 @@ def _parse_model(block: Mapping[str, Any], where: str) -> ModelDirective:
         link_colors=link_colors,
         split_components=split_components,
         component_colors=rules,
+        keep_visual_material=[str(name) for name in keep],
         gravity_compensation=bool(block.get("gravity_compensation", False)),
         urdf_fixups=bool(block.get("urdf_fixups", True)),
         importer_options=dict(

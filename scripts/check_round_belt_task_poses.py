@@ -219,6 +219,11 @@ def urdf_chain_transform(urdf_path: Path, root_link: str, target_link: str, q_by
 #   add_weld world -> nist_board::board
 YAML_BOARD_XYZ = (0.64483928, -0.19718233, 0.01076393)
 YAML_BOARD_RPY_DEG = (-3.32822058e-01, -6.87450103e-02, 8.95207485e01)
+#   round_belt_task_board.sdf pulley joint poses (board frame), magna 2d9b0ca
+BOARD_PULLEY_CENTERS = {
+    "small_round_pulley": (0.355, 0.196, 0.0248),
+    "large_round_pulley": (0.140, 0.196, 0.0248),
+}
 #   add_weld world -> belt_holder::belt_chain_holder_first_half
 YAML_HOLDER_XYZ = (0.4736603358808432, 0.3520562100563749, -0.02858)
 YAML_HOLDER_RPY_DEG = (0.0, 0.0, 90.0)
@@ -234,6 +239,11 @@ YAML_LINK8_HAND_RPY_DEG = (0.0, 0.0, -45.0)
 #   add_weld world -> table::scene  (no X_PC => identity)
 YAML_TABLE_XYZ = (0.0, 0.0, 0.0)
 YAML_TABLE_RPY_DEG = (0.0, 0.0, 0.0)
+#   assets/common/directives/ur10_2f85.yaml, add_weld ur10_wrist_3_link_drake -> robotiq_2f85
+#   z: the UR flange boss seats 3 mm into the Robotiq GRP-CPL-062 coupling pocket.
+YAML_GRIPPER_WELD_Z = -0.003
+YAML_GRIPPER_WELD_XYZ = (0.0, 0.0, YAML_GRIPPER_WELD_Z)
+YAML_GRIPPER_WELD_RPY_DEG = (0.0, 0.0, 90.0)
 
 
 def yaml_mat4(xyz, rpy_deg) -> np.ndarray:
@@ -305,6 +315,8 @@ def check_scene_constants(ctx: dict) -> None:
         ("X_W_PANDA", scene.X_W_PANDA, YAML_PANDA_XYZ, YAML_PANDA_RPY_DEG),
         ("X_W_TABLE", scene.X_W_TABLE, YAML_TABLE_XYZ, YAML_TABLE_RPY_DEG),
         ("X_LINK8_HAND", scene.X_LINK8_HAND, YAML_LINK8_HAND_XYZ, YAML_LINK8_HAND_RPY_DEG),
+        ("X_WRIST3_GRIPPER", scene.X_WRIST3_GRIPPER, YAML_GRIPPER_WELD_XYZ,
+         YAML_GRIPPER_WELD_RPY_DEG),
     ):
         assert_close_tf(
             f"round_belt_task_simulation.{name} vs round-belt-scene.dmd.yaml",
@@ -361,10 +373,34 @@ def check_scene_constants(ctx: dict) -> None:
 
 
 def check_static_shapes(ctx: dict) -> None:
-    """4. Static shape world poses: board/board/collision0, holder collision0."""
+    """4. Static shape world poses (board/board/collision0, holder collision0) and the pulley
+    bodies and axes (board weld composed with the pulley joint poses)."""
     model = ctx["model"]
     info = ctx["info"]
     shape_transform = model.shape_transform.numpy()
+
+    X_W_board = yaml_mat4(YAML_BOARD_XYZ, YAML_BOARD_RPY_DEG)
+    joint_labels = ctx["joint_labels"]
+    joint_x_p = model.joint_X_p.numpy()
+    joint_axis = model.joint_axis.numpy()
+    qd_start = model.joint_qd_start.numpy()
+    for link, centre in BOARD_PULLEY_CENTERS.items():
+        body = scene.body_index(ctx["body_labels"], f"board/{link}")
+        expected = (X_W_board @ np.array([*centre, 1.0]))[:3]
+        got = ctx["body_q"][body, :3].astype(np.float64)
+        if not np.allclose(got, expected, atol=1e-6, rtol=0.0):
+            raise AssertionError(
+                f"board/{link} body at {got.tolist()}, expected {expected.tolist()} "
+                f"(err {np.abs(got - expected).max():.2e})"
+            )
+        joint = scene.joint_index(joint_labels, f"board/{link}_joint")
+        X_p = mat4_from_pos_quat(joint_x_p[joint][:3], joint_x_p[joint][3:7])
+        axis = X_p[:3, :3] @ joint_axis[int(qd_start[joint])].astype(np.float64)
+        if not np.allclose(axis, X_W_board[:3, 2], atol=1e-6, rtol=0.0):
+            raise AssertionError(
+                f"board/{link}_joint world axis {axis.tolist()} != board z "
+                f"{X_W_board[:3, 2].tolist()}"
+            )
 
     board_label = "board/board/collision0"
     idx = info.static_shape_labels[board_label]
@@ -418,10 +454,14 @@ def check_body_poses(ctx: dict) -> None:
     ctx["gripper_root_label"] = body_labels[gripper_root]
     # 2f85.xml's own <body name="base_mount" pos="0 0 0.007" .../> (the MJCF
     # root's first child body) puts the actual "base_mount" body 7 mm along
-    # local +Z of the weld frame X(wrist3).Rz(90) that add_mjcf's xform= is
-    # applied at; that weld frame itself (not a body) is exactly
-    # X(wrist3).Rz(90) with zero translation, per the ur.dmd.yaml weld.
-    expected_gripper = wrist3_drake_mat @ mat4_rz(90.0) @ mat4_translate((0.0, 0.0, 0.007))
+    # local +Z of the weld frame X(wrist3).Rz(90).T(0, 0, -3 mm) that add_mjcf's
+    # xform= is applied at; that weld frame itself (not a body) is exactly
+    # X(wrist3).T(0, 0, -3 mm).Rz(90), the ur.dmd.yaml weld with the 3 mm the UR
+    # flange boss seats into the Robotiq coupling pocket.
+    expected_gripper = (
+        wrist3_drake_mat @ mat4_rz(90.0)
+        @ mat4_translate((0.0, 0.0, YAML_GRIPPER_WELD_Z + 0.007))
+    )
     assert_close_tf(
         body_labels[gripper_root], body_mat4(body_q, gripper_root), expected_gripper, 1e-5, 1e-5
     )
@@ -560,9 +600,11 @@ def check_belt(ctx: dict) -> None:
             f"({scene.BELT_SEMI_AXIS_X}, {scene.BELT_SEMI_AXIS_Y}) (dx={dx * 1000:.3f} mm, dy={dy * 1000:.3f} mm, tol 5 mm)"
         )
 
-    max_abs_z = float(np.max(np.abs(xyz[:, 2])))
+    max_abs_z = float(np.max(np.abs(xyz[:, 2] - scene.BELT_CENTER[2])))
     if max_abs_z >= 0.001:
-        raise AssertionError(f"belt max |z| = {max_abs_z * 1000:.3f} mm (expected < 1 mm)")
+        raise AssertionError(
+            f"belt max |z - BELT_CENTER z| = {max_abs_z * 1000:.3f} mm (expected < 1 mm)"
+        )
 
     ctx["belt_center"] = center
     ctx["belt_half_extent"] = half_extent
@@ -654,7 +696,7 @@ CHECKS = [
     ("1. Build scene, finalize model, run eval_fk", check_build),
     ("2. Rotation convention (board rpy == Rz.Ry.Rx)", check_convention),
     ("3. Scene weld/default constants vs this script's yaml transcription", check_scene_constants),
-    ("4. Static shape poses (board + holder collision boxes)", check_static_shapes),
+    ("4. Static shape poses (board + holder collision boxes, pulley axles)", check_static_shapes),
     ("5. Body poses (panda_link0, /ur10/base_link, panda_hand, 2f85 root)", check_body_poses),
     ("6. Gripper pad geometry relative to wrist_3_link", check_gripper_geometry),
     ("7. Independent numpy FK (panda_link8, ur10 wrist_3 via the USD->URDF frame constant)", check_independent_fk),

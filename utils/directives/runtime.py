@@ -242,7 +242,7 @@ def _load_model(
                 where,
                 f"static model {directive.name!r} must be welded to world, not {weld.parent!r}",
             )
-        labels = add_urdf_as_static_shapes(
+        static = add_urdf_as_static_shapes(
             builder, path, xform,
             label_prefix=directive.name,
             visual_cfg=context.visual_cfg,
@@ -255,11 +255,14 @@ def _load_model(
                 if directive.component_colors
                 else None
             ),
+            keep_visual_material=directive.keep_visual_material,
         )
+        labels = static.labels
+        kept = set(static.kept_visual_shapes)
         for link, rgb in directive.link_colors.items():
             prefix = f"{directive.name}/{link}/visual"
             for shape in range(shape_start, builder.shape_count):
-                if str(builder.shape_label[shape] or "").startswith(prefix):
+                if shape not in kept and str(builder.shape_label[shape] or "").startswith(prefix):
                     builder.shape_color[shape] = rgb
     elif directive.kind == "urdf":
         builder.add_urdf(
@@ -304,7 +307,7 @@ def _load_model(
         return
     link = weld.child.split("::", 1)[1]
     if directive.kind == "static":
-        # Static models have no bodies; check the link at least produced shapes.
+        # Static bodies are jointed links only, never the weld child; check the link has shapes.
         if not any(label.startswith(f"{directive.name}/{link}/") for label in labels):
             _fail(
                 where,

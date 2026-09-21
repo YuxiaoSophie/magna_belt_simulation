@@ -24,7 +24,7 @@
       <inertia ixx="3.06677e-05" iyy="3.0667375e-05" izz="6.0454911e-05" ixy="5.7518697e-14" ixz="1.6724428e-11" iyz="-1.9003215e-11"/>
     </inertial>
     <visual name="first_half">
-      <origin xyz="0.355 0.196 0.0248" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
         <mesh filename="round_belt_task_board/small_round_pulley/small_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
       </geometry>
@@ -33,13 +33,13 @@
       </material>
     </visual>
     <collision name="first_half_volume">
-      <origin xyz="0.355 0.196 0.0248" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
         <mesh filename="round_belt_task_board/small_round_pulley/small_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <visual name="second_half">
-      <origin xyz="0.355 0.196 0.0248" rpy="3.14159 0 0"/>
+      <origin xyz="0 0 0" rpy="3.14159 0 0"/>
       <geometry>
         <mesh filename="round_belt_task_board/small_round_pulley/small_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
       </geometry>
@@ -48,11 +48,20 @@
       </material>
     </visual>
     <collision name="second_half_volume">
-      <origin xyz="0.355 0.196 0.0248" rpy="3.14159 0 0"/>
+      <origin xyz="0 0 0" rpy="3.14159 0 0"/>
       <geometry>
         <mesh filename="round_belt_task_board/small_round_pulley/small_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
+    <visual name="rotation_marker_strip">
+      <origin xyz="0 0.0075 0.0052" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.002 0.015 0.0001"/>
+      </geometry>
+      <material name="marker_dark">
+        <color rgba="0.05 0.05 0.05 1"/>
+      </material>
+    </visual>
   </link>
   <link name="large_round_pulley">
     <inertial>
@@ -61,7 +70,7 @@
       <inertia ixx="3.06677e-05" iyy="3.0667375e-05" izz="6.0454911e-05" ixy="5.7518697e-14" ixz="1.6724428e-11" iyz="-1.9003215e-11"/>
     </inertial>
     <visual name="first_half">
-      <origin xyz="0.140 0.196 0.0248" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
         <mesh filename="round_belt_task_board/large_round_pulley/large_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
       </geometry>
@@ -70,13 +79,13 @@
       </material>
     </visual>
     <collision name="first_half_volume">
-      <origin xyz="0.140 0.196 0.0248" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
         <mesh filename="round_belt_task_board/large_round_pulley/large_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
     <visual name="second_half">
-      <origin xyz="0.140 0.196 0.0248" rpy="3.14159 0 0"/>
+      <origin xyz="0 0 0" rpy="3.14159 0 0"/>
       <geometry>
         <mesh filename="round_belt_task_board/large_round_pulley/large_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
       </geometry>
@@ -85,20 +94,35 @@
       </material>
     </visual>
     <collision name="second_half_volume">
-      <origin xyz="0.140 0.196 0.0248" rpy="3.14159 0 0"/>
+      <origin xyz="0 0 0" rpy="3.14159 0 0"/>
       <geometry>
         <mesh filename="round_belt_task_board/large_round_pulley/large_round_pulley_half.obj" scale="0.001 0.001 0.001"/>
       </geometry>
     </collision>
+    <visual name="rotation_marker_strip">
+      <origin xyz="0 0.025 0.0052" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.002 0.05 0.0001"/>
+      </geometry>
+      <material name="marker_white">
+        <color rgba="1 1 1 1"/>
+      </material>
+    </visual>
   </link>
-  <joint name="small_round_pulley_joint" type="fixed">
+  <joint name="small_round_pulley_joint" type="continuous">
     <parent link="board"/>
     <child link="small_round_pulley"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <origin xyz="0.355 0.196 0.0248" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.001"/>
+    <limit effort="0" velocity="100"/>
   </joint>
-  <joint name="large_round_pulley_joint" type="fixed">
+  <joint name="large_round_pulley_joint" type="continuous">
     <parent link="board"/>
     <child link="large_round_pulley"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <origin xyz="0.140 0.196 0.0248" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.001"/>
+    <limit effort="0" velocity="100"/>
   </joint>
 </robot>

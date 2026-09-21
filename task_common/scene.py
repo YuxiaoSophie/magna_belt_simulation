@@ -73,6 +73,9 @@ class SceneInfo:
     joint_config: JointConfig = field(default_factory=JointConfig)
     franka_finger_bodies: list[int] = field(default_factory=list)
     franka_finger_shapes: list[int] = field(default_factory=list)
+    pulley_bodies: list[int] = field(default_factory=list)
+    pulley_joints: list[int] = field(default_factory=list)
+    pulley_shapes: list[int] = field(default_factory=list)
 
     @property
     def proxy_bodies(self) -> list[int]:
@@ -187,6 +190,11 @@ def build_task_scene(
             f"static shape range {static_shapes[0]}..{static_shapes[-1]} and the static "
             f"models' shapes differ by {sorted(set(static_shapes) ^ owned)}; fix the order"
         )
+    # Jointed static links (the task-board pulleys): bodies owned by the VBD entry.
+    pulley_bodies = [b for record in statics for b in record.bodies]
+    pulley_joints = [j for record in statics for j in record.joints]
+    pulley_body_set = set(pulley_bodies)
+    pulley_shapes = [s for s in static_shapes if int(builder.shape_body[s]) in pulley_body_set]
     labels = {label: s for record in statics for label, s in record.shape_labels.items()}
     labels["tabletop_collision"] = tabletop_collision_shape
     static_labels = dict(sorted(labels.items(), key=lambda item: item[1]))
@@ -221,8 +229,8 @@ def build_task_scene(
     ground_height = float(ground["height"])
     logger.info(
         f"Scene: {len(static_shapes)} static shapes, {len(robot_bodies)} robot bodies, "
-        f"{len(belt['bodies'])} belt bodies; table AABB z = [{table_aabb[0][2]:.5f}, "
-        f"{table_aabb[1][2]:.5f}], ground z = {ground_height:.5f}, "
+        f"{len(belt['bodies'])} belt bodies, pulley bodies {len(pulley_bodies)}; table AABB z = "
+        f"[{table_aabb[0][2]:.5f}, {table_aabb[1][2]:.5f}], ground z = {ground_height:.5f}, "
         f"tabletop_collision top z = {table_top_z:.5f}, franka finger colliders "
         f"{finger_shapes}."
     )
@@ -241,4 +249,5 @@ def build_task_scene(
         cameras=[e for e in scene.extras.values() if isinstance(e, CameraSpec)],
         point_clouds=[e for e in scene.extras.values() if isinstance(e, PointCloudSpec)],
         franka_finger_bodies=[int(b) for b in finger_bodies], franka_finger_shapes=finger_shapes,
+        pulley_bodies=pulley_bodies, pulley_joints=pulley_joints, pulley_shapes=pulley_shapes,
     )

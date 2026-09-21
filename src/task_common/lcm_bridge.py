@@ -14,8 +14,9 @@ import lcm
 import numpy as np
 from loguru import logger
 
-from dairlib import lcmt_robot_input
+from dairlib import lcmt_robot_input, lcmt_timestamped_saved_traj
 from drake import lcmt_schunk_wsg_command
+from magna import lcmt_spatial_pose
 from robotiq import lcmt_robotiq_command
 from task_common.lcm_contract import LcmChannels, RobotIoSpec, efforts_by_name
 
@@ -30,13 +31,17 @@ class _Latest:
 
 
 class LcmBridge:
-    """One ``lcm.LCM`` handle: the robot-input, Robotiq- and hand-command subscriptions."""
+    """One ``lcm.LCM`` handle: the robot-input, Robotiq- and hand-command subscriptions, plus
+    the controllers' target-pose channels when ``record_targets``."""
 
-    def __init__(self, url: str, channels: LcmChannels, specs: Sequence[RobotIoSpec]) -> None:
+    def __init__(self, url: str, channels: LcmChannels, specs: Sequence[RobotIoSpec],
+                 record_targets: bool = False) -> None:
         self.url = url
         self.channels = channels
         self.lc = lcm.LCM(url)
         self.sim_time = 0.0
+        self.subscribed: list[str] = []
+        self.targets: list[tuple[str, object]] = []
         self._latest: dict[str, _Latest] = {}
         self._warned: set[tuple[str, str]] = set()
         for spec in specs:
@@ -44,11 +49,23 @@ class LcmBridge:
                 continue
             channel = getattr(channels, spec.input_channel_key)
             self._latest[channel] = _Latest()
-            self.lc.subscribe(channel, self._on_robot_input)
+            self._subscribe(channel, self._on_robot_input)
         self._latest[channels.robotiq_command_channel] = _Latest()
-        self.lc.subscribe(channels.robotiq_command_channel, self._on_robotiq_command)
+        self._subscribe(channels.robotiq_command_channel, self._on_robotiq_command)
         self._latest[channels.franka_hand_input_channel] = _Latest()
-        self.lc.subscribe(channels.franka_hand_input_channel, self._on_hand_command)
+        self._subscribe(channels.franka_hand_input_channel, self._on_hand_command)
+        if record_targets:
+            self._target_types = {
+                channels.tracking_trajectory_actor_channel: lcmt_timestamped_saved_traj,
+                channels.ur_tracking_trajectory_actor_channel: lcmt_timestamped_saved_traj,
+                channels.ur_target_spatial_pose_channel: lcmt_spatial_pose,
+            }
+            for channel in self._target_types:
+                self._subscribe(channel, self._on_target)
+
+    def _subscribe(self, channel: str, handler) -> None:
+        self.lc.subscribe(channel, handler)
+        self.subscribed.append(channel)
 
     def _warn_once(self, channel: str, key: str, text: str) -> None:
         if (channel, key) not in self._warned:
@@ -90,6 +107,20 @@ class LcmBridge:
         latest = self._latest[channel]
         latest.payload = (int(msg.utime), float(msg.target_position_mm), float(msg.force))
         latest.sim_time = self.sim_time
+
+    def _on_target(self, channel: str, data: bytes) -> None:
+        msg_type = self._target_types[channel]
+        try:
+            msg = msg_type.decode(data)
+        except ValueError as exc:
+            self._warn_once(channel, "<decode>", f"undecodable {msg_type.__name__} ({exc})")
+            return
+        self.targets.append((channel, msg))
+
+    def take_targets(self) -> list[tuple[str, object]]:
+        """Target-pose messages decoded since the last call, in arrival order."""
+        targets, self.targets = self.targets, []
+        return targets
 
     def drain(self, sim_time: float) -> int:
         """Dispatch up to ``MAX_MESSAGES_PER_DRAIN`` pending messages; returns how many."""

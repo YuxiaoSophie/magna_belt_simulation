@@ -15,7 +15,7 @@ group "simulation subsystems" {
 
 group "newton round-belt task" {
     cmd "newton-round-belt-simulation" {
-        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_newton_sim.sh --publish-belt-mesh --viewer viser --render-every 20 --initial-state /home/hienbui/git/magna/python/data/generated/hw_initial_state.yaml";
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_newton_sim.sh --publish-belt-mesh --viewer viser --render-every 20 --initial-state /home/hienbui/git/magna/python/data/generated/hw_initial_state.yaml --record --record-label hw";
         host = "localhost";
     }
     cmd "round-belt-visualizer" {

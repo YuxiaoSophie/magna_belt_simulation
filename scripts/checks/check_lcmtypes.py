@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Check the generated lcmtypes/ packages are wire-compatible with magna's generated modules.
 
-First checks that dairlib/drake/robotiq resolve to this repo's lcmtypes/<pkg>/ (not magna's
-tree or a stray copy). Then for each of the 9 vendored LCM types: compares the packed fingerprint against magna's own
-generated module (bazel-bin output, read-only), then round-trips a non-default instance
-through encode()/decode() and checks field equality. Skips the fingerprint half (not the
-round trip) if the magna reference tree is not present.
+First checks that dairlib/drake/robotiq/magna resolve to this repo's lcmtypes/<pkg>/ (not
+magna's tree or a stray copy). Then for each of the 14 vendored LCM types: compares the packed
+fingerprint against magna's own generated module (bazel-bin output, read-only), then
+round-trips a non-default instance through encode()/decode() and checks field equality. Skips
+the fingerprint half (not the round trip) if the magna reference tree is not present.
 
 Run:
     uv run python scripts/checks/check_lcmtypes.py
@@ -23,13 +23,22 @@ if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
 import task_common  # puts lcmtypes/ on sys.path
-from dairlib import lcmt_object_state, lcmt_robot_input, lcmt_robot_output
+from dairlib import (
+    lcmt_metadata,
+    lcmt_object_state,
+    lcmt_robot_input,
+    lcmt_robot_output,
+    lcmt_saved_traj,
+    lcmt_timestamped_saved_traj,
+    lcmt_trajectory_block,
+)
 from drake import (
     lcmt_schunk_wsg_command,
     lcmt_schunk_wsg_status,
     lcmt_viewer_geometry_data,
     lcmt_viewer_link_data,
 )
+from magna import lcmt_spatial_pose
 from robotiq import lcmt_robotiq_command, lcmt_robotiq_status
 
 # Parent "lcmtypes" dir of each magna-generated package (inserted into sys.path so a nested
@@ -38,6 +47,7 @@ MAGNA_LCMTYPES_DIRS = {
     "dairlib": Path("/home/hienbui/git/magna/bazel-bin/external/dairlib+/lcmtypes"),
     "drake": Path("/home/hienbui/git/magna/bazel-bin/external/drake+/lcmtypes"),
     "robotiq": Path("/home/hienbui/git/magna/bazel-bin/external/robotiq-driver+/lcmtypes"),
+    "magna": Path("/home/hienbui/git/magna/bazel-bin/lcmtypes"),
 }
 MAGNA_AVAILABLE = all(d.is_dir() for d in MAGNA_LCMTYPES_DIRS.values())
 for _dir in MAGNA_LCMTYPES_DIRS.values():
@@ -63,11 +73,11 @@ def _load_magna_class(package: str, type_name: str):
 
 def check_repo_modules_location() -> None:
     lcmtypes_dir = task_common.LCMTYPES_DIR
-    for pkg in ("dairlib", "drake", "robotiq"):
+    for pkg in ("dairlib", "drake", "robotiq", "magna"):
         origin = Path(sys.modules[pkg].__file__).resolve()
         _require(origin == lcmtypes_dir / pkg / "__init__.py",
                  f"{pkg} resolved to {origin}, expected {lcmtypes_dir / pkg}/")
-    print(f"[PASS] dairlib/drake/robotiq resolve to {lcmtypes_dir}/<pkg>/")
+    print(f"[PASS] dairlib/drake/robotiq/magna resolve to {lcmtypes_dir}/<pkg>/")
 
 
 def _check_fingerprint(package: str, type_name: str, repo_cls) -> None:
@@ -175,6 +185,126 @@ def check_object_state() -> None:
     print("[PASS] lcmt_object_state")
 
 
+def _build_metadata() -> lcmt_metadata:
+    meta = lcmt_metadata()
+    meta.git_dirty_flag = True
+    meta.datetime = "2026-09-21T00:00:00"
+    meta.name = "target_cartesian_pose_trajectory"
+    meta.description = "franka end effector position/orientation/force targets"
+    meta.git_commit_hash = "deadbeefcafef00d"
+    return meta
+
+
+def _require_metadata_equal(note: str, got, want) -> None:
+    _require(got.git_dirty_flag == want.git_dirty_flag, f"{note}: git_dirty_flag mismatch")
+    _require(got.datetime == want.datetime, f"{note}: datetime mismatch")
+    _require(got.name == want.name, f"{note}: name mismatch")
+    _require(got.description == want.description, f"{note}: description mismatch")
+    _require(got.git_commit_hash == want.git_commit_hash, f"{note}: git_commit_hash mismatch")
+
+
+def check_metadata() -> None:
+    _check_fingerprint("dairlib", "lcmt_metadata", lcmt_metadata)
+    msg = _build_metadata()
+    decoded = lcmt_metadata.decode(msg.encode())
+    _require_metadata_equal("lcmt_metadata", decoded, msg)
+    print("[PASS] lcmt_metadata")
+
+
+def _build_trajectory_block(
+    name: str, num_datatypes: int, num_points: int
+) -> lcmt_trajectory_block:
+    block = lcmt_trajectory_block()
+    block.trajectory_name = name
+    block.num_points = num_points
+    block.num_datatypes = num_datatypes
+    block.time_vec = [0.1 * i for i in range(num_points)]
+    block.datapoints = [
+        [float(row * 10 + col) for col in range(num_points)] for row in range(num_datatypes)
+    ]
+    block.datatypes = [f"row{row}" for row in range(num_datatypes)]
+    return block
+
+
+def _require_trajectory_block_equal(note: str, got, want) -> None:
+    _require(got.trajectory_name == want.trajectory_name, f"{note}: trajectory_name mismatch")
+    _require(got.num_points == want.num_points, f"{note}: num_points mismatch")
+    _require(got.num_datatypes == want.num_datatypes, f"{note}: num_datatypes mismatch")
+    _require(list(got.time_vec) == want.time_vec, f"{note}: time_vec {got.time_vec} != "
+             f"{want.time_vec}")
+    _require([list(row) for row in got.datapoints] == want.datapoints,
+             f"{note}: datapoints mismatch")
+    _require(list(got.datatypes) == want.datatypes, f"{note}: datatypes mismatch")
+
+
+def check_trajectory_block() -> None:
+    _check_fingerprint("dairlib", "lcmt_trajectory_block", lcmt_trajectory_block)
+    msg = _build_trajectory_block("end_effector_position_target", 3, 5)
+    decoded = lcmt_trajectory_block.decode(msg.encode())
+    _require_trajectory_block_equal("lcmt_trajectory_block", decoded, msg)
+    print("[PASS] lcmt_trajectory_block")
+
+
+def _build_saved_traj() -> lcmt_saved_traj:
+    msg = lcmt_saved_traj()
+    msg.metadata = _build_metadata()
+    msg.trajectories = [
+        _build_trajectory_block("end_effector_position_target", 3, 5),
+        _build_trajectory_block("end_effector_orientation_target", 4, 5),
+    ]
+    msg.num_trajectories = len(msg.trajectories)
+    msg.trajectory_names = [block.trajectory_name for block in msg.trajectories]
+    return msg
+
+
+def _require_saved_traj_equal(note: str, got, want) -> None:
+    _require_metadata_equal(f"{note}.metadata", got.metadata, want.metadata)
+    _require(got.num_trajectories == want.num_trajectories,
+             f"{note}: num_trajectories mismatch")
+    _require(len(got.trajectories) == len(want.trajectories),
+             f"{note}: trajectories count mismatch")
+    for i, (got_block, want_block) in enumerate(zip(got.trajectories, want.trajectories)):
+        _require_trajectory_block_equal(f"{note}.trajectories[{i}]", got_block, want_block)
+    _require(list(got.trajectory_names) == want.trajectory_names,
+             f"{note}: trajectory_names mismatch")
+
+
+def check_saved_traj() -> None:
+    _check_fingerprint("dairlib", "lcmt_saved_traj", lcmt_saved_traj)
+    msg = _build_saved_traj()
+    decoded = lcmt_saved_traj.decode(msg.encode())
+    _require_saved_traj_equal("lcmt_saved_traj", decoded, msg)
+    print("[PASS] lcmt_saved_traj")
+
+
+def check_timestamped_saved_traj() -> None:
+    _check_fingerprint("dairlib", "lcmt_timestamped_saved_traj", lcmt_timestamped_saved_traj)
+    msg = lcmt_timestamped_saved_traj()
+    msg.utime = 5000
+    msg.saved_traj = _build_saved_traj()
+    decoded = lcmt_timestamped_saved_traj.decode(msg.encode())
+    _require(decoded.utime == msg.utime, "utime mismatch")
+    _require_saved_traj_equal("lcmt_timestamped_saved_traj.saved_traj", decoded.saved_traj,
+                                msg.saved_traj)
+    print("[PASS] lcmt_timestamped_saved_traj")
+
+
+def check_spatial_pose() -> None:
+    _check_fingerprint("magna", "lcmt_spatial_pose", lcmt_spatial_pose)
+    msg = lcmt_spatial_pose()
+    msg.utime = 5000
+    msg.position = [0.1, 0.2, 0.3]
+    msg.orientation = [1.0, 0.0, 0.0, 0.0]  # w,x,y,z
+    decoded = lcmt_spatial_pose.decode(msg.encode())
+    _require(decoded.utime == msg.utime, "utime mismatch")
+    _require(list(decoded.position) == msg.position, "position mismatch")
+    _require(list(decoded.orientation) == msg.orientation, "orientation mismatch")
+    msg.orientation = [0.5, 0.5, 0.5, 0.5]
+    decoded = lcmt_spatial_pose.decode(msg.encode())
+    _require(list(decoded.orientation) == msg.orientation, "orientation mismatch (2nd)")
+    print("[PASS] lcmt_spatial_pose")
+
+
 def check_schunk_wsg_status() -> None:
     _check_fingerprint("drake", "lcmt_schunk_wsg_status", lcmt_schunk_wsg_status)
     msg = lcmt_schunk_wsg_status()
@@ -265,9 +395,10 @@ def check_robotiq_status() -> None:
 
 
 CHECKS = [
-    check_repo_modules_location, check_robot_input, check_robot_output, check_object_state, check_schunk_wsg_status,
-    check_schunk_wsg_command, check_viewer_geometry_data, check_viewer_link_data,
-    check_robotiq_command, check_robotiq_status,
+    check_repo_modules_location, check_robot_input, check_robot_output, check_object_state,
+    check_metadata, check_trajectory_block, check_saved_traj, check_timestamped_saved_traj,
+    check_schunk_wsg_status, check_schunk_wsg_command, check_viewer_geometry_data,
+    check_viewer_link_data, check_robotiq_command, check_robotiq_status, check_spatial_pose,
 ]
 
 

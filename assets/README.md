@@ -196,12 +196,15 @@ place of the original pad geoms:
 - **Source:** `magna/bazel-magna/external/dairlib+/lcmtypes/lcmt_robot_{input,output}.lcm`,
   `magna/bazel-magna/external/drake+/lcmtypes/lcmt_{schunk_wsg_status,schunk_wsg_command,
   viewer_link_data,viewer_geometry_data}.lcm`, `magna/bazel-magna/external/robotiq-driver+/lcmtypes/
-  lcmt_robotiq_{command,status}.lcm`
+  lcmt_robotiq_{command,status}.lcm`, `magna/bazel-magna/external/dairlib+/lcmtypes/
+  lcmt_{timestamped_saved_traj,saved_traj,trajectory_block,metadata}.lcm` (nested: a
+  `lcmt_timestamped_saved_traj` wraps `lcmt_saved_traj`, which wraps `lcmt_metadata` and
+  `lcmt_trajectory_block`), `magna/lcmtypes/lcmt_spatial_pose.lcm` (package `magna`).
 - **Copies:** byte-identical.
-- **Regenerated with:** `lcmtypes/gen_lcmtypes.sh` (emits the `dairlib`, `drake`, `robotiq`
-  Python packages in place, next to the `.lcm` sources in `lcmtypes/<pkg>/`, via the venv's
-  `lcm-gen`). They import as top-level packages: `src/task_common/__init__.py` puts `lcmtypes/` on
-  `sys.path`, so anything importing them imports `task_common` first.
+- **Regenerated with:** `lcmtypes/gen_lcmtypes.sh` (emits the `dairlib`, `drake`, `robotiq`,
+  `magna` Python packages in place, next to the `.lcm` sources in `lcmtypes/<pkg>/`, via the
+  venv's `lcm-gen`). They import as top-level packages: `src/task_common/__init__.py` puts
+  `lcmtypes/` on `sys.path`, so anything importing them imports `task_common` first.
 
 ## LCM simulation parameters (`round_belt_task/round_belt_lcm_sim.yaml`)
 

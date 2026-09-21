@@ -15,7 +15,7 @@ group "simulation subsystems" {
 
 group "newton round-belt task" {
     cmd "newton-round-belt-simulation" {
-        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_newton_sim.sh --publish-belt-mesh --viewer viser --render-every 20";
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_newton_sim.sh --publish-belt-mesh --viewer viser --render-every 20 --record --record-label sim";
         host = "localhost";
     }
     cmd "round-belt-visualizer" {

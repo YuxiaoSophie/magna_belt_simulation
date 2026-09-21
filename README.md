@@ -22,7 +22,11 @@ my_projects/
 │   │   ├── lcm_contract.py         #   the Drake magna_simulation LCM contract (channels, messages)
 │   │   ├── lcm_bridge.py           #   non-blocking LCM I/O (latest-message inputs, publishes)
 │   │   ├── lcm_simulation.py       #   LcmBeltTaskSimulation: task-agnostic LCM control-step loop
-│   │   └── belt_mesh_lcm.py        #   optional DRAKE_VIEWER_DEFORMABLE tube-mesh publish
+│   │   ├── belt_mesh_lcm.py        #   optional DRAKE_VIEWER_DEFORMABLE tube-mesh publish
+│   │   ├── recording.py            #   RunRecorder / Recording: --record run capture + reader
+│   │   ├── replay_app.py           #   ReplayApp: viser run selection, timeline, 3D playback
+│   │   ├── replay_metrics.py       #   metrics, derived events, target-pose evaluation
+│   │   └── replay_panels.py        #   Events/Plots/Triads panels for the replay app
 │   ├── timing_belt_task/           # timing-belt model spike (belt.py, belt_strip.py)
 │   └── utils/                      # task-agnostic Newton helpers
 │       ├── directives/             #   Drake-style scene directives loader
@@ -45,11 +49,15 @@ my_projects/
 │
 ├── lcmtypes/                       # LCM types: vendored .lcm sources (byte-identical to magna) + the
 │   ├── dairlib/  drake/  robotiq/  #   generated Python packages beside them, checked in
+│   ├── magna/                      #   lcmt_spatial_pose (UR target pose, docs/lcm-simulation.md)
 │   └── gen_lcmtypes.sh             #   regenerates the Python packages in place from the .lcm sources
 ├── procman/                        # newton_assembly_sim.pmd / _hw.pmd + run_in_magna.sh / run_newton_sim.sh wrappers
 │
+├── recordings/                     # --record output (gitignored), <timestamp>-<label>/ per run
+│
 ├── scripts/
 │   ├── round_belt_lcm_simulation.py     # LCM sim entry point: speaks magna's contract (docs/lcm-simulation.md)
+│   ├── replay_viewer.py                 # viser replay of a --record run: scrub, play, plots, triads
 │   ├── checks/                          # regression checks; run all before a commit
 │   │   ├── check_round_belt_task_poses.py   # independent-FK pose check vs the Drake yaml
 │   │   ├── check_scene_directives.py        # directives loader / scene checks
@@ -58,6 +66,8 @@ my_projects/
 │   │   ├── check_lcm_contract.py            # 12 checks against a live LCM sim (docs/lcm-simulation.md)
 │   │   ├── check_pulleys.py                 # the task-board pulleys spin freely on fixed axles
 │   │   ├── check_robotiq_width.py           # Robotiq command byte -> jaw width calibration
+│   │   ├── check_recording.py               # --record output is complete and bounded overhead
+│   │   ├── check_replay_viewer.py           # headless check of the replay app (ReplayApp)
 │   │   ├── lcm_peer_utils.py                # controller-side LCM peer for the checks (and the bench)
 │   │   └── data/                            # reference data for the checks
 │   └── debug/                           # tuning and analysis tools, not checks:
@@ -85,6 +95,18 @@ my_projects/
 
 ```bash
 vglrun -d :1 uv run python scripts/round_belt_lcm_simulation.py --viewer gl
+```
+
+### Record a run
+
+```bash
+uv run python scripts/round_belt_lcm_simulation.py --record
+```
+
+### Replay a run
+
+```bash
+uv run python scripts/replay_viewer.py
 ```
 
 ---
@@ -218,4 +240,7 @@ uv run python scripts/round_belt_lcm_simulation.py
 # (procman/newton_assembly_hw.pmd points the magna binaries at ..._params_hw.yaml)
 uv run python scripts/round_belt_lcm_simulation.py \
     --initial-state /home/hienbui/git/magna/python/data/generated/hw_initial_state.yaml
+
+# record the run for offline replay with scripts/replay_viewer.py (docs/lcm-simulation.md §10)
+uv run python scripts/round_belt_lcm_simulation.py --record --record-label my_run
 ```

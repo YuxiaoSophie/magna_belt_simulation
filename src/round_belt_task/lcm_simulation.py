@@ -33,12 +33,14 @@ from round_belt_task.constants import (
     LCM_HAND_DRIVE_MAX_SPEED,
     LCM_HAND_DRIVE_STALE_TIMEOUT,
     LCM_PULLEY_STATE_OBJECT_NAME,
+    LCM_SIM_PARAMS,
     LCM_SOLVER_SUBSTEPS,
     LCM_SOLVER_VBD_ITERATIONS,
     LCM_UR_GRIPPER_TIP_Z,
     PANDA_ARM_URDF,
     PANDA_FINGER_LABELS,
     PANDA_JOINT_LABELS,
+    SCENE_DIRECTIVES,
     TABLE_TOP_Z,
     UR10_JOINT_LABELS,
     UR10_WRIST3_LABEL,
@@ -48,6 +50,7 @@ from round_belt_task.joint_state import apply_default_joint_state
 from round_belt_task.scene import SceneInfo, build_scene
 from task_common.lcm_contract import HandDrive, franka_hand_spec, franka_spec, ur10_spec
 from task_common.lcm_simulation import LcmBeltTaskSimulation, reflected_rotor_inertia
+from task_common.recording import file_digest
 from utils.labels import body_index
 
 
@@ -86,6 +89,8 @@ class RoundBeltLcmSimulation(LcmBeltTaskSimulation):
         logger.info(
             f"[BELT] anchor target = finger_tip - {BELT_TRIGGER_GRASP_DEPTH:g} m along the hand z"
         )
+
+    def _resolve_task_bodies(self) -> None:
         body_labels = list(self.model.body_label)
         self._finger_tip_body = body_index(body_labels, BELT_TRIGGER_BODY)
         self._ur_wrist_body = body_index(body_labels, UR10_WRIST3_LABEL)
@@ -93,6 +98,16 @@ class RoundBeltLcmSimulation(LcmBeltTaskSimulation):
             X_USDWRIST3_URDFWRIST3, wp.vec3(0.0, 0.0, LCM_UR_GRIPPER_TIP_Z)
         )
         self._belt_bodies = np.asarray(self.info.belt_bodies, dtype=np.int64)
+
+    def _recording_meta(self) -> dict:
+        return {
+            "scene_directives": file_digest(SCENE_DIRECTIVES),
+            "lcm_sim_params": file_digest(LCM_SIM_PARAMS),
+            "finger_tip_body": int(self._finger_tip_body),
+            "ur_wrist_body": int(self._ur_wrist_body),
+            "ur_tip_in_wrist": [float(v) for v in self._ur_tip_in_wrist],
+            "belt_trigger_point": [float(v) for v in self.belt_trigger_point],
+        }
 
     def _build_scene(self, builder: newton.ModelBuilder) -> SceneInfo:
         info = build_scene(builder)
@@ -146,6 +161,9 @@ class RoundBeltLcmSimulation(LcmBeltTaskSimulation):
         self.reset_body_poses(self._belt_bodies, placed)
         self.belt_placed = True
         self.belt_anchor_body = int(self._belt_bodies[anchor])
+        self._event("belt_placed", finger_tip=finger_tip.tolist(), target=target.tolist(),
+                    anchor_body=self.belt_anchor_body, rule=rule,
+                    translation=translation.tolist())
         logger.success(
             f"[BELT] placed at step {self.step_index} (sim t={self.sim_time:.3f} s): "
             f"finger_tip={_fmt(finger_tip)}, target={_fmt(target)}, "

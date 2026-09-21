@@ -60,6 +60,9 @@ class LcmChannels:
     robotiq_command_channel: str = "ROBOTIQ_COMMAND"
     deformable_geometry_channel: str = "DRAKE_VIEWER_DEFORMABLE"
     round_belt_pulley_state_channel: str = "ROUND_BELT_PULLEY_STATE"
+    tracking_trajectory_actor_channel: str = "TARGET_CARTESIAN_POSE_TRAJECTORY"
+    ur_tracking_trajectory_actor_channel: str = "UR_TARGET_CARTESIAN_POSE_TRAJECTORY"
+    ur_target_spatial_pose_channel: str = "UR_TARGET_SPATIAL_POSE"
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> LcmChannels:

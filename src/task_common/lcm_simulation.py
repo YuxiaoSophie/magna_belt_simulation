@@ -12,6 +12,8 @@ Subclasses supply the scene hooks, ``_robot_specs``, ``_reflected_inertia`` and
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import sys
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping, Sequence
@@ -45,6 +47,13 @@ from task_common.lcm_contract import (
     robotiq_status_msg,
     schunk_status_msg,
 )
+from task_common.recording import (
+    DEFAULT_CHUNK_STEPS,
+    DEFAULT_RECORDINGS_DIR,
+    DEFAULT_STATE_EVERY,
+    RunRecorder,
+    git_state,
+)
 from task_common.scene import SceneInfo
 from task_common.simulation import BeltTaskSimulation
 from utils.labels import joint_index
@@ -73,6 +82,13 @@ def reflected_rotor_inertia(urdf: Path) -> dict[str, float]:
     return inertia
 
 
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"{value} is not >= 1")
+    return value
+
+
 @dataclass
 class _RobotIo:
     """A spec resolved against the model, plus this step's values."""
@@ -85,6 +101,7 @@ class _RobotIo:
     velocities: np.ndarray
     efforts: np.ndarray
     stale: bool = False
+    seen: bool = False
 
 
 class LcmBeltTaskSimulation(BeltTaskSimulation):
@@ -115,6 +132,12 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         self.robotiq_status_byte = 0
         self.hand_target_mm = 0.0
         self._hand_stale = False
+        self._hand_goal_logged: tuple[float, float] | None = None
+        self.robotiq_status_speed_byte = 0
+        self.robotiq_opening = 0.0
+        self.recorder: RunRecorder | None = None
+        self._event_step = 0
+        self._last_compute_ms = 0.0
         self.publish_belt_mesh = bool(getattr(args, "publish_belt_mesh", False))
         if self.publish_belt_mesh and self.belt_radius is None:
             raise ValueError("--publish-belt-mesh requires the task to set belt_radius")
@@ -125,10 +148,15 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         self._grasp_log_every = max(1, round(GRASP_LOG_PERIOD / self.frame_dt))
         self._io_by_name = {io.spec.name: io for io in self._robot_io}
         self._resolve_pulleys()
+        self._resolve_task_bodies()
         self._reset_stats(time.perf_counter())
         self._resyncs = 0
-        self.bridge = LcmBridge(self.lcm_url, self.channels, self.robot_specs)
+        record_dir = getattr(args, "record", None)
+        self.bridge = LcmBridge(self.lcm_url, self.channels, self.robot_specs,
+                                record_targets=record_dir is not None)
         self._log_startup()
+        if record_dir is not None:
+            self._start_recording(Path(record_dir))
 
     def _robot_specs(self) -> Sequence[RobotIoSpec]:
         raise NotImplementedError
@@ -146,6 +174,134 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         bodies = np.asarray(self.info.pulley_bodies, dtype=np.int64)
         self._pulley_bodies = bodies
         self._pulley_initial_centres = self.state_0.body_q.numpy()[bodies, :3].astype(np.float64)
+
+    def _resolve_task_bodies(self) -> None:
+        """Task body/point lookups on the finalized model, before the recorder starts."""
+
+    def _recording_meta(self) -> dict:
+        """Task-specific ``meta.json`` keys (scene files, trigger bodies and points)."""
+        return {}
+
+    def recorder_meta(self) -> dict:
+        """The ``meta.json`` content :class:`RunRecorder` is built with."""
+        model = self.model
+        q_start = model.joint_q_start.numpy()
+        qd_start = model.joint_qd_start.numpy()
+        signal_joints = sorted(self.info.robot_joints + self.info.pulley_joints)
+        signal_coords = [c for j in signal_joints for c in range(q_start[j], q_start[j + 1])]
+        signal_dofs = [d for j in signal_joints for d in range(qd_start[j], qd_start[j + 1])]
+        commit, dirty = git_state()
+        initial_state = getattr(self.args, "initial_state", None)
+
+        def ints(values) -> list[int]:
+            return [int(v) for v in values]
+
+        robot_io = {}
+        for io in self._robot_io:
+            spec = io.spec
+            key = spec.input_channel_key
+            robot_io[spec.name] = {
+                "input_channel": None if key is None else getattr(self.channels, key),
+                "output_channel": io.output_channel, "coords": ints(io.coords),
+                "dofs": ints(io.dofs), "position_names": list(spec.position_names),
+                "velocity_names": list(spec.velocity_names),
+                "effort_names": list(spec.effort_names),
+            }
+        return {
+            "argv": list(sys.argv), "git_commit": commit, "git_dirty": dirty,
+            "control_dt": float(self.frame_dt), "lcm_url": self.lcm_url,
+            "channels": dataclasses.asdict(self.channels),
+            "scene_directives": None, "lcm_sim_params": None,
+            "initial_state": None if initial_state is None else str(initial_state),
+            "body_labels": [str(label) for label in model.body_label],
+            "body_q_layout": "xyz_xyzw",
+            "joint_labels": [str(label) for label in model.joint_label],
+            "joint_q_start": ints(q_start), "joint_qd_start": ints(qd_start),
+            "joint_coord_count": int(model.joint_coord_count),
+            "joint_dof_count": int(model.joint_dof_count),
+            "signal_coords": ints(signal_coords), "signal_dofs": ints(signal_dofs),
+            "belt_bodies": ints(self.info.belt_bodies),
+            "pulley_bodies": ints(self.info.pulley_bodies),
+            "pulley_joints": ints(self.info.pulley_joints),
+            "pulley_coords": ints(self._pulley_coords), "pulley_dofs": ints(self._pulley_dofs),
+            "gripper_pad_bodies": ints(self.info.gripper_pad_bodies),
+            "franka_finger_bodies": ints(self.info.franka_finger_bodies),
+            "driver_coords": ints(self._driver_coords), "driver_dofs": ints(self._driver_dofs),
+            "hand_body": int(self._hand_body),
+            "robot_io": robot_io,
+            "effort_layout": [f"{io.spec.name}/{name}" for io in self._robot_io
+                              for name in io.spec.effort_names],
+            **self._recording_meta(),
+        }
+
+    def _start_recording(self, root: Path) -> None:
+        state_every = int(getattr(self.args, "record_state_every", DEFAULT_STATE_EVERY))
+        chunk_steps = int(getattr(self.args, "record_chunk_steps", DEFAULT_CHUNK_STEPS))
+        label = getattr(self.args, "record_label", None) or "round_belt"
+        meta = self.recorder_meta()
+        self.recorder = recorder = RunRecorder(
+            root, label, meta, state_every=state_every, chunk_steps=chunk_steps
+        )
+        mb_per_min = recorder.bytes_per_step * self.frame_rate * 60.0 / 1e6
+        logger.info(
+            f"[RECORD] {recorder.path} state every {state_every} steps "
+            f"({self.frame_rate / state_every:g} Hz), chunk {chunk_steps} steps, "
+            f"~{mb_per_min:.1f} MB/min (B {len(meta['body_labels'])}, "
+            f"C' {len(meta['signal_coords'])}, D' {len(meta['signal_dofs'])}, "
+            f"{recorder.bytes_per_step:.0f} B/step)"
+        )
+
+    def _event(self, kind: str, /, **data) -> None:
+        if self.recorder is not None:
+            step = self._event_step
+            self.recorder.event(step, step * self.frame_dt, kind, **data)
+
+    def close_recording(self, reason: str = "closed") -> None:
+        """End the recording (idempotent): ``run_end`` event, final ``meta.json``, size log."""
+        recorder = self.recorder
+        if recorder is None or recorder.closed:
+            return
+        self._event_step = self.step_index
+        self._event("run_end", reason=reason, step=self.step_index)
+        recorder.close(finished=True, reason=reason)
+        meta = recorder.meta
+        logger.info(
+            f"[RECORD] closed {recorder.path}: {meta['num_steps']} steps, "
+            f"{sum(c['state_frames'] for c in meta['chunks'])} frames, "
+            f"{recorder.size_bytes() / 1e6:.1f} MB (B {len(meta['body_labels'])}, "
+            f"C' {len(meta['signal_coords'])}, D' {len(meta['signal_dofs'])}), reason {reason}"
+        )
+
+    def _record_step(self, t_start: float, handled: int, joint_q: np.ndarray,
+                     joint_qd: np.ndarray, body_q: np.ndarray) -> None:
+        recorder = self.recorder
+        step, sim_time = self.step_index, self.sim_time
+        for channel, msg in self.bridge.take_targets():
+            recorder.target(step, sim_time, channel, self._target_payload(channel, msg))
+        franka = self._io_by_name.get("franka")
+        recorder.step(
+            step=step, sim_time=sim_time, wall_time=t_start, joint_q=joint_q, joint_qd=joint_qd,
+            efforts=[io.efforts for io in self._robot_io], hand_target_mm=self.hand_target_mm,
+            hand_stale=self._hand_stale, franka_stale=franka is not None and franka.stale,
+            robotiq_cmd=self.bridge.latest_robotiq(),
+            robotiq_status=(self.robotiq_status_byte, self.robotiq_status_speed_byte,
+                            self.robotiq_force_byte),
+            robotiq_opening=self.robotiq_opening, lcm_rx=handled,
+            compute_ms=self._last_compute_ms, body_q=body_q,
+        )
+
+    def _target_payload(self, channel: str, msg) -> dict:
+        if channel == self.channels.ur_target_spatial_pose_channel:
+            return {"utime": int(msg.utime), "position": [float(v) for v in msg.position],
+                    "orientation_wxyz": [float(v) for v in msg.orientation]}
+        blocks = {}
+        for block in msg.saved_traj.trajectories:
+            blocks[block.trajectory_name] = {
+                "t": [float(v) for v in block.time_vec],
+                "data": [[float(v) for v in row] for row in block.datapoints],
+                "datatypes": [str(v) for v in block.datatypes],
+            }
+        return {"utime": int(msg.utime), "blocks": blocks}
 
     def _apply_task_joint_state(self, model: newton.Model, info: SceneInfo) -> None:
         raise NotImplementedError
@@ -397,6 +553,7 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
             f"{c.robotiq_command_channel} -> {c.robotiq_status_channel}, "
             f"{c.robotiq_robot_output_channel}"
         )
+        lines.append(f"subscribed: {', '.join(self.bridge.subscribed)}")
         if self.pulley_state_object_name is not None:
             joints = ", ".join(
                 f"{name} (coord {coord}, dof {dof})" for name, coord, dof in zip(
@@ -412,7 +569,8 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
     def control_step(self) -> None:
         """One control step: drain inputs, apply torques/targets, step physics, publish."""
         t_start = time.perf_counter()
-        self.bridge.drain(self.sim_time)
+        handled = self.bridge.drain(self.sim_time)
+        self._event_step = self.step_index + 1
 
         joint_f = self._joint_f_host
         for io in self._robot_io:
@@ -424,9 +582,14 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
                 io.efforts = -io.spec.stale_damping * io.velocities
             else:
                 io.efforts = efforts if efforts is not None else np.zeros(len(io.dofs))
+            if efforts is not None and not io.seen:
+                io.seen = True
+                self._event("input_first", robot=io.spec.name,
+                            channel=getattr(self.channels, io.spec.input_channel_key))
             if stale != io.stale:
                 io.stale = stale
                 logger.info(f"[LCM] {io.spec.name} input: {'stale-damping' if stale else 'fresh'}")
+                self._event("input_stale", robot=io.spec.name, stale=stale)
             joint_f[io.dofs] = io.efforts
         self.control.joint_f.assign(joint_f)
         targets_changed = self._apply_robotiq_command()
@@ -457,8 +620,11 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         self._after_control_step(body_q)
         if self.step_index % self._grasp_log_every == 0:
             self._log_grasp(body_q, joint_q)
+        if self.recorder is not None:
+            self._record_step(t_start, handled, joint_q, joint_qd, body_q)
 
         compute = time.perf_counter() - t_start
+        self._last_compute_ms = compute * 1e3
         self._stats_steps += 1
         self._stats_compute_sum += compute
         self._stats_compute_max = max(self._stats_compute_max, compute)
@@ -468,10 +634,12 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         command = self.bridge.latest_robotiq()
         if command is None:
             return False
-        position, _speed, self.robotiq_force_byte = command
+        position, speed, self.robotiq_force_byte = command
         if position == self.robotiq_position_byte:
             return False
         self.robotiq_position_byte = position
+        self._event("robotiq_command", position=position, speed=speed,
+                    force=self.robotiq_force_byte)
         self._target_q_host.reshape(-1)[self._driver_target_slots] = self._robotiq_targets[position]
         return True
 
@@ -482,11 +650,16 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
             return False
         command = self.bridge.latest_hand_command()
         if command is not None:
-            utime, target_mm, _force = command
+            utime, target_mm, force = command
+            # magna republishes the same goal every tick: log only goal changes.
+            if (target_mm, force) != self._hand_goal_logged:
+                self._hand_goal_logged = (target_mm, force)
+                self._event("hand_command", utime=utime, target_mm=target_mm, force=force)
             lag = self.sim_time - utime / 1e6
             stale = abs(lag) > drive.stale_timeout
             if stale != self._hand_stale:
                 self._hand_stale = stale
+                self._event("hand_stale", stale=stale, lag_s=lag)
                 channel = self.channels.franka_hand_input_channel
                 if stale:
                     logger.warning(f"[LCM] {channel} stale by {lag:.3f} s: closing")
@@ -540,6 +713,8 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         ))
         status = robotiq_status_msg(utime, fraction, speed, self.robotiq_force_byte)
         self.robotiq_status_byte = int(status.position)
+        self.robotiq_status_speed_byte = int(status.speed)
+        self.robotiq_opening = opening
         publish(self.channels.robotiq_status_channel, status)
 
         if self.pulley_state_object_name is not None:
@@ -620,40 +795,56 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         render = not isinstance(self.viewer, newton.viewer.ViewerNull)
         render_every = max(1, int(getattr(self.args, "render_every", 20)))
         first_step = self.step_index
-        if self.use_cuda_graph and self.physics_graph is None:
-            self.control_step()  # captures the CUDA graph: kept out of the pacing and stats
-        t0 = time.perf_counter()
-        self._reset_stats(t0)
+        self._event_step = self.step_index
+        self._event("run_start", num_steps=num_steps, realtime=realtime, render_every=render_every)
+        reason = "num_steps"
         try:
-            while num_steps <= 0 or self.step_index - first_step < num_steps:
-                if render and not self.viewer.is_running():
-                    break
-                self.control_step()
-                if render and self.step_index % render_every == 0:
-                    self.render()
-                now = time.perf_counter()
-                if realtime:
-                    deadline = t0 + (self.step_index - first_step) * self.frame_dt
-                    if now - deadline > RESYNC_LAG:
-                        if self._resyncs == 0:
-                            logger.warning(
-                                f"[LCM] {now - deadline:.3f} s behind real time at step "
-                                f"{self.step_index}; resyncing (no catch-up burst)"
-                            )
-                        self._resyncs += 1
-                        t0 += now - deadline
-                    else:
-                        if deadline - now > SPIN_MARGIN:
-                            time.sleep(deadline - now - SPIN_MARGIN)
-                        while time.perf_counter() < deadline:
-                            pass
-                        now = time.perf_counter()
-                if now - self._stats_t0 >= STATS_PERIOD:
-                    self._log_stats(now)
-        except KeyboardInterrupt:
-            logger.info(f"[LCM] interrupted at step {self.step_index}")
-        self._log_stats(time.perf_counter())
-        self._log_belt_final()
+            if self.use_cuda_graph and self.physics_graph is None:
+                self.control_step()  # captures the CUDA graph: kept out of the pacing and stats
+            t0 = time.perf_counter()
+            self._reset_stats(t0)
+            try:
+                while num_steps <= 0 or self.step_index - first_step < num_steps:
+                    if render and not self.viewer.is_running():
+                        reason = "viewer_closed"
+                        break
+                    self.control_step()
+                    if render and self.step_index % render_every == 0:
+                        self.render()
+                    now = time.perf_counter()
+                    if realtime:
+                        deadline = t0 + (self.step_index - first_step) * self.frame_dt
+                        if now - deadline > RESYNC_LAG:
+                            if self._resyncs == 0:
+                                logger.warning(
+                                    f"[LCM] {now - deadline:.3f} s behind real time at step "
+                                    f"{self.step_index}; resyncing (no catch-up burst)"
+                                )
+                            self._resyncs += 1
+                            self._event("resync", lag_s=now - deadline, step=self.step_index)
+                            t0 += now - deadline
+                        else:
+                            if deadline - now > SPIN_MARGIN:
+                                time.sleep(deadline - now - SPIN_MARGIN)
+                            while time.perf_counter() < deadline:
+                                pass
+                            now = time.perf_counter()
+                    if now - self._stats_t0 >= STATS_PERIOD:
+                        self._log_stats(now)
+            except KeyboardInterrupt:
+                reason = "interrupted"
+                logger.info(f"[LCM] interrupted at step {self.step_index}")
+            self._log_stats(time.perf_counter())
+            self._log_belt_final()
+        except BaseException as exc:
+            interrupted = isinstance(exc, KeyboardInterrupt)
+            reason = "interrupted" if interrupted else f"error: {type(exc).__name__}"
+            raise
+        finally:
+            try:
+                self.close_recording(reason)
+            except Exception as exc:  # noqa: BLE001 - never mask the run's own outcome
+                logger.opt(exception=exc).error(f"[RECORD] closing the recording failed: {exc!r}")
 
     @classmethod
     def create_parser(cls) -> argparse.ArgumentParser:
@@ -682,6 +873,22 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
             "--initial-state", default=None,
             help="magna *_initial_state.yaml whose q_init_* lists replace the scene's "
                  "default joint positions (default: the scene defaults)",
+        )
+        parser.add_argument(
+            "--record", nargs="?", const=str(DEFAULT_RECORDINGS_DIR), default=None,
+            metavar="DIR", help="record the run under DIR/<timestamp>-<label>/ (default off)",
+        )
+        parser.add_argument(
+            "--record-label", default=None, metavar="LABEL",
+            help="run directory label (default round_belt)",
+        )
+        parser.add_argument(
+            "--record-state-every", type=_positive_int, default=DEFAULT_STATE_EVERY, metavar="N",
+            help="record body poses every N control steps (1 = every step)",
+        )
+        parser.add_argument(
+            "--record-chunk-steps", type=_positive_int, default=DEFAULT_CHUNK_STEPS, metavar="N",
+            help="control steps per recording chunk file",
         )
         # Newton's own --realtime (benchmark priority) shares the dest; this default wins.
         parser.set_defaults(

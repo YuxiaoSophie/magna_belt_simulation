@@ -24,7 +24,7 @@ blocking LCM I/O).
 
 ## 2. Contract table
 
-All channels are `dairlib`/`drake`/`robotiq` LCM types vendored under `lcmtypes/`, `.lcm`
+All channels are `dairlib`/`drake`/`robotiq`/`magna` LCM types vendored under `lcmtypes/`, `.lcm`
 sources and generated Python side by side (`import task_common` puts `lcmtypes/` on `sys.path`;
 see §8, `scripts/checks/check_lcmtypes.py`). Every output publishes once per 5 ms control step (200 Hz)
 unless noted.
@@ -99,7 +99,10 @@ then run script `run_newton_round_belt_sim` (starts the Newton sim, waits 15 s f
 then the OSC controllers, the visualizer and the assembly controller) or `end_experiment` to tear
 everything down. `procman/run_newton_sim.sh` is the Newton sim's own wrapper (`cd` to the repo
 root, then run the sim with any extra args passed through); the procman config passes it
-`--publish-belt-mesh`. This `.pmd` script sequence has only been validated by parsing (procman's
+`--publish-belt-mesh --record --record-label sim` (`newton_assembly_hw.pmd` passes
+`--record-label hw` instead), so every procman run is recorded under
+`recordings/<timestamp>-sim/` / `-hw/` (§10; the CLI's own default is unrecorded, §4). This
+`.pmd` script sequence has only been validated by parsing (procman's
 own `sheriff_config.py`), not by running the sheriff; the E2E runs in §5/§9 launched each process
 directly from a shell instead.
 
@@ -241,13 +244,17 @@ the YAML, `cameras=False`):
 | flag | default | what |
 |---|---|---|
 | `--lcm-url LCM_URL` | `udpm://239.255.76.67:7667?ttl=0` | LCM provider URL |
-| `--lcm-channels-file PATH` | none | a channels-override YAML (subset of the 13 `LcmChannels` fields, e.g. magna's own `/home/hienbui/git/magna/systems/parameters/lcm_channels.yaml`) |
+| `--lcm-channels-file PATH` | none | a channels-override YAML (subset of the 16 `LcmChannels` fields, e.g. magna's own `/home/hienbui/git/magna/systems/parameters/lcm_channels.yaml`) |
 | `--no-realtime` | realtime pacing on | step as fast as possible instead of pacing to wall-clock time |
 | `--num-steps N` | `0` (until stopped / viewer closes) | control steps to run |
 | `--render-every N` | `20` | render every N control steps (10 Hz; lower values cost real time) |
 | `--cameras` | off | render the scene's RGBD cameras |
 | `--publish-belt-mesh` | off | publish the 20 Hz `DRAKE_VIEWER_DEFORMABLE` tube mesh (§2, §3) |
 | `--initial-state PATH` | none (the scene's `default_joint_positions`) | a magna `*_initial_state.yaml` (`q_init_franka`, `q_init_franka_hand`, `q_init_ur`) whose joint positions seed the arms and fingers instead (§3 "Hardware-parameter mode") |
+| `--record [DIR]` | off (`const` = `recordings/`) | record the run under `DIR/<timestamp>-<label>/` for later replay (§10) |
+| `--record-label LABEL` | `round_belt` | label appended to the run directory name |
+| `--record-state-every N` | `4` | record body poses every Nth control step (`N=1` = every step) |
+| `--record-chunk-steps N` | `2000` | control steps per recording chunk file |
 
 `--test` runs 400 steps non-interactively, prints one `[STATS]` line and asserts
 `test_final()`; useful as a smoke check independent of any LCM peer. It still publishes on
@@ -390,12 +397,15 @@ the repo root; the "extra args" column is what follows the script path.
 
 | script | checks | extra args |
 |---|---|---|
-| `scripts/checks/check_lcmtypes.py` | the three packages resolve to `lcmtypes/<pkg>/`; then 9 vendored LCM types: fingerprint match against magna's own generated modules (skipped if that bazel tree is absent) + an encode/decode round trip | none |
+| `scripts/checks/check_lcmtypes.py` | the four packages resolve to `lcmtypes/<pkg>/`; then 14 vendored LCM types: fingerprint match against magna's own generated modules (skipped if that bazel tree is absent) + an encode/decode round trip | none |
 | `scripts/checks/check_lcm_contract.py` | 12 checks against a live, non-realtime `RoundBeltLcmSimulation` on a private LCM group: (1) layouts vs `scripts/checks/data/drake_lcm_layouts.json`, (2) utime monotonic, (3) gravity hold + default (closed) hand, (4) Franka torque sign, (5) Franka stale damping, (6) UR torque sign (no stale rule), (7) hand command open/close/squeeze/stale timing, (8) Robotiq round trip, (9) belt trigger + Franka grasp + a 50 mm lift, (10) `LcmChannels.from_yaml` against magna's own `/home/hienbui/git/magna/systems/parameters/lcm_channels.yaml`, (11) belt tube mesh geometry + wire layout, (12) `ROUND_BELT_PULLEY_STATE` once per step with the names, utime and the simulated pulley `joint_q`/`joint_qd` | none |
 | `scripts/checks/check_pulleys.py` | the free pulley axles in the position-PD `RoundBeltTaskSimulation`: (T0) 2 VBD bodies on world revolute joints at the board weld composed with the joint origins, axis = board normal, (T1) 2 s zero-torque hold (angle < 0.005 rad, centre drift/sag < 0.5 mm), (T2/T3) 2e-3 N m `joint_f` for 0.5 s drives each pulley to torque/damping (2 rad/s, +-15 %) and the damped-rigid angle (+-20 %) without moving its centre or the other pulley, then after release it spins down with the time constant Izz/damping | none |
 | `scripts/checks/check_robotiq_width.py` | the `ROBOTIQ_COMMAND` byte to jaw width map (§2) against a live `RoundBeltLcmSimulation` on a private LCM group: (T0) the 256-entry byte -> driver target table (byte 0 at the open value, 255 at the full-close target, monotone, calibration spanning open to `gripper_drive.stop`), (T1) a 10-byte free-air sweep whose measured pad gap (minimum distance between the two pad collision meshes) is within 1 mm of `open_gap * (1 - byte/255)`, endpoints included, (T2) the `ROBOTIQ_STATUS` position echoes each reached byte to within 3 counts | none |
+| `scripts/checks/check_recording.py` | 10 checks (`R0`-`R9`) against a live, non-realtime `RoundBeltLcmSimulation` recording (`--record`) on a private LCM group: build, a 600-step scripted sequence (a hand command republished unchanged then changed — one `hand_command` event per goal, two Robotiq commands, a deliberate belt trigger), the on-disk files, `Recording.load`, events/signals, `Recording.list_runs`, the recording's per-step overhead against an unrecorded baseline, loading an unfinished copy (chunk discovery) and a copy with a chunk removed (`ValueError`), and run-dir name collisions (§10) | none |
+| `scripts/checks/check_replay_viewer.py` | 11 checks (`V0`-`V10`) against a headless `ReplayApp` (§10) over two recorded runs (a scripted 600-step run and a second, shorter one): run selection, seeking, playback, metrics, events, plots, triads, refusal of a body-label mismatch, per-seek render timing, and synthetic target messages in both runs (target triads vs. `target_world_pose`, a run switch from past the shorter run's end, a failing hook during a GUI run switch), and a 5 s real-time looped playback's rates (redraws/s near `render_fps`, chart updates <= 6/s per chart, no scale resends) | none |
+| `scripts/replay_viewer.py` | not a check — opens the viser replay GUI on a recordings directory (§10) | `--recordings DIR --run NAME --port N --show-collision --device DEV --render-fps FPS --stats` |
 | `scripts/debug/bench_lcm_sim_settings.py` | rest bench (speed + stability) + the diagnostic grasp-and-drag, per `substeps/vbd_iterations` pair; picks and can write the YAML (§5) | `--settings 2/5,2/10 --write-yaml` |
-| `lcmtypes/gen_lcmtypes.sh` | not a check — regenerates the `dairlib`/`drake`/`robotiq` Python packages in place in `lcmtypes/<pkg>/` (beside the `.lcm` sources, which it never deletes) with the venv's `lcm-gen`; idempotent (re-running produces byte-identical output) | none |
+| `lcmtypes/gen_lcmtypes.sh` | not a check — regenerates the `dairlib`/`drake`/`robotiq`/`magna` Python packages in place in `lcmtypes/<pkg>/` (beside the `.lcm` sources, which it never deletes) with the venv's `lcm-gen`; idempotent (re-running produces byte-identical output) | none |
 | `scripts/debug/summarize_e2e_logs.py` | not a check — parses a sim log + a controller log from an end-to-end run (procman or manual) into rate, phase-marker, `[BELT]`/`[GRASP]` (incl. per-pulley unwrapped rotation, >= 3 deg/sample turning windows and the final pulley drift) and error-line summaries; works on either sim's log (Drake fields read `n/a`) | `<sim.log> <controller.log>` |
 
 `scripts/checks/lcm_peer_utils.py` is shared tooling (not a script to run directly): a finger-tip IK,
@@ -556,3 +566,211 @@ unchanged.
   more than 0.1 s (sim time) old — normal for the first ~0.1 s before any controller publishes,
   and expected again if `franka_cartesian_osc_controller` dies or is paused; the arm damps to a
   stop under `-K*v` rather than free-falling or holding the last torque.
+- **`scripts/replay_viewer.py` refuses a recording (body labels differ).** The recording's
+  `body_labels` no longer match the current scene's directive order — either the recording is
+  stale (the scene changed since it was made) or it is from a different task. The error names the
+  first mismatched body and index; the previously loaded run (if any) stays shown (§10).
+- **Recording overhead or `resync` events.** Compare the sim's `[RECORD]` startup/close log lines
+  (path, state-every rate, MB/min, final size) against §10's measured numbers; a `resync` event
+  (§10) means the real-time loop fell behind (e.g. under `--record-state-every 1` with a busy
+  GPU) — lower it back toward the default, or check `nvidia-smi` for other GPU load (§9 above).
+
+## 10. Recording and replay
+
+`--record` (§4) captures a run — sim state, LCM traffic, controller target poses, structured
+events — to disk without perturbing the 200 Hz loop; `scripts/replay_viewer.py` is a standalone
+viser app that loads a recording and scrubs/plays it back, with no LCM and no magna involved.
+Recording is off by default; the CLI keeps its own default unrecorded, and only the procman
+`.pmd` files turn it on (§3).
+
+### Recording a run
+
+```bash
+# CLI: label + decimation defaults (200 Hz signals, 50 Hz body poses, 10 s chunks)
+uv run python scripts/round_belt_lcm_simulation.py --record --record-label my_run
+
+# override the body-pose rate / chunk size
+uv run python scripts/round_belt_lcm_simulation.py --record --record-state-every 1 \
+    --record-chunk-steps 500
+```
+
+Both procman `.pmd` files pass `--record --record-label sim|hw` (§3), so every procman-driven
+run lands under `recordings/<timestamp>-sim/` or `-hw/` automatically.
+
+### Run directory layout
+
+`recordings/` is gitignored. Each run is `<root>/<YYYYmmdd-HHMMSS>-<label>/` (`-2`, `-3`, ...
+appended if a run with that name already exists, e.g. a procman restart within one second):
+
+- `meta.json` — schema version, labels/index maps, args, git provenance, sha256 of the scene
+  files, and the recorder's settings. Key fields: `created`, `label`, `argv`, `git_commit`,
+  `git_dirty`, `control_dt`, `lcm_url`, `channels` (the 16-field `LcmChannels`, §2),
+  `scene_directives`/`lcm_sim_params` (`{path, sha256}`), `initial_state`, `body_labels` (index -> body,
+  fixes `body_q`'s column order), `body_q_layout` (`"xyz_xyzw"`), `joint_labels`/`joint_q_start`/
+  `joint_qd_start`/`joint_coord_count`/`joint_dof_count`, `signal_coords`/`signal_dofs` (which
+  model coords/dofs are recorded, §2 "Contract table" plus the pulleys — the belt rod joints are
+  excluded as useless signals), `belt_bodies`, `pulley_bodies`/`pulley_joints`/`pulley_coords`/
+  `pulley_dofs`, `gripper_pad_bodies`, `franka_finger_bodies`, `driver_coords`/`driver_dofs`,
+  `hand_body`, `robot_io` (per-robot channel/coord/effort layout), `effort_layout`,
+  `finger_tip_body`, `ur_wrist_body`/`ur_tip_in_wrist`, `belt_trigger_point`, `state_every`,
+  `chunk_steps`, `finished`, `reason`, `num_steps`, `last_step`, `chunks` (per-chunk file/
+  first_step/steps/state_frames). `recorder_failed: true` is added only if the writer thread
+  died mid-run; `writer_timeout: true` (with `finished: false`, so the reader still finds the
+  chunks written after that snapshot) if the writer was still busy 30 s after the run ended. The
+  sim logs a warning when the writer falls more than 3 chunks behind.
+- `chunks/chunk_NNNNN.npz` — one file per `--record-chunk-steps` control steps (2000 = 10 s at
+  the default). Two row groups, at different rates:
+
+  | key | dtype | shape | rate |
+  |---|---|---|---|
+  | `step`, `sim_time`, `wall_time`, `compute_ms` | i64/f64/f64/f32 | `(n,)` | 200 Hz |
+  | `hand_target_mm`, `hand_stale`, `franka_stale` | f32/bool/bool | `(n,)` | 200 Hz |
+  | `robotiq_cmd`, `robotiq_status` | u8 | `(n, 3)` | 200 Hz |
+  | `robotiq_cmd_valid`, `robotiq_opening`, `lcm_rx` | bool/f32/i32 | `(n,)` | 200 Hz |
+  | `joint_q`, `joint_qd` | f32 | `(n, signal_coords)`, `(n, signal_dofs)` | 200 Hz |
+  | `efforts` | f32 | `(n, effort_layout)` | 200 Hz |
+  | `state_step` | i64 | `(m,)` | 50 Hz (every `state_every`-th step) |
+  | `body_q` | f32 | `(m, B, 7)` | 50 Hz |
+
+  `n` = chunk steps, `m` = state frames in the chunk, `B` = body count (86 in the round-belt
+  scene). `robotiq_cmd`/`robotiq_status` are `(position, speed, force)` bytes; `body_q` rows are
+  `xyz_xyzw`.
+- `events.jsonl` — one `{step, sim_time, kind, data}` object per line, recorded kinds: `run_start`,
+  `input_first`, `input_stale`, `hand_command`, `hand_stale`, `robotiq_command`, `belt_placed`,
+  `resync`, `run_end`.
+- `targets.jsonl` — one `{step, sim_time, channel, payload}` object per controller target message
+  received while recording (see "Target poses" below).
+
+### Size and overhead
+
+At the defaults (200 Hz signals restricted to the non-belt joints, C' = 33 coords / D' = 31 dofs,
+15 efforts; 50 Hz `body_q`, B = 86 bodies; 10 s chunks): **~11.6 MB/min**, measured **35.0 MB**
+over a 3-minute real-time run (18 chunks, 9000 state frames; measured 2026-09-21). Per-step
+overhead measured the same day: **+0.04 ms/step mean** (`--record` vs. off, both non-realtime,
+GPU idle), well under the 0.10 ms design bar; `--record-state-every 1` (every step's `body_q`,
+~90-100 MB per 3 min) still measured only +0.02 ms/step mean. With `--record` off the step time
+is unchanged within measurement noise (-0.01 ms). A killed run is crash-safe up to its last
+fully written chunk — `Recording.load` reads every chunk still listed or found on disk and raises
+`ValueError` naming any chunk that is missing or breaks the step sequence.
+
+### Events and derived metrics
+
+Recorded events (above) are raw facts logged by the sim as they happen. Everything else is
+computed at load time by `replay_metrics.py` from `body_q`/`joint_q`, so the recording format
+never has to change to add a metric:
+
+- **Hold rules** (debounced 0.2 s, runs under 10 frames ignored): Franka hold = belt-to-
+  `finger_tip` gap <= 15 mm and hand width in [1, 10] mm; UR hold = belt-to-2F-85-tip gap
+  <= 15 mm and the Robotiq command byte >= 200. `ur_release` / `ur_partial_release` fire when the
+  byte drops below 100 / into [100, 200) right after a UR hold.
+- **Pulley wrap** — the largest contiguous azimuthal arc (gaps <= 30 deg merged) of belt bodies
+  seated in the groove: within 6 mm axially of the pulley mid-plane and within 5 mm radially of
+  the belt's seat radius (small 17.38 mm, large 50.73 mm, §8). `pulley_turning_start/_end` fire
+  on a >= 3 deg change in the unwrapped joint angle over a 1 s window.
+- Other metrics: `belt_loop_mm`/`belt_loop_change_pct` (closed polygon over `belt_bodies`, vs.
+  frame 0), per-pad/per-tip gaps, `compute_ms` (shifted to the row it timed; row 0 is the CUDA
+  graph capture, not a real step, see Known limits) and `realtime_factor`.
+
+### Target poses
+
+While recording only, the bridge additionally subscribes the controllers' end-effector target
+channels (magna source-verified, §2): `TARGET_CARTESIAN_POSE_TRAJECTORY` and
+`UR_TARGET_CARTESIAN_POSE_TRAJECTORY` (`dairlib::lcmt_timestamped_saved_traj`, a trajectory of
+position/orientation knots) and `UR_TARGET_SPATIAL_POSE` (`magna::lcmt_spatial_pose`, one pose).
+Orientation is always quaternion **wxyz**. The UR trajectory is `tool0` expressed in the UR
+`base` frame (`base_link` rotated 180 deg about Z); the Franka trajectory is in `panda_link0`;
+the spatial pose is already world. Knot times are on this sim's own clock (verified against
+magna's timestamp sources), with a +-0.5 s fallback ("hold the first knot", warned once per
+channel) if a trajectory's own clock assumption does not hold.
+
+**Not captured:** `OSC_TARGET_TRACKING_DEBUG` (magna's assembly controller hard-codes it to a
+separate `local_lcm` on the shared default group, independent of `--lcm-url`) and `OSC_DEBUG`
+(`lcmt_osc_output`, a large nested type) — both out of scope; nor the belt mesh
+(`DRAKE_VIEWER_DEFORMABLE`) or the RGBD cameras, neither of which is LCM traffic this sim needs
+to replay the scene from `body_q` alone.
+
+### Why not Newton's `ViewerFile`
+
+Newton's own autosave viewer was not reused as the recording format:
+
+- it clones every `State` array into GPU memory for the whole run and re-serialises the entire
+  history on every autosave — O(n^2) cost over a long run;
+- it writes a single CBOR blob with no random access and no channels for signals or events
+  (`log_scalar` is a no-op there);
+- it serialises the whole `Model` (meshes, warp arrays) instead of just the per-frame state.
+
+The replay app borrows only its idea of driving `viewer.log_state` from a rebuilt model; the
+chunked, columnar format above is otherwise unrelated.
+
+### Replaying a run
+
+```bash
+uv run python scripts/replay_viewer.py                              # newest run, port 8081
+uv run python scripts/replay_viewer.py --recordings PATH --run NAME
+uv run python scripts/replay_viewer.py --port 8082 --show-collision --device cuda:0
+uv run python scripts/replay_viewer.py --render-fps 15 --stats     # slow link or weak client
+```
+
+Port 8081 by default (the live `--viewer viser` uses 8080, so both can run at once). The GUI has
+five folders: **Recording** (run dropdown + rescan, provenance/warning markdown), **Timeline**
+(frame slider, transport buttons `|< -10 -1 Play/Pause +1 +10 >|`, speed 0.1x-4x, loop), **Events**
+(a jump-to dropdown over recorded + derived events, and a table), **Plots** (uPlot charts in a
+sliding time window, default 10 s, with a "now" marker; currently one chart, Franka joint
+efforts, hideable; more are added in `CHARTS` in `src/task_common/replay_panels.py`), and
+**Triads** (none shown by default: pick a body, or a target channel above that the run
+recorded, from the "Add triad" dropdown to show its frame; each shown triad gets a button with
+an X that removes it; axes length/radius). Loading a run refuses one whose
+`body_labels` differ from the rebuilt scene's (directive order fixes body indices) and warns, but
+does not refuse, if the recorded scene YAML's sha256 no longer matches the file on disk.
+
+**Playback rates.** The app ticks at 50 Hz (GUI requests and the playback clock). During
+playback, it redraws the 3D scene at no more than `--render-fps` (default 25). It updates the
+frame slider and time text at 10 Hz, and the charts at 5 Hz. A seek, a step, the loop wrap and
+the last frame always redraw at once. Each chart's y ranges are fixed per run (whole-run
+min/max plus 5 % padding) and are sent once when the run loads. Sending new ranges would make
+the browser rebuild the chart, so they are never resent during playback. The window is min-max
+decimated to at most 300 points per series, which keeps spikes. A chart whose window has not
+changed (for example, while paused) is not resent. The replay model is built on the CPU by
+default (`--device`), because on a GPU each frame needs about 100 blocking device-to-host copies
+and competes with a running sim. `--stats` logs the tick, redraw and chart-update rates every
+10 s while something plays.
+
+Measured on 2026-09-21 (1x, looped, default charts, local headless Chromium, 3-min run):
+
+| | before | after |
+|---|---|---|
+| 3D redraws/s (server) | 47, main thread ~100 % busy (21 ms each, GPU model) | 25 (11 ms each, CPU model) |
+| data sent to the browser | 1.27 MB/s | 0.40 MB/s |
+| uPlot chart rebuilds/s (browser) | 17 | 0 |
+| lag behind the server over a 1 MB/s link | 3.3 s mean, still growing | 22 ms |
+
+The initial page load still sends the scene meshes (about 6 MB) once. On a very slow link, the
+page takes that long to appear before playback can keep up.
+
+### Known limits
+
+- Target-pose replay was validated on synthetic target data only: magna's own assembly
+  controller (`run_round_belt_assembly_controller.cc:70`) hard-codes its C3 debug publishers to
+  `udpm://239.255.76.67:7667`, the forbidden shared group, so it could not be run in this
+  session; the trajectory-frame math (above) is verified against the magna source instead.
+- `Recording.frame_at_step`/`frame_at_time` round **down** to the last state frame at or before
+  the given step — there is no step-0 frame at the default `--record-state-every 4` (the first
+  frame is at step 4), so jumping to an event before step `state_every` lands on frame 0.
+- On disk, `compute_ms[i]` is the compute time of the step that produced row `i - 1` (a step is
+  timed after its row is written): row 0 holds `0` and row 1 the one-off CUDA graph capture.
+  `replay_metrics.Metrics.compute_ms` shifts it back by one row, so there row 0 is the capture
+  and the last row is `NaN`.
+- The recorder logs a `hand_command` event only when the goal (`target_mm`, `force`) changes, not
+  per message (magna republishes the same goal every controller tick); the event keeps the
+  `utime` of the first message carrying that goal. `scripts/replay_viewer.py` still drops
+  repeats of the same goal in its events list and table.
+
+### How the checks exercise this headlessly
+
+`scripts/checks/check_recording.py` drives a `RoundBeltLcmSimulation` with `--record` through a
+scripted sequence via `control_step()` and checks the on-disk files, `Recording.load`, events,
+signals and per-step overhead. `scripts/checks/check_replay_viewer.py` records two runs the same
+way, then drives a headless `ReplayApp` (no browser) through run selection, seeking, playback,
+metrics, events, plots, triads (including synthetic target messages), a label-mismatch
+refusal and the playback redraw/chart-update rates. Both use a private LCM group and never open
+a browser or touch `recordings/` in the repo. See §8 for what each checks in detail.

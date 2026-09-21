@@ -17,3 +17,6 @@ __pycache__/
 
 # Viewer UI state
 imgui.ini
+
+# Run recordings (--record)
+/recordings/

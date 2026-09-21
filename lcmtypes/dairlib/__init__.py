@@ -4,6 +4,10 @@ DO NOT MODIFY BY HAND!!!!
 lcm-gen 1.5.2
 """
 
+from .lcmt_metadata import lcmt_metadata as lcmt_metadata
 from .lcmt_object_state import lcmt_object_state as lcmt_object_state
 from .lcmt_robot_input import lcmt_robot_input as lcmt_robot_input
 from .lcmt_robot_output import lcmt_robot_output as lcmt_robot_output
+from .lcmt_saved_traj import lcmt_saved_traj as lcmt_saved_traj
+from .lcmt_timestamped_saved_traj import lcmt_timestamped_saved_traj as lcmt_timestamped_saved_traj
+from .lcmt_trajectory_block import lcmt_trajectory_block as lcmt_trajectory_block

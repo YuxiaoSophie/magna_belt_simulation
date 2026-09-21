@@ -1,0 +1,8 @@
+package magna;
+
+struct lcmt_spatial_pose
+{
+  int64_t utime;
+  double position[3];
+  double orientation[4];
+}

@@ -152,14 +152,19 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         self._reset_stats(time.perf_counter())
         self._resyncs = 0
         record_dir = getattr(args, "record", None)
-        self.bridge = LcmBridge(self.lcm_url, self.channels, self.robot_specs,
-                                record_targets=record_dir is not None)
+        self.bridge = self._make_bridge()
         self._log_startup()
         if record_dir is not None:
             self._start_recording(Path(record_dir))
 
     def _robot_specs(self) -> Sequence[RobotIoSpec]:
         raise NotImplementedError
+
+    def _make_bridge(self) -> LcmBridge:
+        """The command/state transport; subclasses may swap in a socket-free stand-in."""
+        record_targets = getattr(self.args, "record", None) is not None
+        return LcmBridge(self.lcm_url, self.channels, self.robot_specs,
+                         record_targets=record_targets)
 
     def _resolve_pulleys(self) -> None:
         """Coords/dofs and dairlib names of ``info.pulley_joints``, and their initial centres."""
@@ -680,6 +685,28 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         self._hand_target_q = target
         self._target_q_host.reshape(-1)[self._finger_target_slots] = target
         return True
+
+    def hand_ramp_state(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """``(target, goal, ramp)`` finger targets of the hand slew, for ``sim_snapshot``."""
+        return self._hand_target_q.copy(), self._hand_goal_q.copy(), self._hand_ramp_q.copy()
+
+    def sync_after_restore(self, hand_target_q, hand_goal_q, hand_ramp_q) -> None:
+        """Re-derive the host mirrors from a restored ``state_0``/``control`` (sim_snapshot)."""
+        self._hand_target_q = np.array(hand_target_q, dtype=np.float64)
+        self._hand_goal_q = np.array(hand_goal_q, dtype=np.float64)
+        self._hand_ramp_q = np.array(hand_ramp_q, dtype=np.float64)
+        self._target_q_host = self.control.joint_target_q.numpy().copy()
+        self._joint_f_host = self.control.joint_f.numpy().copy()
+        joint_q = self.state_0.joint_q.numpy()
+        joint_qd = self.state_0.joint_qd.numpy()
+        for io in self._robot_io:
+            io.positions = joint_q[io.coords]
+            io.velocities = joint_qd[io.dofs]
+        if self.hand_drive is not None:
+            self._update_hand_efforts()
+        if self.cameras is not None:
+            self._next_camera_time = self.sim_time
+        self._reset_stats(time.perf_counter())
 
     def _update_hand_efforts(self) -> None:
         drive = self.hand_drive

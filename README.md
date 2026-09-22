@@ -14,7 +14,14 @@ my_projects/
 │   │   ├── scene.py                #   build_scene: load directives -> SceneInfo
 │   │   ├── joint_state.py          #   seeds joint values on the finalized Model
 │   │   ├── simulation.py           #   RoundBeltTaskSimulation: solver, stepping
-│   │   └── lcm_simulation.py       #   RoundBeltLcmSimulation: belt trigger over LCM
+│   │   ├── lcm_simulation.py       #   RoundBeltLcmSimulation: belt trigger over LCM
+│   │   ├── waypoints.py            #   magna's pick-and-place waypoints, read from its yaml (LCS)
+│   │   ├── arm_kinematics.py       #   numpy FK/Jacobian/IK for the Franka + UR chains (LCS)
+│   │   ├── motion.py               #   Cartesian interpolation + joint-trajectory IK solve (LCS)
+│   │   ├── offline_simulation.py   #   in-process sim driver: no magna, no LCM socket (LCS)
+│   │   ├── perturbation.py         #   class-conditioned waypoint perturbations (LCS)
+│   │   ├── clearance.py            #   2F-85 vs board clearance: measure + waypoint guard (LCS)
+│   │   └── outcome.py              #   large-pulley engagement outcome classifier (LCS)
 │   ├── task_common/                # task-agnostic scene/joint/simulation scaffolding, RGBD cameras
 │   │   ├── __init__.py             #   REPO_ROOT; puts lcmtypes/ on sys.path
 │   │   ├── defaults.py             #   contact materials, 2F-85 drive gains, solver iterations
@@ -26,7 +33,9 @@ my_projects/
 │   │   ├── recording.py            #   RunRecorder / Recording: --record run capture + reader
 │   │   ├── replay_app.py           #   ReplayApp: viser run selection, timeline, 3D playback
 │   │   ├── replay_metrics.py       #   metrics, derived events, target-pose evaluation
-│   │   └── replay_panels.py        #   Plots/Triads panels for the replay app
+│   │   ├── replay_panels.py        #   Plots/Triads panels for the replay app
+│   │   ├── sim_snapshot.py         #   full sim state/control capture + restore (LCS)
+│   │   └── lcs_dataset.py          #   lcs_learning .npz episode format: writer + validator
 │   ├── timing_belt_task/           # timing-belt model spike (belt.py, belt_strip.py)
 │   └── utils/                      # task-agnostic Newton helpers
 │       ├── directives/             #   Drake-style scene directives loader
@@ -54,10 +63,14 @@ my_projects/
 ├── procman/                        # newton_assembly_sim.pmd / _hw.pmd + run_in_magna.sh / run_newton_sim.sh wrappers
 │
 ├── recordings/                     # --record output (gitignored), <timestamp>-<label>/ per run
+├── data/                           # collected datasets (gitignored), e.g. data/lcs/<run>/
 │
 ├── scripts/
 │   ├── round_belt_lcm_simulation.py     # LCM sim entry point: speaks magna's contract (docs/lcm-simulation.md)
 │   ├── replay_viewer.py                 # viser replay of a --record run: scrub, play, plots, triads
+│   ├── collect_lcs_dataset.py           # collect LCS episodes (docs/lcs-data-collection.md)
+│   ├── lcs/
+│   │   └── make_start_state.py          # nominal in-process pick -> LCS start-state snapshot
 │   ├── checks/                          # regression checks; run all before a commit
 │   │   ├── check_round_belt_task_poses.py   # independent-FK pose check vs the Drake yaml
 │   │   ├── check_scene_directives.py        # directives loader / scene checks
@@ -68,6 +81,11 @@ my_projects/
 │   │   ├── check_robotiq_width.py           # Robotiq command byte -> jaw width calibration
 │   │   ├── check_recording.py               # --record output is complete and bounded overhead
 │   │   ├── check_replay_viewer.py           # headless check of the replay app (ReplayApp)
+│   │   ├── check_sim_snapshot.py            # sim state/control snapshot restore fidelity (LCS)
+│   │   ├── check_inproc_motion.py           # in-process waypoint motion: FK/IK, pick, place (LCS)
+│   │   ├── check_lcs_dataset.py             # LCS .npz writer/validator, synthetic data (LCS)
+│   │   ├── check_lcs_outcome.py             # large-pulley outcome classifier, synthetic belt (LCS)
+│   │   ├── check_lcs_collector.py           # end-to-end LCS collection run (LCS)
 │   │   ├── lcm_peer_utils.py                # controller-side LCM peer for the checks (and the bench)
 │   │   └── data/                            # reference data for the checks
 │   └── debug/                           # tuning and analysis tools, not checks:
@@ -78,7 +96,9 @@ my_projects/
 │
 ├── docs/
 │   ├── scene-directives.md         # directive schema + how to add a task
-│   └── lcm-simulation.md           # the LCM contract, running, CLI, tuning, divergences
+│   ├── lcm-simulation.md           # the LCM contract, running, CLI, tuning, divergences
+│   ├── lcs-dataset.md              # the LCS .npz episode format: state/action layout, point clouds
+│   └── lcs-data-collection.md      # how to collect LCS episodes and hand them to lcs_learning
 ├── external/newton/                # Newton source (git submodule)
 └── external/task_board_urdf/       # DAIRLab task-board meshes (submodule); not used by the current code
 ```
@@ -108,6 +128,17 @@ uv run python scripts/round_belt_lcm_simulation.py --record
 ```bash
 uv run python scripts/replay_viewer.py
 ```
+
+### Collect LCS data
+
+```bash
+uv run python scripts/lcs/make_start_state.py
+uv run python scripts/collect_lcs_dataset.py --episodes 40 --seed 0
+uv run python scripts/replay_viewer.py --recordings data/lcs/<run>/recordings
+```
+
+See `docs/lcs-data-collection.md` for the flags, the perturbation/outcome ranges and how to point
+`lcs_learning` at the output.
 
 ---
 

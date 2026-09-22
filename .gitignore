@@ -20,3 +20,6 @@ imgui.ini
 
 # Run recordings (--record)
 /recordings/
+
+# Collected datasets (data/lcs/)
+/data/

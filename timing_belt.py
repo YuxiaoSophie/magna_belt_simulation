@@ -86,19 +86,13 @@ TARGET_BELT_MASS = 0.033  # kg (33 g)
 # Keep the belt nearly inextensible with the triangle membrane itself.
 TRI_KE = 8.0e4
 TRI_KA = 8.0e4
-TRI_KD = 1.5
+TRI_KD = 1.0
 
-# Longitudinal hinge bending is the right place to prevent collapse/folding.
-# Unlike distance/chord springs, these do not create the old rubber-band
-# translation behavior; they resist sharp changes of local angle.
-BASE_EDGE_KE = 1.5e3
-BASE_EDGE_KD = 6.0
-
-# Cross-sectional ribs remain the stiffest direction of the belt.
-RIB_BENDING_KE = 1.2e4
-RIB_BENDING_KD = 10.0
-RIB_SPRING_KE = 2.0e3
-RIB_SPRING_KD = 4.0
+# Native cloth hinge bending.
+BASE_EDGE_KE = 5.0e2
+BASE_EDGE_KD = 0.5
+LONGITUDINAL_EDGE_KE = 4.0e3
+LONGITUDINAL_EDGE_KD = 1.0
 
 # Keep the original scene names so every non-belt subsystem stays untouched.
 BELT_OUTER_MAJOR_DIAMETER = BELT_MAJOR_DIAMETER
@@ -171,9 +165,9 @@ PULLEY_CONTACT_KE = 3.0e5
 PULLEY_CONTACT_KD = 1.0e-5 * PULLEY_CONTACT_KE
 
 # Gripper-pad contact used by the mjc -> vbd proxy coupling.
-GRIPPER_CONTACT_KE = 1.5e5
-GRIPPER_CONTACT_KD = 80.0
-GRIPPER_CONTACT_MU = 10.0
+GRIPPER_CONTACT_KE = 1.0e5
+GRIPPER_CONTACT_KD = 50.0
+GRIPPER_CONTACT_MU = 3.0
 GRIPPER_CONTACT_MARGIN = 0.0015
 GRIPPER_CONTACT_GAP = 0.0020
 
@@ -225,9 +219,9 @@ GRIPPER_PAD_KEYWORDS = ("pad",)
 ROBOTIQ_GRIPPER_SAFE_CLOSE_FRACTION = 0.93
 
 # Gripper grasp-safety settings.
-GRIPPER_DRIVE_KE = 800.0
-GRIPPER_DRIVE_KD = 120.0
-GRIPPER_EFFORT_LIMIT = 120.0
+GRIPPER_DRIVE_KE = 400.0
+GRIPPER_DRIVE_KD = 80.0
+GRIPPER_EFFORT_LIMIT = 35.0
 
 # Anti-crush grasp latch.
 GRIPPER_STALL_MIN_FRACTION = 0.60
@@ -247,9 +241,14 @@ CONTACT_ADMM_PRECONTACT_MIN_FRACTION = 0.35
 CONTACT_ADMM_PRECONTACT_ERROR_FRACTION = 0.0
 CONTACT_ADMM_PRECONTACT_SPEED_FRACTION_PER_SEC = 1.0e9
 
-GRASPED_MAX_ARM_SPEED = 0.60
-GRIPPER_HOLD_PRELOAD_FRACTION = 0.025
+GRASPED_MAX_ARM_SPEED = 0.35
+GRIPPER_HOLD_PRELOAD_FRACTION = 0.006
 GRIPPER_RELEASE_HYSTERESIS = 0.020
+
+# Keep the robust ADMM/contact path active briefly after opening so the belt's
+# first free-fall/table impact does not happen on the same frame as a solver-mode
+# transition.
+RELEASE_ADMM_GRACE_FRAMES = 24
 
 # SpaceMouse target-following safety.
 # Consume producer TRANSLATION DELTAS locally and keep the IK target close to the
@@ -272,11 +271,11 @@ ADMM_GAMMA = 0.001
 ADMM_BAUMGARTE = 0.5
 ADMM_RIGID_CONTACT_MATCHING = "latest"
 VBD_ITERATIONS = 20
-VBD_RIGID_AVBD_BETA = 1.0e2
+VBD_RIGID_AVBD_BETA = 0.0
 VBD_RIGID_CONTACT_K_START = 3.0e3
 VBD_RIGID_CONTACT_BUFFER_SIZE = 256
 MUJOCO_ITERATIONS = 30  
-MUJOCO_LS_ITERATIONS = 10
+MUJOCO_LS_ITERATIONS = 50
 
 # Shared memory target buffer (identical transport to the standalone demo).
 SHARED_PATH_DEFAULT = "/tmp/sm_teleop_target.bin"
@@ -832,7 +831,7 @@ def belt_particle_id(
     return particle_start + local_id
 
 
-def make_cross_section_bending_stiff(
+def make_longitudinal_bending_stiff(
     builder: newton.ModelBuilder,
     *,
     particle_start: int,
@@ -840,9 +839,11 @@ def make_cross_section_bending_stiff(
     edge_end: int,
     circumference_cells: int,
     width_cells: int,
-    rib_edge_ke: float,
-    rib_edge_kd: float,
+    longitudinal_edge_ke: float,
+    longitudinal_edge_kd: float,
 ) -> int:
+    """Stiffen curvature along the timing-belt loop using native cloth hinges.
+    """
     row_size = width_cells + 1
     belt_particle_end = particle_start + circumference_cells * row_size
     stiffened_count = 0
@@ -854,15 +855,25 @@ def make_cross_section_bending_stiff(
         opposite_0, opposite_1, hinge_0, hinge_1 = builder.edge_indices[edge_id]
         if opposite_0 == -1 or opposite_1 == -1:
             continue
-        if not (particle_start <= hinge_0 < belt_particle_end and particle_start <= hinge_1 < belt_particle_end):
+        if not (
+            particle_start <= hinge_0 < belt_particle_end
+            and particle_start <= hinge_1 < belt_particle_end
+        ):
             continue
+
         circ_0, width_0 = decode(hinge_0)
         circ_1, width_1 = decode(hinge_1)
-        circumferential_delta = (circ_1 - circ_0) % circumference_cells
-        are_circumferential_neighbours = circumferential_delta in (1, circumference_cells - 1)
-        if width_0 == width_1 and are_circumferential_neighbours:
-            builder.edge_bending_properties[edge_id] = (float(rib_edge_ke), float(rib_edge_kd))
+
+        same_circumference_station = circ_0 == circ_1
+        adjacent_width_vertices = abs(width_1 - width_0) == 1
+
+        if same_circumference_station and adjacent_width_vertices:
+            builder.edge_bending_properties[edge_id] = (
+                float(longitudinal_edge_ke),
+                float(longitudinal_edge_kd),
+            )
             stiffened_count += 1
+
     return stiffened_count
 
 
@@ -1386,11 +1397,6 @@ class Example:
         self.pulley_guard_shapes = list(pulley_info["guard_shapes"])
         self.pulley_shapes = list(pulley_info["shapes"])
 
-        # ------------------------------------------------------------------
-        # TIMING BELT ONLY: replace the original rigid rod loop with the
-        # particle/triangle belt from the second file. Everything else in the
-        # scene (UR10, gripper, pulleys, teleop and hybrid coupling) stays the same.
-        # ------------------------------------------------------------------
         vertices, indices = build_elliptical_ring_mesh(
             major_diameter=BELT_MAJOR_DIAMETER,
             minor_diameter=BELT_MINOR_DIAMETER,
@@ -1423,28 +1429,19 @@ class Example:
         belt_particle_end = builder.particle_count
         belt_edge_end = builder.edge_count
 
-        stiff_hinge_count = make_cross_section_bending_stiff(
+        # Preserve the loop curvature with hinge bending
+        stiff_hinge_count = make_longitudinal_bending_stiff(
             builder,
             particle_start=belt_particle_start,
             edge_start=belt_edge_start,
             edge_end=belt_edge_end,
             circumference_cells=CIRCUMFERENCE_CELLS,
             width_cells=WIDTH_CELLS,
-            rib_edge_ke=RIB_BENDING_KE,
-            rib_edge_kd=RIB_BENDING_KD,
+            longitudinal_edge_ke=LONGITUDINAL_EDGE_KE,
+            longitudinal_edge_kd=LONGITUDINAL_EDGE_KD,
         )
-        rib_spring_count = add_cross_section_rib_springs(
-            builder,
-            particle_start=belt_particle_start,
-            circumference_cells=CIRCUMFERENCE_CELLS,
-            width_cells=WIDTH_CELLS,
-            spring_ke=RIB_SPRING_KE,
-            spring_kd=RIB_SPRING_KD,
-        )
-        # Do not add longitudinal distance/chord springs. The triangle membrane
-        # carries in-plane stiffness, while BASE_EDGE_KE supplies angular bending
-        # resistance around the loop. This prevents sharp folds WITHOUT reintroducing
-        # the distance-spring rubber-band translation behavior.
+        
+        rib_spring_count = 0
         loop_spring_count = 0
         shape_spring_count = 0
 
@@ -1460,7 +1457,7 @@ class Example:
             f"density={cloth_density:.4f} kg/m^2, mass={TARGET_BELT_MASS * 1e3:.1f} g"
         )
         print(
-            f"[TIMING BELT] {stiff_hinge_count} stiff rib hinges, "
+            f"[TIMING BELT] {stiff_hinge_count} stiff longitudinal-curvature hinges, "
             f"{rib_spring_count} rib springs, {loop_spring_count} loop springs, "
             f"{shape_spring_count} curvature springs"
         )
@@ -1482,40 +1479,6 @@ class Example:
         self.model.soft_contact_ke = CABLE_CONTACT_KE
         self.model.soft_contact_kd = CABLE_CONTACT_KD
         self.model.soft_contact_mu = CABLE_CONTACT_MU
-
-        # Global reset of material arrays...
-        self.model.shape_material_ke.fill_(CABLE_CONTACT_KE)
-        self.model.shape_material_kd.fill_(CABLE_CONTACT_KD)
-        self.model.shape_material_mu.fill_(CABLE_CONTACT_MU)
-
-        # Re-apply per-shape friction.
-        mu_np = self.model.shape_material_mu.numpy().copy()
-        if self.gripper_pad_shapes:
-            mu_np[np.asarray(self.gripper_pad_shapes, dtype=np.int32)] = GRIPPER_CONTACT_MU
-        if self.pulley_sheave_shapes:
-            mu_np[np.asarray(self.pulley_sheave_shapes, dtype=np.int32)] = PULLEY_SHEAVE_MU
-        if self.pulley_flange_shapes:
-            mu_np[np.asarray(self.pulley_flange_shapes, dtype=np.int32)] = PULLEY_FLANGE_MU
-        if self.pulley_guard_shapes:
-            mu_np[np.asarray(self.pulley_guard_shapes, dtype=np.int32)] = PULLEY_FLANGE_MU
-        self.model.shape_material_mu.assign(mu_np)
-
-        # Re-apply per-shape stiffness too.
-        ke_np = self.model.shape_material_ke.numpy().copy()
-        kd_np = self.model.shape_material_kd.numpy().copy()
-        if self.gripper_pad_shapes:
-            pad_idx = np.asarray(self.gripper_pad_shapes, dtype=np.int32)
-            ke_np[pad_idx] = GRIPPER_CONTACT_KE
-            kd_np[pad_idx] = GRIPPER_CONTACT_KD
-        pulley_shape_idx = np.asarray(
-            self.pulley_sheave_shapes + self.pulley_flange_shapes + self.pulley_guard_shapes,
-            dtype=np.int32,
-        )
-        if pulley_shape_idx.size:
-            ke_np[pulley_shape_idx] = PULLEY_CONTACT_KE
-            kd_np[pulley_shape_idx] = PULLEY_CONTACT_KD
-        self.model.shape_material_ke.assign(ke_np)
-        self.model.shape_material_kd.assign(kd_np)
 
         # Save the exact normal/grasp material for every collision shape carried by
         # the proxy pad bodies.
@@ -1573,8 +1536,10 @@ class Example:
                 SolverCoupled.Entry(
                     name="vbd",
                     solver=lambda v: SolverVBD(
-                        model=v, iterations=VBD_ITERATIONS, rigid_avbd_beta=VBD_RIGID_AVBD_BETA,
-                        rigid_contact_k_start=VBD_RIGID_CONTACT_K_START, rigid_contact_history=False,
+                        model=v, iterations=VBD_ITERATIONS,
+                        rigid_compliant_alm=True,
+                        rigid_avbd_beta=VBD_RIGID_AVBD_BETA,
+                        rigid_contact_history=False,
                         rigid_body_contact_buffer_size=VBD_RIGID_CONTACT_BUFFER_SIZE,
                         rigid_body_particle_contact_buffer_size=8192,
                         particle_enable_self_contact=True,
@@ -1613,7 +1578,6 @@ class Example:
                         model=v, iterations=VBD_ITERATIONS,
                         rigid_compliant_alm=True,
                         rigid_avbd_beta=VBD_RIGID_AVBD_BETA,
-                        rigid_contact_k_start=VBD_RIGID_CONTACT_K_START,
                         rigid_contact_history=False,
                         rigid_body_contact_buffer_size=VBD_RIGID_CONTACT_BUFFER_SIZE,
                         rigid_body_particle_contact_buffer_size=8192,
@@ -1804,8 +1768,8 @@ class Example:
             )
 
         # Two CUDA graphs, matching the original hybrid execution logic:
-        #   FREE / not grasping  -> original lightweight proxy-coupled graph
-        #   GRASP / transport    -> ADMM-coupled graph
+        #   FREE / not grasping -> original lightweight proxy-coupled graph
+        #   GRASP / transport -> ADMM-coupled graph
         # This avoids falling back to Python/kernel-launch-heavy ADMM every frame.
         self.fast_physics_graph = None
         self.admm_physics_graph = None
@@ -1891,7 +1855,7 @@ class Example:
         return time.perf_counter() - phys_start, collide_s, solve_s
 
     def _capture_one_physics_graph(self, simulate_fn, label: str):
-        """Capture one fixed 10-substep coupled frame without changing runtime mode."""
+        """Capture one fixed-substep coupled frame without changing runtime mode."""
         saved_state_0 = self.state_0
         saved_state_1 = self.state_1
         try:
@@ -1907,7 +1871,7 @@ class Example:
             )
             return capture.graph
         finally:
-            # With 10 (even) substeps these references normally already return to the
+            # With an even number of substeps these references normally return to the
             # same ordering, but restore explicitly so capture cannot alter the selector.
             self.state_0 = saved_state_0
             self.state_1 = saved_state_1
@@ -1953,7 +1917,11 @@ class Example:
             self._grip_requested_fraction >= CONTACT_ADMM_PRECONTACT_MIN_FRACTION
             or self._grip_fraction >= CONTACT_ADMM_PRECONTACT_MIN_FRACTION
         )
-        return closing_or_closed or self._grip_hold_fraction is not None
+        return (
+            closing_or_closed
+            or self._grip_hold_fraction is not None
+            or self._contact_admm_frames_remaining > 0
+        )
 
     def _launch_physics(self) -> None:
         use_admm = self._use_admm_physics()
@@ -2330,6 +2298,9 @@ class Example:
                 self._grip_hold_fraction = None
                 self._grip_stall_frames = 0
                 self._grasp_stabilize_frames_remaining = 0
+                self._contact_admm_frames_remaining = max(
+                    self._contact_admm_frames_remaining, RELEASE_ADMM_GRACE_FRAMES
+                )
                 self._grip_fraction = requested
             else:
                 self._grip_fraction = min(requested, self._grip_hold_fraction)
@@ -2382,6 +2353,11 @@ class Example:
         kd_np = self.model.shape_material_kd.numpy().copy()
 
         if releasing:
+            # Do not trigger the grace period on the initial all-open frame.
+            if self._grip_actual_fraction >= CONTACT_ADMM_PRECONTACT_MIN_FRACTION:
+                self._contact_admm_frames_remaining = max(
+                    self._contact_admm_frames_remaining, RELEASE_ADMM_GRACE_FRAMES
+                )
             mu_np[idx] = GRIPPER_RELEASE_MU
             ke_np[idx] = GRIPPER_RELEASE_KE
             kd_np[idx] = GRIPPER_RELEASE_KD
@@ -2722,6 +2698,11 @@ class Example:
             self._prof_frames += 1
         else:
             self._launch_physics()
+
+        if self._grasp_stabilize_frames_remaining > 0:
+            self._grasp_stabilize_frames_remaining -= 1
+        if self._contact_admm_frames_remaining > 0:
+            self._contact_admm_frames_remaining -= 1
 
         # Passive recording hook
         if self.episode_recorder is not None:

@@ -7,7 +7,6 @@ The grasp gaps and hold rules match ``LcmBeltTaskSimulation._log_grasp`` and
 from __future__ import annotations
 
 import itertools
-import math
 import weakref
 from dataclasses import dataclass
 
@@ -390,14 +389,3 @@ def target_world_pose(rec: Recording, channel: str, step: int, frame: int
     position = row[:3] + quat_rotate(q_base, pose[0])
     quat = quat_multiply(q_base, wxyz_to_xyzw(pose[1]))
     return position, xyzw_to_wxyz(quat / np.linalg.norm(quat))
-
-
-def event_summary(event: Event) -> str:
-    """Short ``key=value`` text of an event's numbers for labels and tables."""
-    parts = []
-    for key, value in event.data.items():
-        if isinstance(value, float):
-            parts.append(f"{key}={value:.4g}" if math.isfinite(value) else f"{key}=nan")
-        elif isinstance(value, (int, str, bool)):
-            parts.append(f"{key}={value}")
-    return " ".join(parts)

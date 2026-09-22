@@ -26,7 +26,7 @@ my_projects/
 │   │   ├── recording.py            #   RunRecorder / Recording: --record run capture + reader
 │   │   ├── replay_app.py           #   ReplayApp: viser run selection, timeline, 3D playback
 │   │   ├── replay_metrics.py       #   metrics, derived events, target-pose evaluation
-│   │   └── replay_panels.py        #   Events/Plots/Triads panels for the replay app
+│   │   └── replay_panels.py        #   Plots/Triads panels for the replay app
 │   ├── timing_belt_task/           # timing-belt model spike (belt.py, belt_strip.py)
 │   └── utils/                      # task-agnostic Newton helpers
 │       ├── directives/             #   Drake-style scene directives loader

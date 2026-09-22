@@ -23,7 +23,7 @@ from loguru import logger
 from task_common import REPO_ROOT
 from task_common.recording import Event, Recording, file_digest
 from task_common.replay_metrics import Metrics, compute_metrics, derive_events
-from task_common.replay_panels import EventsPanel, PlotsPanel, TriadsPanel
+from task_common.replay_panels import PlotsPanel, TriadsPanel
 
 SPEED_OPTIONS = ("0.1x", "0.25x", "0.5x", "1x", "2x", "4x")
 TRANSPORT_OPTIONS = ("|<", "-10", "-1", "Play", "+1", "+10", ">|")
@@ -91,7 +91,7 @@ class ReplayApp:
         self.metrics: Metrics | None = None
         self.all_events: list[Event] = []
         self._analysis = analysis
-        self._events_panel = self._plots_panel = self._triads_panel = None
+        self._plots_panel = self._triads_panel = None
 
         start = time.perf_counter()
         # CPU by default: on a GPU every frame costs ~100 synchronous device-to-host copies.
@@ -109,9 +109,8 @@ class ReplayApp:
         self._model_labels = [str(label) for label in self.model.body_label]
         self._build_gui()
         if analysis:
-            self._events_panel, self._plots_panel = EventsPanel(), PlotsPanel()
-            self._triads_panel = TriadsPanel()
-            for hook in (self._events_panel, self._plots_panel, self._triads_panel):
+            self._plots_panel, self._triads_panel = PlotsPanel(), TriadsPanel()
+            for hook in (self._plots_panel, self._triads_panel):
                 self.add_hook(hook)
         for hook in hooks:
             self.add_hook(hook)
@@ -329,13 +328,6 @@ class ReplayApp:
             self.pending.setdefault("calls", []).append(fn)
 
     # ---- analysis API (``analysis=True``) ------------------------------------------------
-
-    def event_index(self) -> list[str]:
-        """Labels of :attr:`all_events` as listed in the ``Jump to`` dropdown (same order)."""
-        return list(self._panel("_events_panel").labels)
-
-    def jump_to_event(self, index: int) -> None:
-        self.seek(self.recording.frame_at_step(self.all_events[index].step))
 
     def triads(self) -> dict[str, Any]:
         """Triad name -> viser frame handle, for the triads currently enabled and shown."""

@@ -712,10 +712,9 @@ uv run python scripts/replay_viewer.py --render-fps 15 --stats     # slow link o
 ```
 
 Port 8081 by default (the live `--viewer viser` uses 8080, so both can run at once). The GUI has
-five folders: **Recording** (run dropdown + rescan, provenance/warning markdown), **Timeline**
-(frame slider, transport buttons `|< -10 -1 Play/Pause +1 +10 >|`, speed 0.1x-4x, loop), **Events**
-(a jump-to dropdown over recorded + derived events, and a table), **Plots** (uPlot charts in a
-sliding time window, default 10 s, with a "now" marker; currently one chart, Franka joint
+four folders: **Recording** (run dropdown + rescan, provenance/warning markdown), **Timeline**
+(frame slider, transport buttons `|< -10 -1 Play/Pause +1 +10 >|`, speed 0.1x-4x, loop), **Plots** (uPlot charts in a
+sliding time window, default 10 s, with a dashed vertical line at the current time; currently one chart, Franka joint
 efforts, hideable; more are added in `CHARTS` in `src/task_common/replay_panels.py`), and
 **Triads** (none shown by default: pick a body, or a target channel above that the run
 recorded, from the "Add triad" dropdown to show its frame; each shown triad gets a button with
@@ -762,8 +761,8 @@ page takes that long to appear before playback can keep up.
   and the last row is `NaN`.
 - The recorder logs a `hand_command` event only when the goal (`target_mm`, `force`) changes, not
   per message (magna republishes the same goal every controller tick); the event keeps the
-  `utime` of the first message carrying that goal. `scripts/replay_viewer.py` still drops
-  repeats of the same goal in its events list and table.
+  `utime` of the first message carrying that goal. The replay app still drops repeats of the
+  same goal when it merges events (`ReplayApp.all_events`), for older recordings.
 
 ### How the checks exercise this headlessly
 

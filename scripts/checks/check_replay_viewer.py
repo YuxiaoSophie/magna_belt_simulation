@@ -280,7 +280,7 @@ def check_v3(ctx: SimpleNamespace) -> str:
 
 @check("V4 events")
 def check_v4(ctx: SimpleNamespace) -> str:
-    app, rec = ctx.app, ctx.rec
+    app = ctx.app
     events = app.all_events
     kinds = [e.kind for e in events]
     for want in ("hand_command", "belt_placed", "run_end"):
@@ -289,25 +289,9 @@ def check_v4(ctx: SimpleNamespace) -> str:
              f"robotiq_command count {kinds.count('robotiq_command')} != 2")
     steps = [e.step for e in events]
     _require(steps == sorted(steps), "all_events not in step order")
-    idx = app.event_index()
-    _require(len(idx) == len(events),
-             f"event_index() length {len(idx)} != all_events {len(events)}")
-
-    belt_i = next(i for i, e in enumerate(events) if e.kind == "belt_placed")
-    belt_event = events[belt_i]
+    belt_event = next(e for e in events if e.kind == "belt_placed")
     _require(belt_event.step == 201, f"belt_placed step {belt_event.step} != 201")
-    app.jump_to_event(belt_i)
-    # frame_at_step rounds down: the jump lands up to one state_every before the event.
-    want_frame = rec.frame_at_step(belt_event.step)
-    _require(app.current_frame == want_frame,
-             f"jump_to_event(belt_placed) frame {app.current_frame} != "
-             f"frame_at_step(201)={want_frame}")
-    state_every = rec.meta["state_every"]
-    _require(belt_event.step - state_every < app.current_step <= belt_event.step,
-             f"current_step {app.current_step} not within one state_every of event step "
-             f"{belt_event.step}")
-    return (f"{len(events)} events, kinds {sorted(set(kinds))}, "
-            f"jump_to_event(belt_placed) -> step {app.current_step}")
+    return f"{len(events)} events, kinds {sorted(set(kinds))}, belt_placed at step 201"
 
 
 @check("V5 plots")
@@ -324,12 +308,17 @@ def check_v5(ctx: SimpleNamespace) -> str:
         x = np.asarray(data[0])
         _require(x.min() >= t - 2.0 - 1e-6, f"{name}: x.min() {x.min()} < window start")
         _require(x.max() <= t + 2.0 + 1e-6, f"{name}: x.max() {x.max()} > window end")
-        _require(len(x) <= MAX_PLOT_POINTS, f"{name}: {len(x)} points > {MAX_PLOT_POINTS}")
+        _require(len(x) <= MAX_PLOT_POINTS + 2, f"{name}: {len(x)} points > {MAX_PLOT_POINTS}+2")
+        _require(np.all(np.diff(x) >= 0), f"{name}: x not sorted")
         lengths = {len(np.asarray(s)) for s in data}
         _require(lengths == {len(x)}, f"{name}: series lengths differ {lengths}")
         now = np.asarray(data[-1])
-        finite = int(np.isfinite(now).sum())
-        _require(finite == 1, f"{name}: now series has {finite} finite samples, expected 1")
+        rows = np.flatnonzero(np.isfinite(now))
+        _require(len(rows) == 2 and np.all(x[rows] == t),
+                 f"{name}: 'now' line is not two samples at x = t (rows {rows.tolist()})")
+        _require(now[rows[0]] < now[rows[1]], f"{name}: 'now' line has no height")
+        _require(all(np.isnan(np.asarray(s)[rows]).all() for s in data[1:-1]),
+                 f"{name}: data series are not NaN on the 'now' rows")
         checked += 1
     _require(checked > 0, "no visible plot handles found")
     # Franka efforts are 200 Hz: > MAX_PLOT_POINTS rows in the window, so min-max decimated.

@@ -1,4 +1,4 @@
-"""Replay app panels (:class:`~task_common.replay_app.ReplayHook`): events, charts, triads.
+"""Replay app panels (:class:`~task_common.replay_app.ReplayHook`): charts and triads.
 
 GUI callbacks only queue work with ``app.call_soon``; viser handles are touched on the main thread.
 """
@@ -15,25 +15,17 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from viser import uplot
 
-from task_common.recording import Event, Recording
-from task_common.replay_metrics import (
-    event_summary,
-    target_channels,
-    target_world_pose,
-    xyzw_to_wxyz,
-)
+from task_common.recording import Recording
+from task_common.replay_metrics import target_channels, target_world_pose, xyzw_to_wxyz
 
 if TYPE_CHECKING:
     from task_common.replay_app import ReplayApp
 
-BLANK_EVENT = "(events)"
-MAX_EVENT_ROWS = 200
-MAX_LABEL_DATA = 60
 PLOT_PERIOD_S = 0.2
 MAX_PLOT_POINTS = 300
 DEFAULT_WINDOW_S = 10.0
 COLORS = ("#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2", "#ca8a04")
-NOW_COLOR = "#111827"
+NOW_COLOR = "#6b7280"
 BLANK_TRIAD = "(pick a body or target)"
 REMOVE_LABEL = "✕"
 DEFAULT_AXES_LENGTH = 0.05
@@ -47,70 +39,6 @@ TRIAD_ROW_CSS = (
     "{row} > div:last-child {{ flex: 0 0 auto !important; }}",
     "{row} > div:last-child button {{ flex: 0 0 auto !important; min-width: 2em; }}",
 )
-
-
-def event_label(event: Event) -> str:
-    summary = event_summary(event)
-    if len(summary) > MAX_LABEL_DATA:
-        summary = summary[:MAX_LABEL_DATA - 3] + "..."
-    return f"{event.sim_time:8.3f}s  {event.kind}  {summary}".rstrip()
-
-
-class EventsPanel:
-    """``Events`` folder: a jump-to dropdown and a table of recorded + derived events."""
-
-    def __init__(self) -> None:
-        self.labels: list[str] = []
-
-    def build_gui(self, app: ReplayApp) -> None:
-        gui = app.gui
-        with gui.add_folder("Events", expand_by_default=False):
-            self.dropdown = gui.add_dropdown("Jump to", (BLANK_EVENT,))
-            self.table = gui.add_markdown("")
-        self.dropdown.on_update(lambda e: self._on_pick(app, e.target.value))
-
-    def on_run_loaded(self, app: ReplayApp, rec: Recording) -> None:
-        labels, seen = [], set()
-        for i, event in enumerate(app.all_events):
-            label = event_label(event)
-            if label in seen:
-                label = f"{label}  #{i}"
-            seen.add(label)
-            labels.append(label)
-        self.labels = labels
-        app._syncing = True
-        try:
-            self.dropdown.options = (BLANK_EVENT, *labels)
-            self.dropdown.value = BLANK_EVENT
-        finally:
-            app._syncing = False
-        self.table.content = self._table(app.all_events)
-
-    def on_frame(self, app: ReplayApp, frame_index: int, step: int, sim_time: float) -> None:
-        pass
-
-    def _on_pick(self, app: ReplayApp, value: str) -> None:
-        if value == BLANK_EVENT or value not in self.labels:
-            return
-        index = self.labels.index(value)
-        app.call_soon(lambda: self._jump(app, index))
-
-    def _jump(self, app: ReplayApp, index: int) -> None:
-        app.jump_to_event(index)
-        # Blank again so picking the same event twice still fires on_update.
-        app._set_gui(self.dropdown, BLANK_EVENT)
-
-    @staticmethod
-    def _table(events: list[Event]) -> str:
-        if not events:
-            return "No events."
-        lines = [f"{len(events)} events" + (f" (first {MAX_EVENT_ROWS} shown)"
-                                            if len(events) > MAX_EVENT_ROWS else ""),
-                 "", "| t s | step | kind | data |", "|---:|---:|---|---|"]
-        for event in events[:MAX_EVENT_ROWS]:
-            data = event_summary(event).replace("|", "/")
-            lines.append(f"| {event.sim_time:.3f} | {event.step} | {event.kind} | {data} |")
-        return "\n".join(lines)
 
 
 def _franka_efforts(rec: Recording) -> tuple[np.ndarray, list[np.ndarray]]:
@@ -162,6 +90,10 @@ class PlotsPanel:
                 self.charts[name] = _Chart(name, title, labels, source, checkbox)
             for chart in self.charts.values():
                 chart.handle = self._make_handle(app, chart)
+            # "now" is every chart's last series: it has no legend value, and uPlot parks its
+            # hover marker at the plot's top-left corner wherever it is NaN.
+            gui.add_html("<style>.u-legend .u-series:last-child, "
+                         ".u-over .u-cursor-pt:last-child { display: none !important; }</style>")
         self.window.on_update(
             lambda e: app.call_soon(lambda v=float(e.target.value): self.set_window(app, v)))
         for chart in self.charts.values():
@@ -173,9 +105,11 @@ class PlotsPanel:
     def _make_handle(app: ReplayApp, chart: _Chart) -> Any:
         series = [uplot.Series(label="t s")]
         for i, label in enumerate(chart.labels):
-            series.append(uplot.Series(label=label, stroke=COLORS[i % len(COLORS)], width=1.5))
-        series.append(uplot.Series(label="now", stroke=NOW_COLOR, width=0,
-                                   points={"show": True, "size": 8, "fill": NOW_COLOR}))
+            # spanGaps: each window has two NaN rows at "now" that the lines must bridge.
+            series.append(uplot.Series(label=label, stroke=COLORS[i % len(COLORS)], width=1.5,
+                                       spanGaps=True))
+        series.append(uplot.Series(label="now", stroke=NOW_COLOR, width=1.5, dash=[4, 4],
+                                   points={"show": False}))
         data = (np.array([0.0, 1.0]), *([np.full(2, np.nan)] * (len(series) - 1)))
         return app.gui.add_uplot(data=data, series=tuple(series),
                                  scales=PlotsPanel._scales(chart.y_range), title=chart.title,
@@ -250,11 +184,12 @@ class PlotsPanel:
         xs = x[i0:i1]
         if i1 - i0 > MAX_PLOT_POINTS:
             xs, ys = _min_max_decimate(xs, ys, MAX_PLOT_POINTS // 2)
-        # The "now" point sits on the first series (0 where that is not finite).
-        anchor = np.where(np.isfinite(ys[0]), ys[0], 0.0) if ys else np.zeros(len(xs))
+        # The "now" line: two rows at x = t spanning the chart's y range.
+        k = int(np.searchsorted(xs, t))
+        xs = np.insert(xs, k, [t, t])
+        ys = [np.insert(y, k, [np.nan, np.nan]) for y in ys]
         now = np.full(len(xs), np.nan)
-        k = int(np.argmin(np.abs(xs - t)))
-        now[k] = anchor[k]
+        now[k:k + 2] = chart.y_range
         return (i0, i1, k), (xs, *ys, now)
 
     def set_window(self, app: ReplayApp, seconds: float) -> None:

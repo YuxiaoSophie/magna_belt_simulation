@@ -7,7 +7,7 @@ LCM, no magna.  Open the printed URL (default port 8081; the live viewer uses 80
 Run:
     uv run python scripts/replay_viewer.py
     uv run python scripts/replay_viewer.py --recordings /path/to/recordings --run NAME
-    uv run python scripts/replay_viewer.py --port 8082 --show-collision
+    uv run python scripts/replay_viewer.py --port 8082 --show-collision --point-cloud
     uv run python scripts/replay_viewer.py --render-fps 15 --stats   # slow link / client
 """
 
@@ -26,6 +26,8 @@ if str(REPO_ROOT / "src") not in sys.path:
 import newton
 
 from round_belt_task.scene import build_scene
+from task_common.cameras import RgbdCameras
+from task_common.point_cloud import CroppedPointCloud
 from task_common.recording import Recording
 from task_common.replay_app import DEFAULT_DEVICE, DEFAULT_RENDER_FPS, ReplayApp
 from task_common.scene import make_builder
@@ -48,6 +50,16 @@ def build_model() -> newton.Model:
     return builder.finalize()
 
 
+def build_point_clouds() -> tuple[newton.Model, list[CroppedPointCloud]]:
+    builder = make_builder()
+    info = build_scene(builder)
+    model = builder.finalize()
+    if not info.point_clouds:
+        return model, []
+    cameras = RgbdCameras(model, info.cameras)
+    return model, [CroppedPointCloud(cameras, spec) for spec in info.point_clouds]
+
+
 def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--recordings", type=Path, default=REPO_ROOT / "recordings",
@@ -55,7 +67,9 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run", default=None, help="run directory name (default: newest)")
     parser.add_argument("--port", type=int, default=8081, help="viser port")
     parser.add_argument("--show-collision", action="store_true",
-                        help="show collision shapes instead of visuals")
+                        help="start with collision shapes shown (toggle under Display)")
+    parser.add_argument("--point-cloud", action="store_true",
+                        help="start with the camera point cloud shown (toggle under Display)")
     parser.add_argument("--device", default=DEFAULT_DEVICE,
                         help="Warp device of the replay model (default %(default)s; a GPU adds "
                              "per-frame device syncs and competes with a running sim)")
@@ -78,5 +92,6 @@ if __name__ == "__main__":
     patch_viser_texture_material()
     app = ReplayApp(args.recordings, build_model, port=args.port,
                     show_collision=args.show_collision, run=args.run,
+                    build_point_clouds=build_point_clouds, show_point_cloud=args.point_cloud,
                     render_fps=args.render_fps, device=args.device)
     app.run_forever(stats=args.stats)

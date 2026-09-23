@@ -121,11 +121,12 @@ class CroppedPointCloud:
             return voxelized_down_sample(xyz, rgb, self.spec.voxel_size)
         return xyz, rgb
 
-    def log(self, viewer: newton.viewer.ViewerBase) -> None:
+    def log(self, viewer: newton.viewer.ViewerBase, point_size: float | None = None) -> None:
+        """``point_size`` [m] defaults to the voxel radius (at least 1 mm)."""
         xyz, rgb = self.compute()
         device = self._points.device
         viewer.log_points(
             self.spec.name, wp.array(xyz, dtype=wp.vec3, device=device),
-            radii=0.5 * max(self.spec.voxel_size, 0.002),
+            radii=point_size or 0.5 * max(self.spec.voxel_size, 0.002),
             colors=wp.array(rgb / 255.0, dtype=wp.vec3, device=device),
         )

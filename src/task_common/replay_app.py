@@ -21,6 +21,7 @@ import warp as wp
 from loguru import logger
 
 from task_common import REPO_ROOT
+from task_common.point_cloud import CroppedPointCloud
 from task_common.recording import Event, Recording, file_digest
 from task_common.replay_metrics import Metrics, compute_metrics, derive_events
 from task_common.replay_panels import PlotsPanel, TriadsPanel
@@ -32,6 +33,10 @@ MAX_TICK_DT_S = 0.1
 DEFAULT_RENDER_FPS = 25.0
 DEFAULT_DEVICE = "cpu"
 STATS_PERIOD_S = 10.0
+DEFAULT_POINT_SIZE_MM = 1.0
+
+# A private model (on CUDA when available: ~5 ms a frame vs ~0.5 s on CPU) plus its clouds.
+PointCloudFactory = Callable[[], tuple[newton.Model, list[CroppedPointCloud]]]
 
 
 class ReplayHook(Protocol):
@@ -66,7 +71,9 @@ class ReplayApp:
                  port: int = 8081, show_collision: bool = False, run: str | None = None,
                  verbose: bool = True, hooks: Sequence[ReplayHook] = (),
                  analysis: bool = True, render_fps: float = DEFAULT_RENDER_FPS,
-                 device: str | None = DEFAULT_DEVICE) -> None:
+                 device: str | None = DEFAULT_DEVICE,
+                 build_point_clouds: PointCloudFactory | None = None,
+                 show_point_cloud: bool = False) -> None:
         if not render_fps > 0.0:
             raise ValueError(f"render_fps must be > 0, got {render_fps}")
         self.recordings_root = Path(recordings_root)
@@ -92,6 +99,11 @@ class ReplayApp:
         self.all_events: list[Event] = []
         self._analysis = analysis
         self._plots_panel = self._triads_panel = None
+        self._build_point_clouds = build_point_clouds
+        self._clouds: list[CroppedPointCloud] | None = None
+        self._cloud_state: newton.State | None = None
+        self.show_point_cloud = False
+        self.point_size_mm = DEFAULT_POINT_SIZE_MM
 
         start = time.perf_counter()
         # CPU by default: on a GPU every frame costs ~100 synchronous device-to-host copies.
@@ -108,6 +120,8 @@ class ReplayApp:
             self.state = self.model.state()
         self._model_labels = [str(label) for label in self.model.body_label]
         self._build_gui()
+        if show_point_cloud:
+            self.set_display(point_cloud=True)
         if analysis:
             self._plots_panel, self._triads_panel = PlotsPanel(), TriadsPanel()
             for hook in (self._plots_panel, self._triads_panel):
@@ -243,6 +257,30 @@ class ReplayApp:
         if label in SPEED_OPTIONS:
             self._set_gui(self._speed_dropdown, label)
 
+    def set_display(self, *, visual: bool | None = None, collision: bool | None = None,
+                    point_cloud: bool | None = None,
+                    point_size_mm: float | None = None) -> None:
+        """Show or hide visual meshes, collision shapes and the camera point clouds."""
+        if point_size_mm is not None:
+            if not point_size_mm > 0.0:
+                raise ValueError(f"point_size_mm must be > 0, got {point_size_mm}")
+            self.point_size_mm = float(point_size_mm)
+            self._set_gui(self._point_size_slider, self.point_size_mm)
+        if visual is not None:
+            self.viewer.show_visual = bool(visual)
+            self._set_gui(self._visual_box, self.viewer.show_visual)
+        if collision is not None:
+            self.viewer.show_collision = bool(collision)
+            self._set_gui(self._collision_box, self.viewer.show_collision)
+        if point_cloud is not None:
+            if point_cloud and self._build_point_clouds is None:
+                raise RuntimeError("no point clouds: ReplayApp(build_point_clouds=None)")
+            if point_cloud and self._clouds is None:
+                self._init_point_clouds()
+            self.show_point_cloud = bool(point_cloud)
+            self._set_gui(self._cloud_box, self.show_point_cloud)
+        self._render(self.current_frame)
+
     def tick(self, wall_dt: float | None = None) -> None:
         """Apply pending GUI requests, then advance playback by ``speed * wall_dt`` seconds.
 
@@ -373,6 +411,28 @@ class ReplayApp:
             return 0.0
         return float(self.recording.state_step[frame]) * self.recording.control_dt
 
+    def _init_point_clouds(self) -> None:
+        start = time.perf_counter()
+        device = "cuda:0" if wp.is_cuda_available() else self.model.device
+        with wp.ScopedDevice(device):
+            model, self._clouds = self._build_point_clouds()
+            self._cloud_state = model.state()
+        names = [cloud.spec.name for cloud in self._clouds]
+        logger.info(f"[REPLAY] point clouds {names} on {model.device} in "
+                    f"{time.perf_counter() - start:.1f} s")
+
+    def _log_point_clouds(self, frame: int) -> None:
+        if not self.show_point_cloud:
+            for cloud in self._clouds:
+                self.viewer.log_points(cloud.spec.name, None, hidden=True)
+            return
+        if self.recording is not None and self.frame_count:
+            self._cloud_state.body_q.assign(np.ascontiguousarray(self.recording.body_q[frame]))
+        for cameras in {id(c.cameras): c.cameras for c in self._clouds}.values():
+            cameras.update(self._cloud_state)
+        for cloud in self._clouds:
+            cloud.log(self.viewer, point_size=1e-3 * self.point_size_mm)
+
     def _load_checked(self, name: str) -> Recording:
         path = self.recordings_root / name
         if not (path / "meta.json").is_file():
@@ -415,6 +475,8 @@ class ReplayApp:
         if self.recording is not None and self.frame_count:
             self.state.body_q.assign(np.ascontiguousarray(self.recording.body_q[frame]))
         self.viewer.log_state(self.state)
+        if self._clouds is not None:
+            self._log_point_clouds(frame)
         self.viewer.end_frame()
         self._sync_timeline(force=not self.playing)
         for hook in self.hooks:
@@ -516,6 +578,10 @@ class ReplayApp:
             self.set_speed(float(pending["speed"].rstrip("x")))
         if "loop" in pending:
             self.loop = pending["loop"]
+        display = {k: pending[k] for k in ("visual", "collision", "point_cloud", "point_size_mm")
+                   if k in pending}
+        if display:
+            self.set_display(**display)
         if "seek" in pending:
             frame = pending["seek"]
             self.seek(self.frame_count - 1 if frame < 0 else frame)
@@ -567,6 +633,16 @@ class ReplayApp:
             self._transport = gui.add_button_group("Transport", TRANSPORT_OPTIONS)
             self._speed_dropdown = gui.add_dropdown("Speed", SPEED_OPTIONS, initial_value="1x")
             self._loop_box = gui.add_checkbox("Loop", False)
+        with gui.add_folder("Display"):
+            self._visual_box = gui.add_checkbox("Visual meshes", self.viewer.show_visual)
+            self._collision_box = gui.add_checkbox("Collision geometry",
+                                                   self.viewer.show_collision)
+            self._cloud_box = gui.add_checkbox("Point cloud", False,
+                                               disabled=self._build_point_clouds is None)
+            self._point_size_slider = gui.add_slider(
+                "Point size [mm]", min=0.2, max=2.0, step=0.05,
+                initial_value=DEFAULT_POINT_SIZE_MM,
+                disabled=self._build_point_clouds is None)
 
         self._run_dropdown.on_update(lambda e: self._request("run", e.target.value))
         self._rescan_button.on_click(lambda _: self._request("rescan", True))
@@ -575,4 +651,9 @@ class ReplayApp:
         self._transport.on_click(lambda e: self._on_transport(e.target.value))
         self._speed_dropdown.on_update(lambda e: self._request("speed", e.target.value))
         self._loop_box.on_update(lambda e: self._request("loop", bool(e.target.value)))
+        for key, box in (("visual", self._visual_box), ("collision", self._collision_box),
+                         ("point_cloud", self._cloud_box)):
+            box.on_update(lambda e, key=key: self._request(key, bool(e.target.value)))
+        self._point_size_slider.on_update(
+            lambda e: self._request("point_size_mm", float(e.target.value)))
         self._show_info()

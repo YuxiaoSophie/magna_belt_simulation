@@ -4,4 +4,5 @@ DO NOT MODIFY BY HAND!!!!
 lcm-gen 1.5.2
 """
 
+from .lcmt_round_belt_state import lcmt_round_belt_state as lcmt_round_belt_state
 from .lcmt_spatial_pose import lcmt_spatial_pose as lcmt_spatial_pose

@@ -47,6 +47,13 @@ from task_common.lcm_contract import (
     robotiq_status_msg,
     schunk_status_msg,
 )
+from task_common.perception_lcm import (
+    TASKBOARD_FRAME,
+    WORLD_FRAME,
+    point_cloud_msg,
+    round_belt_state_msg,
+    to_frame,
+)
 from task_common.recording import (
     DEFAULT_CHUNK_STEPS,
     DEFAULT_RECORDINGS_DIR,
@@ -63,6 +70,8 @@ RESYNC_LAG = 0.25
 SPIN_MARGIN = 0.0005
 DRAKE_XMLNS = "{http://drake.mit.edu}"
 BELT_MESH_PUBLISH_EVERY = 10  # 10 steps @ 5 ms = 20 Hz
+PERCEPTION_EVERY = 15  # 15 steps @ 5 ms = 0.075 s, the LCS knot
+PERCEPTION_CLOUD = "cropped_point_cloud"
 GRASP_LOG_PERIOD = 1.0
 
 
@@ -141,6 +150,13 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         self.publish_belt_mesh = bool(getattr(args, "publish_belt_mesh", False))
         if self.publish_belt_mesh and self.belt_radius is None:
             raise ValueError("--publish-belt-mesh requires the task to set belt_radius")
+        self.publish_point_cloud = bool(getattr(args, "publish_point_cloud", False))
+        self.publish_belt_state = bool(getattr(args, "publish_belt_state", False))
+        self.perception_every = int(getattr(args, "perception_every", PERCEPTION_EVERY))
+        self._perception_on = self.publish_point_cloud or self.publish_belt_state
+        if self.publish_point_cloud and not getattr(args, "cameras", False):
+            raise ValueError("--publish-point-cloud requires --cameras")
+        self._perception_render_s = 0.0
 
         super().__init__(viewer, args)
 
@@ -149,6 +165,8 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         self._io_by_name = {io.spec.name: io for io in self._robot_io}
         self._resolve_pulleys()
         self._resolve_task_bodies()
+        if self._perception_on:
+            self._init_perception()
         self._reset_stats(time.perf_counter())
         self._resyncs = 0
         record_dir = getattr(args, "record", None)
@@ -159,6 +177,61 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
 
     def _robot_specs(self) -> Sequence[RobotIoSpec]:
         raise NotImplementedError
+
+    def _init_perception(self) -> None:
+        if self.publish_point_cloud:
+            if PERCEPTION_CLOUD not in self.point_clouds:
+                raise ValueError(f"--publish-point-cloud: the scene has no {PERCEPTION_CLOUD!r} "
+                                 f"(have {sorted(self.point_clouds)})")
+            self._perception_cloud = self.point_clouds[PERCEPTION_CLOUD]
+        self._X_W_board = None
+        if self.publish_belt_state:
+            # Lazy: task_common does not otherwise depend on round_belt_task.
+            from round_belt_task.waypoints import MAGNA_PARAMS_SIM_YAML, board_pose
+
+            params = getattr(self.args, "board_params", None) or MAGNA_PARAMS_SIM_YAML
+            self._X_W_board = board_pose(Path(params))
+        c = self.channels
+        logger.info(
+            f"[PERCEPTION] every {self.perception_every} steps "
+            f"({self.perception_every * self.frame_dt:g} s): "
+            f"{c.point_cloud_channel if self.publish_point_cloud else '-'} (cloud "
+            f"{PERCEPTION_CLOUD!r}, world, cameras rendered only on these steps), "
+            f"{c.round_belt_state_channel if self.publish_belt_state else '-'} "
+            f"(belt bodies, taskboard frame)"
+        )
+
+    def _update_cameras(self) -> None:
+        if not self.publish_point_cloud:
+            super()._update_cameras()
+            return
+        # The scene's camera period is ignored: render only on the perception steps.
+        self.cameras_updated = False
+        if self.step_index % self.perception_every != 0:
+            return
+        t0 = time.perf_counter()
+        self.cameras.update(self.state_0)
+        self.cameras_updated = True
+        self._perception_render_s = time.perf_counter() - t0
+
+    def _publish_perception(self, body_q: np.ndarray) -> None:
+        """The cropped cloud and the belt state, stamped with this step's ``FRANKA_STATE`` utime."""
+        t0 = time.perf_counter()
+        utime = self.step_index * self._utime_per_step
+        if self.publish_point_cloud:
+            xyz, rgb = self._perception_cloud.compute()
+            msg = point_cloud_msg(utime, xyz, rgb, WORLD_FRAME)
+            self.bridge.publish(self.channels.point_cloud_channel, msg)
+            self._stats_cloud_points += int(msg.width)
+        if self.publish_belt_state:
+            belt = body_q[self.info.belt_bodies, :3].astype(np.float64)
+            msg = round_belt_state_msg(utime, to_frame(self._X_W_board, belt), TASKBOARD_FRAME)
+            self.bridge.publish(self.channels.round_belt_state_channel, msg)
+        cost = self._perception_render_s + time.perf_counter() - t0
+        self._perception_render_s = 0.0
+        self._stats_perception += 1
+        self._stats_perception_sum += cost
+        self._stats_perception_max = max(self._stats_perception_max, cost)
 
     def _make_bridge(self) -> LcmBridge:
         """The command/state transport; subclasses may swap in a socket-free stand-in."""
@@ -620,6 +693,8 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         if self.hand_drive is not None:
             self._update_hand_efforts()
         self._publish_state(joint_q, joint_qd)
+        if self._perception_on and self.step_index % self.perception_every == 0:
+            self._publish_perception(body_q)
         if self.publish_belt_mesh and self.step_index % BELT_MESH_PUBLISH_EVERY == 0:
             self._publish_belt_mesh(body_q)
         self._after_control_step(body_q)
@@ -799,6 +874,10 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         self._stats_steps = 0
         self._stats_compute_sum = 0.0
         self._stats_compute_max = 0.0
+        self._stats_perception = 0
+        self._stats_perception_sum = 0.0
+        self._stats_perception_max = 0.0
+        self._stats_cloud_points = 0
 
     def _log_stats(self, now: float) -> None:
         wall = now - self._stats_t0
@@ -808,12 +887,19 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         franka = self._io_by_name.get("franka")
         franka_state = "n/a" if franka is None else ("stale-damping" if franka.stale else "fresh")
         robotiq = "none" if self.robotiq_position_byte is None else self.robotiq_position_byte
+        perception = ""
+        if self._perception_on and self._stats_perception:
+            n = self._stats_perception
+            perception = (f", perception {n} x (render+cloud+publish mean "
+                          f"{self._stats_perception_sum / n * 1e3:.2f} ms max "
+                          f"{self._stats_perception_max * 1e3:.2f} ms, "
+                          f"{self._stats_cloud_points / n:.0f} pts)")
         logger.info(
             f"[STATS] step {self.step_index}: {rate:.1f} steps/s, compute "
             f"mean {self._stats_compute_sum / self._stats_steps * 1e3:.2f} ms "
             f"max {self._stats_compute_max * 1e3:.2f} ms, realtime {rate * self.frame_dt:.2f}x, "
             f"franka={franka_state}, robotiq_target={robotiq}, belt_placed={self.belt_placed}, "
-            f"resyncs={self._resyncs}"
+            f"resyncs={self._resyncs}{perception}"
         )
         self._reset_stats(now)
 
@@ -895,6 +981,25 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         parser.add_argument(
             "--publish-belt-mesh", action="store_true",
             help="publish a 20 Hz belt tube mesh on DRAKE_VIEWER_DEFORMABLE",
+        )
+        parser.add_argument(
+            "--publish-point-cloud", action="store_true",
+            help="publish the cropped camera cloud (drake::lcmt_point_cloud, world) on "
+                 "POINT_CLOUD_CROPPED every --perception-every steps; requires --cameras",
+        )
+        parser.add_argument(
+            "--publish-belt-state", action="store_true",
+            help="publish the belt body centres (magna::lcmt_round_belt_state, taskboard "
+                 "frame) on RoundBeltState every --perception-every steps",
+        )
+        parser.add_argument(
+            "--perception-every", type=_positive_int, default=PERCEPTION_EVERY, metavar="N",
+            help="control steps between perception messages (default 15 = 0.075 s)",
+        )
+        parser.add_argument(
+            "--board-params", default=None, metavar="PATH",
+            help="controller params yaml whose task_board_position/orientation define the "
+                 "taskboard frame (default: magna round_belt_controller_params_sim.yaml)",
         )
         parser.add_argument(
             "--initial-state", default=None,

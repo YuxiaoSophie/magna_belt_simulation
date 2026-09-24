@@ -30,6 +30,8 @@ from round_belt_task.outcome import (
     classify,
     classify_episode,
     frame_metrics,
+    slant_episode,
+    slant_metrics,
 )
 from task_common.replay_metrics import quat_rotate
 
@@ -185,6 +187,42 @@ def check_o5(ctx: SimpleNamespace) -> str:
     _require(label == "engaged", f"episode last_n=3 label {label!r} != 'engaged'")
     _require(set(LABELS) >= {w for _, w in ctx.scenarios.values()}, "label outside LABELS")
     return f"{len(ctx.scenarios)} scenarios rotated + spun, episode API ok"
+
+
+@check("O6 slant metrics")
+def check_o6(ctx: SimpleNamespace) -> str:
+    tangent = np.array([1.0, 0.0, 0.0])  # Franka -> UR along +X
+    tol = 1e-6
+    sm = slant_metrics(ctx.base, IDENTITY_POSE, tangent, th=ctx.th)
+    _require(sm.slant_deg < tol and sm.slant_dir == "level", f"seated: {sm}")
+    sm = slant_metrics(ctx.scenarios["pulled_out"][0], IDENTITY_POSE, tangent, th=ctx.th)
+    _require(np.isnan(sm.slant_deg) and sm.slant_dir == "n/a", f"pulled_out: {sm}")
+    sm = slant_metrics(ctx.scenarios["tilted"][0], IDENTITY_POSE, tangent, th=ctx.th)
+    _require(abs(sm.slant_deg - 20.0) < tol and abs(sm.slant_axis_deg) < tol
+             and sm.slant_dir == "roll+", f"tilted 20 deg about +X: {sm}")
+    # +alpha about azimuth phi: slant alpha, axis phi; about +Y the +X (UR) side goes down.
+    cases = ((90.0, "franka_high"), (-90.0, "ur_high"), (0.0, "roll+"), (180.0, "roll-"),
+             (35.0, "roll+"), (125.0, "franka_high"))
+    q = _quat([0.3, -0.8, 0.5], 67.0)
+    origin = np.array([0.41, -0.27, 0.93])
+    for phi, want in cases:
+        axis = [np.cos(np.radians(phi)), np.sin(np.radians(phi)), 0.0]
+        belt = _rotate_about(ctx.base, np.zeros(3), axis, 8.0)
+        sm = slant_metrics(belt, IDENTITY_POSE, tangent, th=ctx.th)
+        d_axis = (sm.slant_axis_deg - phi + 180.0) % 360.0 - 180.0
+        _require(abs(sm.slant_deg - 8.0) < tol and abs(d_axis) < tol and sm.slant_dir == want,
+                 f"phi {phi}: {sm} (want 8 deg, axis {phi}, {want})")
+        moved = origin + quat_rotate(np.broadcast_to(q, (len(belt), 4)), belt)
+        sm2 = slant_metrics(moved, np.concatenate((origin, q)), quat_rotate(q, tangent),
+                            th=ctx.th)
+        _require(abs(sm2.slant_deg - sm.slant_deg) < tol
+                 and abs(sm2.slant_axis_deg - sm.slant_axis_deg) < tol
+                 and sm2.slant_dir == sm.slant_dir, f"phi {phi} rotated: {sm2} != {sm}")
+    ep = slant_episode(np.stack([ctx.base, ctx.scenarios["tilted"][0]]),
+                       np.tile(IDENTITY_POSE, (2, 1)), tangent, ctx.th)
+    _require(ep["slant_deg_t"].shape == (2,) and ep["slant_deg"] == ep["slant_deg_t"][-1]
+             and ep["slant_dir"] == "roll+", f"episode API: {ep}")
+    return f"level/n/a/tilted 20 deg ok, {len(cases)} axes x (identity, rotated frame)"
 
 
 def main() -> int:

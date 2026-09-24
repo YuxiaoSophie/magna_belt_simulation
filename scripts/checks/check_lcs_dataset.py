@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Headless check of the LCS episode format (``task_common.lcs_dataset``) on synthetic data.
 
-No sim, no GPU, no LCM. F0 constants, F1 belt resampling, F2 writer -> validator round trip,
+No sim, no GPU, no LCM. F0 constants, F1 material belt sampling, F2 writer -> validator round trip,
 F3 broken copies are rejected naming the key. If the magna logs are present, the validator is
 also run on ``log_001.npz`` (reported as INFO).
 
@@ -11,7 +11,9 @@ Run:
 
 from __future__ import annotations
 
+import json
 import math
+import re
 import shutil
 import sys
 import tempfile
@@ -28,6 +30,7 @@ if str(REPO_ROOT / "src") not in sys.path:
 
 from task_common import lcs_dataset as ld
 
+SCENE_YAML = REPO_ROOT / "assets" / "round_belt_task" / "round_belt_scene.yaml"
 MAGNA_LOG = Path("/home/hienbui/git/magna-logs/2026-06-22/log_001.npz")
 N_FRAMES = 12
 
@@ -51,11 +54,6 @@ def check(title: str):
 def _ellipse(n: int = ld.BELT_BODIES, a: float = 0.12, b: float = 0.07) -> np.ndarray:
     t = np.linspace(0.0, 2.0 * np.pi, n, endpoint=False)
     return np.stack([0.45 + a * np.cos(t), b * np.sin(t), np.full(n, 0.03)], axis=1)
-
-
-def _signed_area_xy(p: np.ndarray) -> float:
-    x, y = p[:, 0].astype(np.float64), p[:, 1].astype(np.float64)
-    return 0.5 * float(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y))
 
 
 def _quat_axis_angle(axis, angle: float) -> np.ndarray:
@@ -97,46 +95,87 @@ def check_f0(ctx: SimpleNamespace) -> str:
     _require(abs(ld.SAMPLE_STEPS * ld.SIM_DT_S - ld.SAMPLE_PERIOD_S) < 1e-12,
              f"SAMPLE_STEPS {ld.SAMPLE_STEPS} * {ld.SIM_DT_S} != {ld.SAMPLE_PERIOD_S}")
     _require(ld.SAMPLE_PERIOD_US == round(ld.SAMPLE_PERIOD_S * 1e6), "SAMPLE_PERIOD_US mismatch")
+    _require(ld.MAGNA_LOG_PERIOD_US == round(ld.MAGNA_LOG_PERIOD_S * 1e6),
+             "MAGNA_LOG_PERIOD_US mismatch")
     _require((ld.STATE_DIM, ld.ACTION_DIM, ld.BELT_POINTS) == (40, 12, 150),
              f"dims {(ld.STATE_DIM, ld.ACTION_DIM, ld.BELT_POINTS)} != (40, 12, 150)")
     _require(ld.POSE_LAYOUT == "xyz_wxyz", f"POSE_LAYOUT {ld.POSE_LAYOUT}")
     _require(not set(ld.KEYS_REQUIRED) & set(ld.KEYS_OPTIONAL), "required/optional overlap")
     _require(not any(k.startswith(ld.EXTRA_PREFIX) for k in ld.KEYS_REQUIRED + ld.KEYS_OPTIONAL),
              "a collector key uses the sim_ prefix")
-    return (f"period {ld.SAMPLE_PERIOD_S} s = {ld.SAMPLE_STEPS} x {ld.SIM_DT_S} s, "
-            f"state {ld.STATE_DIM}, action {ld.ACTION_DIM}, belt {ld.BELT_POINTS}")
+    return (f"period {ld.SAMPLE_PERIOD_S} s = {ld.SAMPLE_STEPS} x {ld.SIM_DT_S} s (magna logs "
+            f"{ld.MAGNA_LOG_PERIOD_S} s), state {ld.STATE_DIM}, action {ld.ACTION_DIM}, "
+            f"belt {ld.BELT_POINTS}")
 
 
-@check("F1 belt_points_ordered")
+def _scene_belt() -> tuple[tuple[float, float], int]:
+    """``(semi_axes, num_elements)`` of the belt in the scene YAML (text parse, no warp)."""
+    text = SCENE_YAML.read_text()
+    block = text[text.index("add_rod_ellipse:"):]
+    axes = re.search(r"semi_axes:\s*\[([^\]]+)\]", block).group(1)
+    count = re.search(r"num_elements:\s*(\d+)", block).group(1)
+    return tuple(float(v) for v in axes.split(",")), int(count)
+
+
+def _recover(bodies: np.ndarray, pts: np.ndarray, i: np.ndarray) -> np.ndarray:
+    """Fraction of each point along its own segment ``i -> i+1``."""
+    a, b = bodies[i], bodies[(i + 1) % len(bodies)]
+    return np.sum((pts - a) * (b - a), axis=1) / np.sum((b - a) ** 2, axis=1)
+
+
+@check("F1 belt_points_ordered (material)")
 def check_f1(ctx: SimpleNamespace) -> str:
-    bodies = _ellipse()
-    out = ld.belt_points_ordered(bodies)
+    axes, count = _scene_belt()
+    _require(axes == ld.REST_BELT_SEMI_AXES and count == ld.BELT_BODIES,
+             f"scene belt {axes} x {count} != lcs_dataset {ld.REST_BELT_SEMI_AXES} x "
+             f"{ld.BELT_BODIES}")
+    i, f = ld.material_table()
+    _require(i[0] == 0 and f[0] == 0.0 and np.all(np.diff(i) >= 0) and np.all((f >= 0) & (f < 1)),
+             "table not ordered from body 0")
+    _require(np.array_equal(i, ld.material_table()[0]) and not i.flags.writeable,
+             "table not cached/read-only")
+    rest = ld.rest_belt_bodies()
+    along = np.concatenate([[0.0], np.cumsum(np.linalg.norm(
+        np.diff(np.vstack([rest, rest[:1]]), axis=0), axis=1))])
+    s_rest = along[i] + f * (along[i + 1] - along[i])
+    spread = float(np.ptp(np.diff(np.append(s_rest, along[-1]))) / (along[-1] / ld.BELT_POINTS))
+    _require(spread < 1e-9, f"rest points not at equal arc length (spread {spread:.1e})")
+
+    # Stretch the rest loop non-uniformly + move it: every point keeps its (i_k, f_k).
+    rng = np.random.default_rng(1)
+    warped = rest * [1.3, 0.8, 1.0] + rng.normal(scale=0.003, size=rest.shape) + [0.45, 0.1, 0.03]
+    out64 = ld.belt_points_material(warped)
+    err = float(np.abs(_recover(warped, out64, i) - f).max())
+    _require(err < 1e-12, f"material fraction drift {err:.1e} after stretching")
+    out = ld.belt_points_ordered(warped)
     _require(out.shape == (ld.BELT_POINTS, 3) and out.dtype == np.float32,
              f"shape/dtype {out.shape} {out.dtype}")
-    _require(np.allclose(out[0], bodies[0], atol=1e-7), f"first point {out[0]} != body 0")
-    gaps = np.linalg.norm(np.diff(np.vstack([out, out[:1]]).astype(np.float64), axis=0), axis=1)
-    spread = (gaps.max() - gaps.min()) / gaps.mean()
-    _require(spread < 0.02, f"closed-loop spacing spread {spread:.4f} >= 2 %")
-    _require(np.array_equal(out, ld.belt_points_ordered(bodies)), "not deterministic")
+    _require(np.array_equal(out, out64.astype(np.float32)), "float32 output != float64 core")
+    _require(np.allclose(out[0], warped[0], atol=1e-7), "first point != body 0")
+    _require(np.array_equal(out, ld.belt_points_ordered(warped)), "not deterministic")
+    shifted = ld.belt_points_ordered(np.roll(warped, -1, axis=0))
+    _require(np.allclose(shifted[0], warped[1], atol=1e-7), "shifted: first point != body 1")
 
-    shifted = ld.belt_points_ordered(np.roll(bodies, -1, axis=0))
-    _require(np.allclose(shifted[0], bodies[1], atol=1e-7), "shifted: first point != body 1")
-    _require(np.sign(_signed_area_xy(shifted)) == np.sign(_signed_area_xy(out)),
-             "shifted input reversed the loop orientation")
-    # Each shifted point maps to a strictly forward-walking point of the original loop.
-    dense = ld.belt_points_ordered(bodies, n_points=ld.BELT_POINTS * 20).astype(np.float64)
-    idx = np.array([np.argmin(np.linalg.norm(dense - p, axis=1)) for p in shifted])
-    steps = np.mod(np.diff(idx), len(dense))
-    _require(np.all((steps > 0) & (steps < len(dense) // 4)),
-             "shifted output does not roll forward")
-    return f"150 pts, spacing spread {100 * spread:.2f} %, 1-body shift rolls forward"
+    spline = ld.belt_points_material(warped, spline=True)
+    _require(np.allclose(spline[0], warped[0], atol=1e-12), "spline: first point != body 0")
+    dev = float(np.linalg.norm(spline - out64, axis=1).max())
+    _require(0.0 < dev < 0.01, f"spline vs chord deviation {dev * 1e3:.2f} mm")
+    rest_dev = float(np.linalg.norm(ld.belt_points_material(rest, spline=True)
+                                    - ld.belt_points_material(rest), axis=1).max())
+    return (f"scene ellipse {axes} x {count}; rest spacing equal; fraction drift {err:.0e} "
+            f"under stretch; spline-chord max {rest_dev * 1e3:.3f} mm at rest")
 
 
 @check(f"F2 writer round trip ({N_FRAMES} frames)")
 def check_f2(ctx: SimpleNamespace) -> str:
     rng = np.random.default_rng(0)
     frames = [_synthetic_frame(rng, i) for i in range(N_FRAMES + 1)]
-    writer = ld.EpisodeWriter()
+    writer = ld.EpisodeWriter(action_definition="knot1_minus_measured")
+    try:
+        ld.EpisodeWriter(action_definition="bogus")
+        raise AssertionError("EpisodeWriter accepted an unknown action_definition")
+    except ValueError:
+        pass
     step0 = 2700
     for i in range(N_FRAMES):
         f, g = frames[i], frames[i + 1]
@@ -154,6 +193,9 @@ def check_f2(ctx: SimpleNamespace) -> str:
     ctx.episode = path
     summary = ld.validate_episode(path)
     _require(summary["T"] == N_FRAMES, f"T {summary['T']} != {N_FRAMES}")
+    _require(summary["action_definition"] == "knot1_minus_measured",
+             f"action_definition {summary['action_definition']!r}")
+    _require(summary["belt_sampling"] == "material", f"belt_sampling {summary['belt_sampling']!r}")
     with np.load(path, allow_pickle=True) as d:
         _require(np.all(np.diff(d["utime"]) == ld.SAMPLE_PERIOD_US), "utime diffs != period")
         _require(d["pcd"].shape == (N_FRAMES,) and d["pcd"].dtype == object, "pcd not 1-D object")
@@ -194,6 +236,18 @@ def _broken_copy(src: Path, dst: Path, mutate) -> Path:
     return dst
 
 
+def _bad_action_definition(p: dict) -> None:
+    meta = json.loads(str(p["sim_meta"]))
+    meta["lcs_format"]["action_definition"] = "bogus"
+    p["sim_meta"] = np.array(json.dumps(meta))
+
+
+def _bad_belt_sampling(p: dict) -> None:
+    meta = json.loads(str(p["sim_meta"]))
+    meta["lcs_format"]["belt_sampling"] = "bogus"
+    p["sim_meta"] = np.array(json.dumps(meta))
+
+
 def _set_nan(p: dict) -> None:
     frames = list(p["pcd"])
     frames[3] = frames[3].copy()
@@ -207,6 +261,8 @@ def check_f3(ctx: SimpleNamespace) -> str:
         ("pcd_belt", lambda p: p.pop("pcd_belt")),
         ("state", lambda p: p.update(state=p["state"][:, :39])),
         ("pcd", _set_nan),
+        ("sim_meta", _bad_action_definition),
+        ("sim_meta", _bad_belt_sampling),
     ]
     for i, (key, mutate) in enumerate(cases):
         path = _broken_copy(ctx.episode, ctx.tmp / f"broken_{i}.npz", mutate)
@@ -217,7 +273,8 @@ def check_f3(ctx: SimpleNamespace) -> str:
                      f"error does not name {path.name} / {key}: {exc}")
             continue
         raise AssertionError(f"validate_episode accepted a copy with broken {key}")
-    return "missing pcd_belt, state width 39, NaN in pcd -> ValueError naming the key"
+    return ("missing pcd_belt, state width 39, NaN in pcd, unknown action_definition / "
+            "belt_sampling -> ValueError naming the key")
 
 
 def main() -> int:
@@ -240,7 +297,7 @@ def main() -> int:
                 break
             print(f"[PASS] {name}: {detail}")
         if exit_code == 0 and MAGNA_LOG.is_file():
-            s = ld.validate_episode(MAGNA_LOG)
+            s = ld.validate_episode(MAGNA_LOG, period_us=ld.MAGNA_LOG_PERIOD_US)
             print(f"[INFO] {MAGNA_LOG.name}: T {s['T']}, label {s.get('trajectory_label')}, "
                   f"period {s['period_us']} us, pcd {s['points']['pcd']}")
     finally:

@@ -4,6 +4,8 @@ DO NOT MODIFY BY HAND!!!!
 lcm-gen 1.5.2
 """
 
+from .lcmt_point_cloud_field import lcmt_point_cloud_field as lcmt_point_cloud_field
+from .lcmt_point_cloud import lcmt_point_cloud as lcmt_point_cloud
 from .lcmt_schunk_wsg_command import lcmt_schunk_wsg_command as lcmt_schunk_wsg_command
 from .lcmt_schunk_wsg_status import lcmt_schunk_wsg_status as lcmt_schunk_wsg_status
 from .lcmt_viewer_geometry_data import lcmt_viewer_geometry_data as lcmt_viewer_geometry_data

@@ -6,6 +6,7 @@ so ``validate_episode`` runs without the sim.
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 import os
@@ -15,18 +16,32 @@ import numpy as np
 from loguru import logger
 
 SIM_DT_S = 0.005
-# Camera at 20 fps + the collector's 13.3 Hz rate limit -> every other cloud (docs §5).
-SAMPLE_PERIOD_S = 0.1
+# The MPC (C3) knot spacing: one tuple per MPC query.
+SAMPLE_PERIOD_S = 0.075
 SAMPLE_STEPS = round(SAMPLE_PERIOD_S / SIM_DT_S)
 assert abs(SAMPLE_STEPS * SIM_DT_S - SAMPLE_PERIOD_S) < 1e-12, "period not a whole step count"
 SAMPLE_PERIOD_US = round(SAMPLE_PERIOD_S * 1e6)
+# magna's hardware logs (log_001.npz ...) are sampled every 0.1 s.
+MAGNA_LOG_PERIOD_S = 0.1
+MAGNA_LOG_PERIOD_US = round(MAGNA_LOG_PERIOD_S * 1e6)
 # C3 knot spacing the collector's action deltas span (informational).
 ACTION_KNOT_DT_S = 0.075
+# ``sim_meta["lcs_format"]["action_definition"]`` values validate_episode accepts.
+ACTION_DEFINITIONS = {
+    "knot1_minus_measured": "commanded pose one knot dt ahead - measured EE pose at t",
+    "knot1_minus_knot0": "knot 1 - knot 0 of the command published at t",
+    "cmd_t1_minus_cmd_t": "commanded target at t+1 - commanded target at t",
+}
 
 STATE_DIM = 40
 ACTION_DIM = 12
 BELT_POINTS = 150
 BELT_BODIES = 48
+# Scene belt ellipse semi-axes (x, y) [m] (round_belt_scene.yaml, add_rod_ellipse).
+REST_BELT_SEMI_AXES = (0.08558, 0.12066)
+# ``sim_meta["lcs_format"]["belt_sampling"]``: how ``pcd_belt`` was resampled (absent = arc_length).
+BELT_SAMPLINGS = ("arc_length", "material")
+BELT_SAMPLING = "material"
 PCD_POINTS = None  # ragged: the collector stores the cropped cloud as received
 POSE_LAYOUT = "xyz_wxyz"
 POINT_CLOUD_SOURCE = "camera_plus_belt"
@@ -116,9 +131,9 @@ def state_vector(q_franka, q_ur, v_franka, v_ur, ee_franka_pose7, ee_ur_pose7) -
 def action_vector(pose_franka_t, pose_franka_t1, pose_ur_t, pose_ur_t1) -> np.ndarray:
     """``[dxyz_franka, dxyz_ur, drotvec_franka, drotvec_ur]``, float64, world frame.
 
-    The collector's knot delta: ``dxyz = p1 - p0`` and ``drotvec = rotvec(R1 * R0^T)``
-    (``_parse_trajectory_pose_and_delta`` / ``_delta_orientation_rotvec``). Poses are
-    ``xyz_wxyz``; the caller picks which two commanded poses to difference.
+    ``dxyz = p1 - p0`` and ``drotvec = rotvec(R1 * R0^T)`` (``_parse_trajectory_pose_and_delta``
+    / ``_delta_orientation_rotvec``). Poses are ``xyz_wxyz``; the caller picks the two poses
+    (see ``ACTION_DEFINITIONS``).
     """
     f0 = _as_vec(pose_franka_t, 7, "pose_franka_t")
     f1 = _as_vec(pose_franka_t1, 7, "pose_franka_t1")
@@ -130,25 +145,87 @@ def action_vector(pose_franka_t, pose_franka_t1, pose_ur_t, pose_ur_t1) -> np.nd
     ])
 
 
-def belt_points_ordered(belt_xyz, n_points: int = BELT_POINTS) -> np.ndarray:
-    """Arc-length resampling of the closed body polyline (index order, back to body 0).
+def rest_belt_bodies(n_bodies: int = BELT_BODIES) -> np.ndarray:
+    """Rest body centres of the scene's belt, centred at the origin, float64 ``(n, 3)``.
 
-    Point 0 is body 0 and the points walk in body-index order; returns ``(n_points, 3)`` float32.
+    ``add_rod_ellipse`` puts nodes at equal angle on the ellipse; each body sits at the midpoint
+    of its two nodes (``body_frame_origin: com``).
     """
+    a, b = REST_BELT_SEMI_AXES
+    th = 2.0 * np.pi * np.arange(n_bodies + 1) / n_bodies
+    nodes = np.stack([a * np.cos(th), b * np.sin(th), np.zeros_like(th)], axis=1)
+    return 0.5 * (nodes[:-1] + nodes[1:])
+
+
+@functools.lru_cache(maxsize=8)
+def _material_table(n_points: int, n_bodies: int) -> tuple[np.ndarray, np.ndarray]:
+    rest = rest_belt_bodies(n_bodies)
+    loop = np.vstack([rest, rest[:1]])
+    seg = np.linalg.norm(np.diff(loop, axis=0), axis=1)
+    cum = np.concatenate([[0.0], np.cumsum(seg)])
+    s = np.arange(n_points) * (cum[-1] / n_points)
+    i = np.clip(np.searchsorted(cum, s, side="right") - 1, 0, n_bodies - 1)
+    f = (s - cum[i]) / seg[i]
+    i.setflags(write=False)
+    f.setflags(write=False)
+    return i, f
+
+
+def material_table(n_points: int = BELT_POINTS, n_bodies: int = BELT_BODIES
+                   ) -> tuple[np.ndarray, np.ndarray]:
+    """``(i_k, f_k)``: point ``k`` sits at fraction ``f_k`` from body ``i_k`` to ``i_k + 1``.
+
+    Equal arc length along the closed rest body loop (:func:`rest_belt_bodies`), point 0 = body 0.
+    """
+    return _material_table(int(n_points), int(n_bodies))
+
+
+def _centripetal_catmull_rom(p: np.ndarray, i: np.ndarray, f: np.ndarray) -> np.ndarray:
+    m = len(p)
+    p0, p1, p2, p3 = p[(i - 1) % m], p[i], p[(i + 1) % m], p[(i + 2) % m]
+
+    def knot(a, b):  # sqrt of the chord, floored so coincident bodies stay finite
+        return np.maximum(np.linalg.norm(b - a, axis=1), 1e-12) ** 0.5
+
+    t0 = np.zeros(len(i))
+    t1 = t0 + knot(p0, p1)
+    t2 = t1 + knot(p1, p2)
+    t3 = t2 + knot(p2, p3)
+    t = (t1 + f * (t2 - t1))[:, None]
+    t0, t1, t2, t3 = (x[:, None] for x in (t0, t1, t2, t3))
+    a1 = ((t1 - t) * p0 + (t - t0) * p1) / (t1 - t0)
+    a2 = ((t2 - t) * p1 + (t - t1) * p2) / (t2 - t1)
+    a3 = ((t3 - t) * p2 + (t - t2) * p3) / (t3 - t2)
+    b1 = ((t2 - t) * a1 + (t - t0) * a2) / (t2 - t0)
+    b2 = ((t3 - t) * a2 + (t - t1) * a3) / (t3 - t1)
+    return ((t2 - t) * b1 + (t - t1) * b2) / (t2 - t1)
+
+
+def belt_points_material(belt_xyz, n_points: int = BELT_POINTS, spline: bool = False
+                         ) -> np.ndarray:
+    """Float64 core of :func:`belt_points_ordered`."""
     p = np.asarray(belt_xyz, dtype=np.float64)
     if p.ndim != 2 or p.shape[1] != 3 or p.shape[0] < 3:
         raise ValueError(f"belt_xyz: expected (M>=3, 3), got {p.shape}")
     if not np.all(np.isfinite(p)):
         raise ValueError("belt_xyz: non-finite points")
-    loop = np.vstack([p, p[:1]])
-    seg = np.linalg.norm(np.diff(loop, axis=0), axis=1)
-    cum = np.concatenate([[0.0], np.cumsum(seg)])
-    if cum[-1] <= 0.0:
-        raise ValueError("belt_xyz: zero-length loop")
-    s = np.arange(n_points) * (cum[-1] / n_points)
-    i = np.clip(np.searchsorted(cum, s, side="right") - 1, 0, len(seg) - 1)
-    frac = np.divide(s - cum[i], seg[i], out=np.zeros_like(s), where=seg[i] > 0.0)
-    return (loop[i] + frac[:, None] * (loop[i + 1] - loop[i])).astype(np.float32)
+    i, f = material_table(n_points, p.shape[0])
+    if spline:
+        return _centripetal_catmull_rom(p, i, f)
+    j = (i + 1) % p.shape[0]
+    return (1.0 - f)[:, None] * p[i] + f[:, None] * p[j]
+
+
+def belt_points_ordered(belt_xyz, n_points: int = BELT_POINTS, spline: bool = False
+                        ) -> np.ndarray:
+    """Material (Lagrangian) sampling of the closed body loop; ``(n_points, 3)`` float32.
+
+    Point ``k`` = ``(1 - f_k) body[i_k] + f_k body[i_k + 1]`` (:func:`material_table`), so it
+    follows the same piece of belt however the belt stretches. Point 0 is body 0; points walk
+    in body-index order (body ``M-1`` closes to body 0). ``spline=True`` uses a closed
+    centripetal Catmull-Rom through the bodies with the same ``(i_k, f_k)``.
+    """
+    return belt_points_material(belt_xyz, n_points, spline).astype(np.float32)
 
 
 def camera_points(xyz) -> np.ndarray:
@@ -189,8 +266,13 @@ def json_default(o):
 class EpisodeWriter:
     """Accumulates sampled frames and writes one episode ``.npz`` (``docs/lcs-dataset.md``)."""
 
-    def __init__(self, sample_steps: int = SAMPLE_STEPS) -> None:
+    def __init__(self, sample_steps: int = SAMPLE_STEPS,
+                 action_definition: str | None = None) -> None:
+        if action_definition is not None and action_definition not in ACTION_DEFINITIONS:
+            raise ValueError(f"action_definition {action_definition!r} not in "
+                             f"{sorted(ACTION_DEFINITIONS)}")
         self.sample_steps = int(sample_steps)
+        self.action_definition = action_definition
         self._steps: list[int] = []
         self._times: list[float] = []
         self._state: list[np.ndarray] = []
@@ -250,8 +332,10 @@ class EpisodeWriter:
         meta["lcs_format"] = {
             "sample_period_s": self.sample_steps * SIM_DT_S, "sample_steps": self.sample_steps,
             "pose_layout": POSE_LAYOUT, "belt_points": BELT_POINTS,
-            "action_knot_dt_s": ACTION_KNOT_DT_S,
+            "action_knot_dt_s": ACTION_KNOT_DT_S, "belt_sampling": BELT_SAMPLING,
         }
+        if self.action_definition is not None:
+            meta["lcs_format"]["action_definition"] = self.action_definition
         kin = _stack_or_ragged(self._kin, np.float32)
         out = {
             "pcd": _ragged(self._pcd),
@@ -383,6 +467,22 @@ def validate_episode(path, legacy: bool = False, period_us: int | None = SAMPLE_
             if label.shape != () or label.dtype.kind not in "UO":
                 _fail(path, "trajectory_label", f"expected a 0-d string, got {label.shape}")
             summary["trajectory_label"] = str(label.item())
+        summary["action_definition"] = summary["belt_sampling"] = None
+        if "sim_meta" in files:
+            try:
+                meta = json.loads(str(data["sim_meta"]))
+            except json.JSONDecodeError as exc:
+                _fail(path, "sim_meta", f"not JSON: {exc}")
+            fmt = meta.get("lcs_format") if isinstance(meta, dict) else None
+            definition = fmt.get("action_definition") if isinstance(fmt, dict) else None
+            if definition is not None and definition not in ACTION_DEFINITIONS:
+                _fail(path, "sim_meta", f"action_definition {definition!r} not in "
+                                        f"{sorted(ACTION_DEFINITIONS)}")
+            summary["action_definition"] = definition
+            sampling = fmt.get("belt_sampling") if isinstance(fmt, dict) else None
+            if sampling is not None and sampling not in BELT_SAMPLINGS:
+                _fail(path, "sim_meta", f"belt_sampling {sampling!r} not in {BELT_SAMPLINGS}")
+            summary["belt_sampling"] = sampling
         summary["sources"] = LOADER_SOURCES if "pcd_belt" in files else ("legacy",)
         summary["shapes"] = {k: (tuple(data[k].shape), str(data[k].dtype)) for k in data.files}
     return summary

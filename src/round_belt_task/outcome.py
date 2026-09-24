@@ -113,3 +113,76 @@ def classify_episode(belt_xyz_T: np.ndarray, pulley_pose7_T: np.ndarray,
     best = max(counts.values())
     label = next(lab for lab in reversed(tail) if counts[lab] == best)
     return label, metrics
+
+
+SLANT_LEVEL_DEG = 1.0  # below this slant_dir is "level" (descriptive only, not a label)
+SLANT_DIRS = ("level", "ur_high", "franka_high", "roll+", "roll-", "n/a")
+
+
+@dataclass
+class SlantMetrics:
+    """Tilt of the plane fitted to the neighbourhood bodies vs the groove plane (pulley frame).
+
+    ``slant_axis_deg``: azimuth (from the pulley +X) of ``z x n``, the axis that rotates the
+    pulley axis ``z`` onto the fitted normal ``n`` by ``slant_deg``. ``slant_dir`` compares the
+    high side (in-plane uphill direction) with the Franka -> UR tangent: within 45 deg ->
+    ``ur_high``, beyond 135 -> ``franka_high``, otherwise ``roll+`` (uphill to the left of the
+    tangent, i.e. ``z . (tangent x uphill) > 0``) or ``roll-``.
+    """
+
+    slant_deg: float
+    slant_axis_deg: float
+    slant_dir: str
+    n_fit: int
+
+
+def slant_metrics(belt_xyz: np.ndarray, pulley_pose7: np.ndarray, tangent_world: np.ndarray,
+                  seat_mm: float = LARGE_SEAT_MM, th: OutcomeThresholds = DEFAULT_THRESHOLDS
+                  ) -> SlantMetrics:
+    """SVD plane fit to the classifier's neighbourhood bodies; NaN / ``n/a`` if < 3 or collinear."""
+    pose = np.asarray(pulley_pose7, dtype=np.float64)
+    centre, q = pose[:3], pose[3:7] / np.linalg.norm(pose[3:7])
+    axis = quat_rotate(q, np.array([0.0, 0.0, 1.0]))
+    x_dir = quat_rotate(q, np.array([1.0, 0.0, 0.0]))
+    y_dir = np.cross(axis, x_dir)
+    frame = np.stack([x_dir, y_dir, axis])
+    local = (np.asarray(belt_xyz, dtype=np.float64) - centre) @ frame.T
+    r = np.linalg.norm(local[:, :2], axis=1) * 1e3
+    near = (r <= seat_mm + th.neighbour_radial_mm) & (r >= seat_mm - th.neighbour_inner_mm)
+    pts = local[near]
+    nan = SlantMetrics(float("nan"), float("nan"), "n/a", int(near.sum()))
+    if len(pts) < 3:
+        return nan
+    sv, vt = np.linalg.svd(pts - pts.mean(axis=0), full_matrices=False)[1:]
+    if sv[1] <= 1e-9 * max(sv[0], 1e-30):
+        return nan
+    n = vt[2] if vt[2, 2] >= 0.0 else -vt[2]
+    slant = float(np.degrees(np.arccos(np.clip(n[2], -1.0, 1.0))))
+    axis_deg = float(np.degrees(np.arctan2(n[0], -n[1])))  # z x n = (-n_y, n_x, 0)
+    t = frame @ np.asarray(tangent_world, dtype=np.float64)
+    t2, up = t[:2], -n[:2]  # uphill: h = -(n_x x + n_y y) / n_z
+    if slant < SLANT_LEVEL_DEG or np.linalg.norm(t2) < 1e-9:
+        direction = "level" if slant < SLANT_LEVEL_DEG else "n/a"
+    else:
+        ang = float(np.degrees(np.arctan2(t2[0] * up[1] - t2[1] * up[0], t2 @ up)))
+        if abs(ang) <= 45.0:
+            direction = "ur_high"
+        elif abs(ang) >= 135.0:
+            direction = "franka_high"
+        else:
+            direction = "roll+" if ang > 0.0 else "roll-"
+    return SlantMetrics(slant, axis_deg, direction, len(pts))
+
+
+def slant_episode(belt_xyz_T: np.ndarray, pulley_pose7_T: np.ndarray, tangent_world: np.ndarray,
+                  th: OutcomeThresholds = DEFAULT_THRESHOLDS, seat_mm: float = LARGE_SEAT_MM
+                  ) -> dict[str, np.ndarray | float | str]:
+    """Per-frame ``slant_deg_t`` / ``slant_axis_deg_t``, final-frame scalars and ``slant_dir``."""
+    fs = [slant_metrics(b, p, tangent_world, seat_mm, th)
+          for b, p in zip(belt_xyz_T, pulley_pose7_T, strict=True)]
+    if not fs:
+        raise ValueError("slant_episode needs at least one frame")
+    return {"slant_deg": fs[-1].slant_deg, "slant_axis_deg": fs[-1].slant_axis_deg,
+            "slant_dir": fs[-1].slant_dir,
+            "slant_deg_t": np.array([m.slant_deg for m in fs], dtype=np.float64),
+            "slant_axis_deg_t": np.array([m.slant_axis_deg for m in fs], dtype=np.float64)}

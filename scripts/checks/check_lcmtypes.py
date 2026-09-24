@@ -2,7 +2,7 @@
 """Check the generated lcmtypes/ packages are wire-compatible with magna's generated modules.
 
 First checks that dairlib/drake/robotiq/magna resolve to this repo's lcmtypes/<pkg>/ (not
-magna's tree or a stray copy). Then for each of the 14 vendored LCM types: compares the packed
+magna's tree or a stray copy). Then for each of the 17 vendored LCM types: compares the packed
 fingerprint against magna's own generated module (bazel-bin output, read-only), then
 round-trips a non-default instance through encode()/decode() and checks field equality. Skips
 the fingerprint half (not the round trip) if the magna reference tree is not present.
@@ -16,6 +16,8 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
+
+import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 # The task packages live under src/; make them importable regardless of CWD.
@@ -33,12 +35,14 @@ from dairlib import (
     lcmt_trajectory_block,
 )
 from drake import (
+    lcmt_point_cloud,
+    lcmt_point_cloud_field,
     lcmt_schunk_wsg_command,
     lcmt_schunk_wsg_status,
     lcmt_viewer_geometry_data,
     lcmt_viewer_link_data,
 )
-from magna import lcmt_spatial_pose
+from magna import lcmt_round_belt_state, lcmt_spatial_pose
 from robotiq import lcmt_robotiq_command, lcmt_robotiq_status
 
 # Parent "lcmtypes" dir of each magna-generated package (inserted into sys.path so a nested
@@ -394,11 +398,76 @@ def check_robotiq_status() -> None:
     print("[PASS] lcmt_robotiq_status")
 
 
+def _build_point_cloud(n_points: int = 2000) -> lcmt_point_cloud:
+    msg = lcmt_point_cloud()
+    msg.utime = 75000
+    msg.frame_name = "world"
+    msg.width, msg.height = n_points, 1
+    msg.fields = []
+    for i, name in enumerate(("x", "y", "z")):
+        field = lcmt_point_cloud_field()
+        field.name, field.byte_offset = name, 4 * i
+        field.datatype, field.count = lcmt_point_cloud_field.FLOAT32, 1
+        msg.fields.append(field)
+    msg.num_fields = len(msg.fields)
+    msg.flags = lcmt_point_cloud.IS_STRICTLY_FINITE
+    msg.point_step = 12
+    msg.row_step = 12 * n_points
+    msg.filler = b"\x00\x00\x00"
+    msg.filler_size = len(msg.filler)
+    xyz = (np.arange(3 * n_points, dtype=np.float32) * 1e-3).reshape(-1, 3)
+    msg.data = xyz.tobytes()
+    msg.data_size = len(msg.data)
+    return msg
+
+
+def check_point_cloud_field() -> None:
+    _check_fingerprint("drake", "lcmt_point_cloud_field", lcmt_point_cloud_field)
+    msg = _build_point_cloud(1).fields[1]
+    decoded = lcmt_point_cloud_field.decode(msg.encode())
+    _require((decoded.name, decoded.byte_offset, decoded.datatype, decoded.count)
+             == ("y", 4, lcmt_point_cloud_field.FLOAT32, 1), "field mismatch")
+    print("[PASS] lcmt_point_cloud_field")
+
+
+def check_point_cloud() -> None:
+    _check_fingerprint("drake", "lcmt_point_cloud", lcmt_point_cloud)
+    msg = _build_point_cloud()
+    decoded = lcmt_point_cloud.decode(msg.encode())
+    for name in ("utime", "frame_name", "width", "height", "num_fields", "flags", "point_step",
+                 "row_step", "filler_size", "filler", "data_size", "data"):
+        _require(getattr(decoded, name) == getattr(msg, name), f"{name} mismatch")
+    _require([(f.name, f.byte_offset, f.datatype, f.count) for f in decoded.fields]
+             == [(f.name, f.byte_offset, f.datatype, f.count) for f in msg.fields],
+             "fields mismatch")
+    print("[PASS] lcmt_point_cloud")
+
+
+def check_round_belt_state() -> None:
+    _check_fingerprint("magna", "lcmt_round_belt_state", lcmt_round_belt_state)
+    msg = lcmt_round_belt_state()
+    msg.utime = 75000
+    msg.frame_name = "taskboard"
+    msg.num_control_points = 0
+    msg.control_point_positions = []
+    points = (np.arange(48 * 3, dtype=np.float32) * 0.25).reshape(48, 3)
+    msg.point_positions = points.tolist()
+    msg.num_points = len(msg.point_positions)
+    decoded = lcmt_round_belt_state.decode(msg.encode())
+    _require(decoded.utime == msg.utime and decoded.frame_name == msg.frame_name,
+             "header mismatch")
+    _require(decoded.num_control_points == 0 and decoded.num_points == 48, "counts mismatch")
+    _require(np.array_equal(np.asarray(decoded.point_positions, dtype=np.float32), points),
+             "point_positions mismatch")
+    print("[PASS] lcmt_round_belt_state")
+
+
 CHECKS = [
     check_repo_modules_location, check_robot_input, check_robot_output, check_object_state,
     check_metadata, check_trajectory_block, check_saved_traj, check_timestamped_saved_traj,
     check_schunk_wsg_status, check_schunk_wsg_command, check_viewer_geometry_data,
     check_viewer_link_data, check_robotiq_command, check_robotiq_status, check_spatial_pose,
+    check_point_cloud_field, check_point_cloud, check_round_belt_state,
 ]
 
 

@@ -19,9 +19,14 @@ my_projects/
 │   │   ├── arm_kinematics.py       #   numpy FK/Jacobian/IK for the Franka + UR chains (LCS)
 │   │   ├── motion.py               #   Cartesian interpolation + joint-trajectory IK solve (LCS)
 │   │   ├── offline_simulation.py   #   in-process sim driver: no magna, no LCM socket (LCS)
+│   │   ├── osc_simulation.py       #   Franka torque-driven by magna's real OSC, lock-step (LCS)
+│   │   ├── osc_bridge.py           #   lock-step LCM bridge to magna's Franka OSC (LCS)
+│   │   ├── controller_bridge.py    #   OscBridge + LATENT_STATE, controller cmds in (learned MPC)
+│   │   ├── commander.py            #   emulated magna waypoint/UR-line commander + excitation (LCS)
 │   │   ├── perturbation.py         #   class-conditioned waypoint perturbations (LCS)
 │   │   ├── clearance.py            #   2F-85 vs board clearance: measure + waypoint guard (LCS)
-│   │   └── outcome.py              #   large-pulley engagement outcome classifier (LCS)
+│   │   ├── outcome.py              #   large-pulley engagement outcome classifier (LCS)
+│   │   └── episode_io.py           #   .npz write helpers shared by the collector + MPC harness
 │   ├── task_common/                # task-agnostic scene/joint/simulation scaffolding, RGBD cameras
 │   │   ├── __init__.py             #   REPO_ROOT; puts lcmtypes/ on sys.path
 │   │   ├── defaults.py             #   contact materials, 2F-85 drive gains, solver iterations
@@ -35,6 +40,11 @@ my_projects/
 │   │   ├── replay_metrics.py       #   metrics, derived events, target-pose evaluation
 │   │   ├── replay_panels.py        #   Plots/Triads panels for the replay app
 │   │   ├── sim_snapshot.py         #   full sim state/control capture + restore (LCS)
+│   │   ├── osc_process.py          #   magna's Franka OSC as a private-URL child process (LCS)
+│   │   ├── magna_process.py        #   generic magna-binary child process launcher (learned MPC)
+│   │   ├── latent_encoder.py       #   numpy encoder/learned-LCS step + LATENT_STATE (learned MPC)
+│   │   ├── belt_metrics.py         #   belt alignment: RMSE, chamfer, best-shift (learned MPC)
+│   │   ├── perception_lcm.py       #   point-cloud/belt-state LCM build + decode (learned MPC)
 │   │   └── lcs_dataset.py          #   lcs_learning .npz episode format: writer + validator
 │   ├── timing_belt_task/           # timing-belt model spike (belt.py, belt_strip.py)
 │   └── utils/                      # task-agnostic Newton helpers
@@ -57,10 +67,14 @@ my_projects/
 │       └── round_belt_task_board/  #   board + small/large pulleys
 │
 ├── lcmtypes/                       # LCM types: vendored .lcm sources (byte-identical to magna) + the
-│   ├── dairlib/  drake/  robotiq/  #   generated Python packages beside them, checked in
-│   ├── magna/                      #   lcmt_spatial_pose (UR target pose, docs/lcm-simulation.md)
+│   ├── dairlib/                    #   generated Python packages beside them, checked in
+│   ├── drake/                      #   incl. lcmt_point_cloud[_field] (learned MPC perception, §2)
+│   ├── robotiq/
+│   ├── magna/                      #   lcmt_spatial_pose (UR pose), lcmt_round_belt_state (MPC)
 │   └── gen_lcmtypes.sh             #   regenerates the Python packages in place from the .lcm sources
-├── procman/                        # newton_assembly_sim.pmd / _hw.pmd + run_in_magna.sh / run_newton_sim.sh wrappers
+├── procman/                        # newton_assembly_sim.pmd / _hw.pmd + run_in_magna.sh /
+│                                   #   run_newton_sim.sh wrappers; newton_assembly_learned_sim.pmd,
+│                                   #   run_in_magna_learned.sh, run_learned_encoder.sh (MPC)
 │
 ├── recordings/                     # --record output (gitignored), <timestamp>-<label>/ per run
 ├── data/                           # collected datasets (gitignored), e.g. data/lcs/<run>/
@@ -70,7 +84,13 @@ my_projects/
 │   ├── replay_viewer.py                 # viser replay of a --record run: scrub, play, plots, triads
 │   ├── collect_lcs_dataset.py           # collect LCS episodes (docs/lcs-data-collection.md)
 │   ├── lcs/
-│   │   └── make_start_state.py          # nominal in-process pick -> LCS start-state snapshot
+│   │   ├── make_start_state.py          # nominal in-process pick -> LCS start-state snapshot
+│   │   ├── rewrite_belt_points.py       # backfill material pcd_belt + slant into old runs
+│   │   ├── make_grasp_variants.py       # grasp-varied pre_place_1 start states (learned MPC)
+│   │   ├── make_demo_goals.py           # per-stage demo latent goals -> demo_goals.npz (§5.5)
+│   │   ├── eval_learned_mpc.py          # lock-step eval harness: learned MPC vs baseline (§5.8)
+│   │   ├── latent_encoder_node.py       # the encoder as its own LCM node, for procman (§7)
+│   │   └── run_learned_stack.py         # shell validation of the procman learned stack (§7)
 │   ├── checks/                          # regression checks; run all before a commit
 │   │   ├── check_round_belt_task_poses.py   # independent-FK pose check vs the Drake yaml
 │   │   ├── check_scene_directives.py        # directives loader / scene checks
@@ -83,9 +103,17 @@ my_projects/
 │   │   ├── check_replay_viewer.py           # headless check of the replay app (ReplayApp)
 │   │   ├── check_sim_snapshot.py            # sim state/control snapshot restore fidelity (LCS)
 │   │   ├── check_inproc_motion.py           # in-process waypoint motion: FK/IK, pick, place (LCS)
+│   │   ├── check_commander.py               # emulated magna waypoint/UR-line commander (LCS)
+│   │   ├── check_osc_backend.py             # lock-step magna Franka OSC child process (LCS)
 │   │   ├── check_lcs_dataset.py             # LCS .npz writer/validator, synthetic data (LCS)
 │   │   ├── check_lcs_outcome.py             # large-pulley outcome classifier, synthetic belt (LCS)
-│   │   ├── check_lcs_collector.py           # end-to-end LCS collection run (LCS)
+│   │   ├── check_lcs_collector.py           # end-to-end LCS collection run, both backends (LCS)
+│   │   ├── check_lcs_tuples.py              # osc-backend tuple semantics: timing, actions (LCS)
+│   │   ├── check_latent_encoder.py          # numpy encoder / learned-LCS step (learned MPC)
+│   │   ├── check_demo_goals.py              # demo episode, re-export, demo_goals.npz (§5.5)
+│   │   ├── check_grasp_variants.py          # grasp-varied start states (§5.6)
+│   │   ├── check_mpc_harness.py             # end-to-end eval harness (§5.8)
+│   │   ├── check_latent_encoder_node.py     # LATENT_STATE encoder node + sim perception publishers
 │   │   ├── lcm_peer_utils.py                # controller-side LCM peer for the checks (and the bench)
 │   │   └── data/                            # reference data for the checks
 │   └── debug/                           # tuning and analysis tools, not checks:
@@ -98,7 +126,8 @@ my_projects/
 │   ├── scene-directives.md         # directive schema + how to add a task
 │   ├── lcm-simulation.md           # the LCM contract, running, CLI, tuning, divergences
 │   ├── lcs-dataset.md              # the LCS .npz episode format: state/action layout, point clouds
-│   └── lcs-data-collection.md      # how to collect LCS episodes and hand them to lcs_learning
+│   ├── lcs-data-collection.md      # how to collect LCS episodes and hand them to lcs_learning
+│   └── learned-mpc.md              # learned latent-LCS MPC: contract, how-to, 2026-09-24 results
 ├── external/newton/                # Newton source (git submodule)
 └── external/task_board_urdf/       # DAIRLab task-board meshes (submodule); not used by the current code
 ```
@@ -133,12 +162,45 @@ uv run python scripts/replay_viewer.py
 
 ```bash
 uv run python scripts/lcs/make_start_state.py
-uv run python scripts/collect_lcs_dataset.py --episodes 40 --seed 0
+uv run python scripts/lcs/make_start_state.py --backend osc   # once, after the line above
+uv run python scripts/collect_lcs_dataset.py --episodes 40 --seed 0   # --backend osc by default
+uv run python scripts/collect_lcs_dataset.py --episodes 16 --intents slanted_franka_high_steep
 uv run python scripts/replay_viewer.py --recordings data/lcs/<run>/recordings
 ```
 
-See `docs/lcs-data-collection.md` for the flags, the perturbation/outcome ranges and how to point
-`lcs_learning` at the output.
+The default `osc` backend drives the Franka through magna's real OSC controller as a child
+process on a private LCM URL (`--lcm-url`, default `udpm://239.255.76.83:7683?ttl=0`; never
+magna's shared group, and one URL per concurrent run). See `docs/lcs-data-collection.md` for the
+flags, the perturbation/outcome ranges and how to point `lcs_learning` at the output.
+
+### Deploy the learned LCS as the MPC model
+
+```bash
+# in ~/git/lcs_learning: export the learned LCS, then check it here
+uv run python scripts/export_learned_lcs_deploy.py --checkpoint <ckpt.pt> --out-dir <deploy>
+uv run python scripts/checks/check_latent_encoder.py --deploy <deploy>/deploy.npz
+
+# here: record a demo, re-export with it, build its per-stage goals
+uv run python scripts/collect_lcs_dataset.py --out data/lcs/demo/<label> --scenario nominal \
+    --episodes 3 --record --lcm-url udpm://239.255.76.94:7694?ttl=0
+# in ~/git/lcs_learning: export again with --goal-episode <it> --goal-frames 0,-1
+uv run python scripts/lcs/make_demo_goals.py --episode data/lcs/demo/demo_episode.npz \
+    --deploy <deploy_demo>/deploy.npz --out data/lcs/demo/demo_goals.npz
+
+# build grasp-varied start states, build the magna worktree (bazel), run the eval harness
+uv run python scripts/lcs/make_grasp_variants.py --probe --set set1
+uv run python scripts/lcs/make_grasp_variants.py --set set1 --count 12 --seed 0
+uv run python scripts/lcs/eval_learned_mpc.py --mode learned --repeats 2 \
+    --start-states data/lcs/start_states/grasp_variants/set1 \
+    --lcm-url udpm://239.255.76.90:7690?ttl=0
+```
+
+Full contract (`LATENT_STATE`, the learned LCS yaml, the `learned_mpc:` params block, the u/knot
+semantics, how to read `index.json`) and the 2026-09-24 evaluation — **negative: the tuned
+learned MPC does not beat the waypoint baseline** — are in `docs/learned-mpc.md`; the procman
+deployment against the free-running sim is `docs/lcm-simulation.md` §3. Every process here needs
+its own private LCM URL (never magna's shared group); `docs/learned-mpc.md` §9 lists the ones
+used in the 2026-09-24 run.
 
 ---
 

@@ -225,6 +225,10 @@ class RoundBeltOfflineSimulation(RoundBeltLcmSimulation):
         host = self.control.joint_target_q.numpy().reshape(-1).astype(np.float64)
         return host[self._franka_slots].copy(), host[self._ur_slots].copy()
 
+    def arm_coords(self) -> tuple[np.ndarray, np.ndarray]:
+        """``joint_q`` indices of the Franka and UR arm joints."""
+        return self._io_by_spec_name("franka").coords, self._io_by_spec_name("ur10").coords
+
     def arm_positions(self) -> tuple[np.ndarray, np.ndarray]:
         q = self.state_0.joint_q.numpy().astype(np.float64)
         return (q[self._io_by_spec_name("franka").coords].copy(),

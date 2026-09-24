@@ -1,0 +1,63 @@
+group "simulation subsystems" {
+    cmd "ur-control-simulation" {
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_in_magna_learned.sh bazel-bin/systems/simulation/ur_control_simulation --lcm_url=udpm://239.255.76.95:7695?ttl=0";
+        host = "localhost";
+    }
+    cmd "ur_trajectory_cartesian_osc" {
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_in_magna_learned.sh bazel-bin/systems/controllers/ur_cartesian_trajectory_controller --ur_input_mode=1 --lcm_url=udpm://239.255.76.95:7695?ttl=0";
+        host = "localhost";
+    }
+    cmd "franka_trajectory_cartesian_osc" {
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_in_magna_learned.sh bazel-bin/systems/controllers/franka_cartesian_osc_controller --input_mode=1 --lcm_url=udpm://239.255.76.95:7695?ttl=0";
+        host = "localhost";
+    }
+}
+
+group "perception" {
+    cmd "latent-encoder" {
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_learned_encoder.sh --lcm-url udpm://239.255.76.95:7695?ttl=0 --deploy /home/hienbui/git/lcs_learning/outputs/sim_belt_ablation_20260924/ckpt_decoded_only/deploy_demo/deploy.npz --ur-state-channel UR_STATE_SIM --state-match exact --params /home/hienbui/git/magna-deploy-learned-lcs/systems/parameters/round_belt_controller_params_learned_sim.yaml";
+        host = "localhost";
+    }
+}
+
+group "newton round-belt task" {
+    cmd "newton-round-belt-simulation" {
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_newton_sim.sh --lcm-url udpm://239.255.76.95:7695?ttl=0 --cameras --publish-point-cloud --publish-belt-state --perception-every 15 --board-params /home/hienbui/git/magna-deploy-learned-lcs/systems/parameters/round_belt_controller_params_learned_sim.yaml --publish-belt-mesh --viewer viser --render-every 20 --record --record-label learned";
+        host = "localhost";
+    }
+    cmd "round-belt-visualizer" {
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_in_magna_learned.sh bazel-bin/systems/visualization/magna_visualization --visualization_params_file=systems/parameters/assembly_visualization_params.yaml --assembly_controller_params_file=systems/parameters/round_belt_controller_params_learned_sim.yaml --lcm_url=udpm://239.255.76.95:7695?ttl=0";
+        host = "localhost";
+    }
+    cmd "round-belt-assembly-controller" {
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_in_magna_learned.sh bazel-bin/systems/controllers/run_round_belt_assembly_controller --assembly_controller_params=systems/parameters/round_belt_controller_params_learned_sim.yaml --lcm_url=udpm://239.255.76.95:7695?ttl=0 --local_lcm_url=udpm://239.255.76.95:7695?ttl=0";
+        host = "localhost";
+    }
+}
+
+group "debug" {
+    cmd "lcm-spy" {
+        exec = "/usr/bin/env LEARNED_LCM_URL=udpm://239.255.76.95:7695?ttl=0 /home/hienbui/git/magna_belt_simulation-main/procman/run_in_magna_learned.sh bazel-bin/lcmtypes/dair-lcm-spy";
+        host = "localhost";
+    }
+}
+
+script "run_learned_round_belt_sim" {
+    stop everything;
+    wait ms 1000;
+    start cmd "newton-round-belt-simulation";
+    wait ms 15000;
+    start group "simulation subsystems";
+    wait ms 2000;
+    start cmd "latent-encoder";
+    wait ms 3000;
+    start cmd "round-belt-visualizer";
+    start cmd "round-belt-assembly-controller";
+}
+
+script "end_experiment" {
+    stop group "simulation subsystems";
+    stop group "perception";
+    stop group "newton round-belt task";
+    stop group "debug";
+}

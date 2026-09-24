@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""End-to-end check of the LCS collector (no magna, no LCM).
+"""End-to-end check of the LCS collector.
 
-Runs a tiny collection (one episode per intent, in-process) into a temp dir and verifies every
-artefact: the ``.npz`` format, ``index.json``, the recordings and (if the ``lcs_learning`` venv
-exists) the real ``RoundBeltTupleDataset`` loader.
+Runs a tiny collection (one episode per intent) into a temp dir with the default ``osc`` backend
+(magna's OSC as a child process on a private LCM URL) and verifies every artefact: the ``.npz``
+format and tuple semantics, ``index.json``, the recordings and (if the ``lcs_learning`` venv
+exists) the real ``RoundBeltTupleDataset`` loader. C8 runs one ``--backend position`` episode.
 
 Run:
     uv run python scripts/checks/check_lcs_collector.py
     uv run python scripts/checks/check_lcs_collector.py --keep
+    uv run python scripts/checks/check_lcs_collector.py --backend position
 """
 
 from __future__ import annotations
@@ -49,13 +51,16 @@ from task_common.scene import make_builder
 from utils.viewer_patches import patch_viewer_shape_names, patch_viser_texture_material
 
 REPLAY_PORT = 18088
-RUNTIME_BUDGET_S = 240.0
+RUNTIME_BUDGET_S = 360.0
 C1_BUDGET_S = 180.0
+# A private multicast group so this check never disturbs a running magna stack.
+PRIVATE_LCM_URL = "udpm://239.255.76.85:7685?ttl=0"
+ACTION_TOL = 1e-9
 # PD tracking can overshoot the URDF's commanded limits by a hair; not a hard mechanical bound.
 FRANKA_LIMIT_TOL_RAD = 0.05
 # A UR dz this deep drags the 2F-85 fingers through the board plate without the guard.
 UNSAFE_DZ_MM = -15.0
-DEFAULT_START_STATE = sim_snapshot.DEFAULT_START_STATE_DIR / "pre_place_1.npz"
+START_STATES = cli.DEFAULT_START_STATES
 LCS_LEARNING_ROOT = Path("/home/hienbui/git/lcs_learning")
 LCS_LEARNING_VENV = LCS_LEARNING_ROOT / ".venv" / "bin" / "python"
 LOADER_SHAPES = {"curr_pc": [1800, 3], "curr_belt": [150, 3], "curr_prop": [40], "u": [12],
@@ -89,10 +94,11 @@ def build_model() -> newton.Model:
 
 
 def run_collect(intent: str, seed: int, out_dir: Path, start_state: Path, record: bool,
-                no_pcd: bool = False) -> dict:
+                no_pcd: bool = False, backend: str = "osc") -> dict:
     """One ``collect()`` call, one episode, one fixed intent (the collector has no cycle flag)."""
     argv = ["--episodes", "1", "--seed", str(seed), "--intents", intent, "--weights", "1",
-            "--out", str(out_dir), "--start-state", str(start_state)]
+            "--out", str(out_dir), "--start-state", str(start_state), "--backend", backend,
+            "--lcm-url", PRIVATE_LCM_URL]
     if record:
         argv.append("--record")
     if no_pcd:
@@ -106,16 +112,19 @@ def check_c0(ctx: SimpleNamespace) -> str:
     want = {"scene_directives": file_digest(SCENE_DIRECTIVES)["sha256"],
             "lcm_sim_params": file_digest(LCM_SIM_PARAMS)["sha256"]}
     snap = None
-    if DEFAULT_START_STATE.is_file():
-        candidate = sim_snapshot.load(DEFAULT_START_STATE)
+    path = START_STATES[ctx.backend]
+    if path.is_file():
+        candidate = sim_snapshot.load(path)
         got = {k: candidate.meta.get(k, {}).get("sha256") for k in want}
         if got == want:
-            snap, ctx.start_state = candidate, DEFAULT_START_STATE
-            detail = f"reused {DEFAULT_START_STATE} (scene digests match)"
+            snap, ctx.start_state = candidate, path
+            detail = f"reused {path} (scene digests match)"
     if snap is None:
-        out = ctx.tmp_root / "pre_place_1.npz"
+        out = ctx.tmp_root / path.name
         cmd = ["uv", "run", "python", str(REPO_ROOT / "scripts" / "lcs" / "make_start_state.py"),
                "--out", str(out)]
+        if ctx.backend == "osc":
+            cmd += ["--backend", "osc", "--lcm-url", PRIVATE_LCM_URL]
         proc = subprocess.run(cmd, cwd=REPO_ROOT, capture_output=True, text=True, timeout=180,
                               check=False)
         _require(proc.returncode == 0, f"make_start_state.py failed:\n{proc.stdout[-2000:]}\n"
@@ -135,13 +144,18 @@ def check_c1(ctx: SimpleNamespace) -> str:
     rows = []
     for i, intent in enumerate(pert.INTENTS):
         sub = ctx.tmp_root / f"collect_{intent}"
-        index = run_collect(intent, seed=0, out_dir=sub, start_state=ctx.start_state, record=True)
+        index = run_collect(intent, seed=0, out_dir=sub, start_state=ctx.start_state, record=True,
+                            backend=ctx.backend)
         row = index["episodes"][0]
         _require(row["status"] == "ok", f"{intent}: episode not ok: {row}")
         if header is None:
             header = {k: index[k] for k in
-                      ("args", "git", "start_state", "sample_period_s", "sample_steps",
-                       "thresholds", "ranges", "labels", "belt_tangent")}
+                      ("args", "git", "backend", "start_state", "sample_period_s",
+                       "sample_steps", "thresholds", "ranges", "labels", "belt_tangent")}
+        if ctx.backend == "osc":
+            _require("osc" in index.get("summary", {}), f"{intent}: summary has no 'osc'")
+            _require(not index["summary"]["osc_log_errors"],
+                     f"{intent}: OSC log errors {index['summary']['osc_log_errors']}")
         dst_name = f"episode_{i:04d}.npz"
         shutil.move(str(sub / row["file"]), str(run_dir / dst_name))
         row = {**row, "file": dst_name}
@@ -167,7 +181,7 @@ def check_c1(ctx: SimpleNamespace) -> str:
 
 @check("C2 per-file contents")
 def check_c2(ctx: SimpleNamespace) -> str:
-    period_us = round(lcs.SAMPLE_PERIOD_S * 1e6)
+    period_us = lcs.SAMPLE_PERIOD_US
     t_list, pcd_min, pcd_max = [], 10**9, 0
     lo, hi = ak.FrankaTip.lower - FRANKA_LIMIT_TOL_RAD, ak.FrankaTip.upper + FRANKA_LIMIT_TOL_RAD
     for row in ctx.rows:
@@ -198,17 +212,55 @@ def check_c2(ctx: SimpleNamespace) -> str:
             _require(bool(np.all((q_franka >= lo) & (q_franka <= hi))),
                      f"{row['file']}: state[:, :7] outside Franka joint limits "
                      f"+-{FRANKA_LIMIT_TOL_RAD} rad")
-            actions = np.asarray(data["actions"])
-            _require(np.all(actions[-1] == 0.0), f"{row['file']}: actions[-1] not all zero")
-            for key in ("sim_ee_cmd_franka", "sim_ee_cmd_ur"):
-                _require(np.isfinite(np.asarray(data[key])).all(),
-                         f"{row['file']}: {key} has non-finite values")
+            _check_tuples(row["file"], data, ctx.backend)
             counts = [int(np.asarray(frame).shape[0]) for frame in data["pcd"]]
             _require(min(counts) >= 200, f"{row['file']}: min pcd points {min(counts)} < 200")
             _require(max(counts) <= 20000, f"{row['file']}: max pcd points {max(counts)} > 20000")
             pcd_min, pcd_max = min(pcd_min, min(counts)), max(pcd_max, max(counts))
     ctx.t_list, ctx.t_range, ctx.pcd_range = t_list, (min(t_list), max(t_list)), (pcd_min, pcd_max)
     return f"T in {ctx.t_range}, pcd points in {ctx.pcd_range}"
+
+
+def _check_tuples(name: str, data, backend: str) -> None:
+    """Sample spacing, state pose block and action semantics of one file."""
+    state, actions = np.asarray(data["state"]), np.asarray(data["actions"])
+    steps = np.diff(np.asarray(data["sim_step"]))
+    _require(np.all(steps == lcs.SAMPLE_STEPS),
+             f"{name}: sim_step diffs {sorted(set(steps.tolist()))} != {lcs.SAMPLE_STEPS}")
+    meta = json.loads(str(data["sim_meta"]))
+    _require(meta.get("backend") == backend, f"{name}: sim_meta backend {meta.get('backend')!r}")
+    if backend == "position":
+        _require(np.all(actions[-1] == 0.0), f"{name}: actions[-1] not all zero")
+        _require(np.array_equal(state[:, 26:33], data["sim_ee_cmd_franka"]),
+                 f"{name}: state pose block != sim_ee_cmd_franka")
+        for key in ("sim_ee_cmd_franka", "sim_ee_cmd_ur"):
+            _require(np.isfinite(np.asarray(data[key])).all(), f"{name}: {key} non-finite")
+        return
+    _require(np.array_equal(state[:, 26:33], data["sim_ee_franka"]),
+             f"{name}: state[:, 26:33] != sim_ee_franka")
+    _require(np.array_equal(state[:, 33:40], data["sim_ee_ur"]),
+             f"{name}: state[:, 33:40] != sim_ee_ur")
+    definition = meta.get("lcs_format", {}).get("action_definition")
+    _require(definition == "knot1_minus_measured", f"{name}: action_definition {definition!r}")
+    k1 = np.asarray(data["sim_cmd_knot1_franka"])
+    err = float(np.abs(actions[:, :3] - (k1[:, :3] - state[:, 26:29])).max())
+    _require(err <= ACTION_TOL, f"{name}: actions[:, :3] != knot1 - measured ({err:.2e})")
+    ur1 = np.asarray(data["sim_cmd_ur_t1"])
+    err = float(np.abs(actions[:, 3:6] - (ur1[:, :3] - state[:, 33:36])).max())
+    _require(err <= ACTION_TOL, f"{name}: actions[:, 3:6] != UR line(t+dt) - measured ({err:.2e})")
+    _require(np.asarray(data["sim_cmd_knot0_franka"]).shape == k1.shape,
+             f"{name}: sim_cmd_knot0_franka missing its (T, 7) shape")
+    _require(np.array_equal(data["sim_render_step"], data["sim_step"]),
+             f"{name}: sim_render_step != sim_step")
+    _require(np.asarray(data["sim_cmd_knots_franka"]).shape[1:] == (7, 7),
+             f"{name}: sim_cmd_knots_franka shape {np.asarray(data['sim_cmd_knots_franka']).shape}")
+    for key in ("sim_cmd_knots_franka", "sim_cmd_ur_t", "sim_cmd_ur_t1", "sim_tracking_err_mm",
+                "sim_franka_tip_clearance_mm"):
+        _require(np.isfinite(np.asarray(data[key], dtype=np.float64)).all(),
+                 f"{name}: {key} non-finite")
+    utime = np.asarray(data["utime"])
+    _require(np.array_equal(utime, np.asarray(data["sim_osc_utime"])),
+             f"{name}: utime != sim_osc_utime")
 
 
 @check("C3 index")
@@ -272,7 +324,7 @@ def check_c5(ctx: SimpleNamespace) -> str:
     _require(row1["intent"] == intent, f"rows[0] intent {row1['intent']!r} != {intent!r}")
     out2 = ctx.tmp_root / "run2"
     index2 = run_collect(intent, seed=0, out_dir=out2, start_state=ctx.start_state, record=False,
-                         no_pcd=True)
+                         no_pcd=True, backend=ctx.backend)
     row2 = index2["episodes"][0]
     _require(row2["status"] == "ok", f"rerun: episode not ok: {row2}")
     _require(row2["perturbation"] == row1["perturbation"],
@@ -338,14 +390,15 @@ def check_c7(ctx: SimpleNamespace) -> str:
                      f"{per_frame.min():.3f} mm")
         lows.append(low)
 
-    unsafe = dict(pert.DEFAULT_RANGES)
+    unsafe = dict(pert.ranges_for_backend(ctx.backend))
     unsafe["under"] = dataclasses.replace(
         unsafe["under"], ur_dz_mm=pert.Range(UNSAFE_DZ_MM, UNSAFE_DZ_MM),
         ur_dxy_mm=pert.Range(0.0, 0.0), ur_tilt_deg=pert.Range(0.0, 0.0),
         franka_dxyz_mm=pert.Range(0.0, 0.0), franka_tilt_deg=pert.Range(0.0, 0.0))
     args = cli.create_parser().parse_args(
         ["--episodes", "1", "--seed", "0", "--intents", "under", "--weights", "1", "--no-pcd",
-         "--out", str(ctx.tmp_root / "guard"), "--start-state", str(ctx.start_state)])
+         "--out", str(ctx.tmp_root / "guard"), "--start-state", str(ctx.start_state),
+         "--backend", ctx.backend, "--lcm-url", PRIVATE_LCM_URL])
     row = cli.collect(args, ranges=unsafe)["episodes"][0]
     _require(row["status"] == "ok", f"guard episode not ok: {row}")
     clamp = row["clamp"]
@@ -365,10 +418,29 @@ def check_c7(ctx: SimpleNamespace) -> str:
             f"lifted {row['clamp_lift_mm']:.1f} mm -> {row['min_board_clearance_mm']:.2f} mm")
 
 
+@check("C8 position backend (legacy path)")
+def check_c8(ctx: SimpleNamespace) -> str:
+    out = ctx.tmp_root / "position"
+    index = run_collect(pert.INTENTS[0], seed=0, out_dir=out, start_state=START_STATES["position"],
+                        record=False, backend="position")
+    row = index["episodes"][0]
+    _require(row["status"] == "ok", f"position episode not ok: {row}")
+    path = out / row["file"]
+    summary = lcs.validate_episode(path, period_us=lcs.SAMPLE_PERIOD_US)
+    with np.load(path, allow_pickle=True) as data:
+        _check_tuples(row["file"], data, "position")
+        source = json.loads(str(data["sim_meta"]))["ee_pose_source"]
+    _require(source == "commanded Cartesian target", f"ee_pose_source {source!r}")
+    return (f"{row['intent']}->{row['outcome']}, T {summary['T']}, period "
+            f"{summary['period_us']} us, commanded-target state, zero last action")
+
+
 def main() -> int:
     import argparse
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--keep", action="store_true", help="keep the temp dir")
+    parser.add_argument("--backend", choices=cli.BACKENDS, default="osc",
+                        help="backend of C1-C7 (C8 always runs position)")
     args = parser.parse_args()
 
     from loguru import logger
@@ -377,7 +449,7 @@ def main() -> int:
 
     t0 = time.perf_counter()
     tmp_root = Path(tempfile.mkdtemp(prefix="check_lcs_collector_"))
-    ctx = SimpleNamespace(tmp_root=tmp_root)
+    ctx = SimpleNamespace(tmp_root=tmp_root, backend=args.backend)
     exit_code = 0
     for name, fn in CHECKS:
         try:

@@ -20,6 +20,10 @@ from round_belt_task.arm_kinematics import (
 from round_belt_task.waypoints import Waypoint
 
 INTENTS = ("engaged", "over", "under", "slanted")
+# Aim for outcome ``slanted`` with a given high side (``outcome.slant_metrics``); osc only.
+# ur_high / roll+ / roll- found infeasible or < 50 % slanted (docs/lcs-data-collection.md 5.3).
+SLANT_VARIANTS = ("slanted_franka_high_steep",)
+ALL_INTENTS = INTENTS + SLANT_VARIANTS
 PERTURBED_LABELS = ("pre_place_2", "place_3")
 TANGENT_LABEL = "pre_place_2"
 
@@ -43,6 +47,7 @@ class ClassRanges:
     ur_tilt_sign_random: bool = False
     franka_dxyz_mm: Range = Range(-2.0, 2.0)
     franka_tilt_deg: Range = Range(-3.0, 3.0)
+    franka_dz_mm: Range | None = None  # None: z drawn from franka_dxyz_mm
 
 
 # Tuned on the sim (RUN-STATE PKG-20260922-lcs-collector): engaged only for UR dz ~1..5 mm, and a
@@ -57,6 +62,26 @@ DEFAULT_RANGES: dict[str, ClassRanges] = {
     "slanted": ClassRanges(ur_dz_mm=Range(2.0, 4.0), ur_tilt_deg=Range(3.5, 5.5),
                            ur_tilt_sign_random=True),
 }
+
+# The Franka latches ~5 mm short of place_3: engaged needs a + tilt, slanted a - tilt + low dz.
+OSC_RANGES: dict[str, ClassRanges] = {
+    **DEFAULT_RANGES,
+    "engaged": ClassRanges(ur_dz_mm=Range(1.5, 4.0), ur_tilt_deg=Range(2.5, 5.0)),
+    "under": ClassRanges(ur_dz_mm=Range(2.0, 4.0), ur_dxy_mm=Range(-2.0, 2.0),
+                         ur_tilt_deg=Range(10.0, 15.0)),
+    "slanted": ClassRanges(ur_dz_mm=Range(-2.0, -0.5), ur_tilt_deg=Range(-5.5, -4.5)),
+    # Raising the Franka end steepens the franka_high slant (median 13.8 vs 12.6 deg).
+    "slanted_franka_high_steep": ClassRanges(ur_dz_mm=Range(-2.0, -1.0),
+                                             ur_tilt_deg=Range(-5.5, -4.5),
+                                             franka_dz_mm=Range(3.5, 6.5)),
+}
+BACKEND_RANGES = {"position": DEFAULT_RANGES, "osc": OSC_RANGES}
+
+
+def ranges_for_backend(name: str) -> dict[str, ClassRanges]:
+    if name not in BACKEND_RANGES:
+        raise KeyError(f"backend {name!r} not in {tuple(BACKEND_RANGES)}")
+    return BACKEND_RANGES[name]
 
 
 @dataclass(frozen=True)
@@ -89,7 +114,9 @@ def sample(rng: np.random.Generator, intent: str,
     tilt = r.ur_tilt_deg.sample(rng)
     if r.ur_tilt_sign_random and rng.random() < 0.5:
         tilt = -tilt
-    franka = np.array([r.franka_dxyz_mm.sample(rng) for _ in range(3)])
+    franka_z = r.franka_dxyz_mm if r.franka_dz_mm is None else r.franka_dz_mm
+    franka = np.array([r.franka_dxyz_mm.sample(rng), r.franka_dxyz_mm.sample(rng),
+                       franka_z.sample(rng)])
     franka_tilt = r.franka_tilt_deg.sample(rng)
     return Perturbation(intent=intent, ur_dpos_m=np.array([dx, dy, dz]) * 1e-3,
                         ur_tilt_deg=tilt, franka_dpos_m=franka * 1e-3,

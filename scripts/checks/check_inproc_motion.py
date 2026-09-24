@@ -40,8 +40,9 @@ from round_belt_task.outcome import belt_in_pulley_frame
 from round_belt_task.waypoints import MAGNA_PARAMS_SIM_YAML, load_pre_mpc_segment
 from task_common import sim_snapshot
 
-LABELS = ["pre_pick_0", "pre_pick_1", "pick", "post_pick", "pre_place_1", "pre_place_2",
-          "place_3"]
+FIRST_LABEL, LAST_LABEL = "pre_pick_0", "place_3"
+# magna's yaml may repeat waypoints (post_pick ends the pick and starts the place segment).
+PLACE_ORDER = ("pre_place_1", "pre_place_2", "place_3")
 # magna round-belt-scene.dmd.yaml board weld, typed here independently of the scene.
 PLANNING_BOARD_XYZ = (0.64483928, -0.19718233, 0.01076393)
 PLANNING_BOARD_RPY_DEG = (-3.32822058e-01, -6.87450103e-02, 8.95207485e01)
@@ -79,9 +80,12 @@ def _pose_err(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
 
 @check("M0 waypoints")
 def check_m0(ctx: SimpleNamespace) -> str:
-    wps = load_pre_mpc_segment(ctx.params, first=LABELS[0], last=LABELS[-1])
+    ctx.wps = wps = load_pre_mpc_segment(ctx.params, first=FIRST_LABEL, last=LAST_LABEL)
     ctx.waypoints = {w.label: w for w in wps}
-    _require([w.label for w in wps] == LABELS, f"labels {[w.label for w in wps]} != {LABELS}")
+    labels = [w.label for w in wps]
+    _require(labels[0] == FIRST_LABEL and labels[-1] == LAST_LABEL, f"labels {labels}")
+    at = [labels.index(k) if k in labels else -1 for k in PLACE_ORDER]
+    _require(min(at) >= 0 and at == sorted(at), f"{PLACE_ORDER} not in order in {labels}")
     rot = ak.rpy_to_mat3(np.radians(PLANNING_BOARD_RPY_DEG))
     want = np.asarray(PLANNING_BOARD_XYZ) + rot @ np.asarray(PRE_PLACE_1_BOARD)
     got = ctx.waypoints["pre_place_1"].franka_pos
@@ -103,8 +107,9 @@ def check_m0(ctx: SimpleNamespace) -> str:
     for label, key, value in expected:
         _require(getattr(w[label], key) == value,
                  f"{label}.{key} {getattr(w[label], key)} != {value}")
-    return (f"7 waypoints, pre_place_1 franka ({', '.join(f'{v:.6f}' for v in got)}); "
-            f"commands 40 mm / 63 / 0 mm + 255 / 191, pick dwell 2.0 s")
+    return (f"{len(wps)} waypoints ({', '.join(labels)}), pre_place_1 franka "
+            f"({', '.join(f'{v:.6f}' for v in got)}); commands 40 mm / 63 / 0 mm + 255 / 191, "
+            f"pick dwell 2.0 s")
 
 
 @check("M1 FK vs model")
@@ -129,8 +134,8 @@ def check_m2(ctx: SimpleNamespace) -> str:
     sim = ctx.sim
     worst = [0.0, 0.0]
     q = dict(zip(("franka", "ur"), sim.arm_targets()))
-    for label in LABELS:
-        wp_ = ctx.waypoints[label]
+    for wp_ in ctx.wps:
+        label = wp_.label
         for arm, chain, target in (("franka", ak.FrankaTip, wp_.franka_mat()),
                                    ("ur", ak.UrTracking, wp_.ur_mat())):
             q[arm] = ak.ik(chain, target, q[arm], max_iters=200)[0]
@@ -139,14 +144,15 @@ def check_m2(ctx: SimpleNamespace) -> str:
                      f"{label} {arm}: fk(ik) off by {p:.3g} m / {r:.3g} rad")
             worst = [max(worst[0], p), max(worst[1], r)]
     try:
-        ctx.pick_traj = traj = sim.plan([ctx.waypoints[k] for k in LABELS[:5]])
+        pick = [w.label for w in ctx.wps].index(PICK_LAST) + 1
+        ctx.pick_traj = traj = sim.plan(ctx.wps[:pick])
     except MotionError as exc:
         raise AssertionError(f"nominal trajectory: {exc}") from exc
     jump = max(traj.stats["franka"]["jump_max_rad"], traj.stats["ur"]["jump_max_rad"])
     _require(jump <= M2_JUMP_TOL, f"max per-step joint jump {jump:.4f} rad > {M2_JUMP_TOL}")
     s = traj.stats
-    return (f"14 round trips <= {worst[0] * 1e3:.3f} mm / {worst[1]:.1e} rad; nominal "
-            f"{len(traj)} steps, jump {jump:.4f} rad, iters mean/max franka "
+    return (f"{2 * len(ctx.wps)} round trips <= {worst[0] * 1e3:.3f} mm / {worst[1]:.1e} rad; "
+            f"nominal {len(traj)} steps, jump {jump:.4f} rad, iters mean/max franka "
             f"{s['franka']['iters_mean']:.2f}/{s['franka']['iters_max']} ur "
             f"{s['ur']['iters_mean']:.2f}/{s['ur']['iters_max']}")
 

@@ -63,6 +63,12 @@ class LcmChannels:
     tracking_trajectory_actor_channel: str = "TARGET_CARTESIAN_POSE_TRAJECTORY"
     ur_tracking_trajectory_actor_channel: str = "UR_TARGET_CARTESIAN_POSE_TRAJECTORY"
     ur_target_spatial_pose_channel: str = "UR_TARGET_SPATIAL_POSE"
+    # Perception inputs of the latent encoder node (hardware names/types); the sim publishes
+    # them only with --publish-point-cloud / --publish-belt-state.
+    point_cloud_channel: str = "POINT_CLOUD_CROPPED"
+    round_belt_state_channel: str = "RoundBeltState"
+    # Hardware UR state; the sim keeps publishing ur_state_channel_sim.
+    ur_state_channel: str = "UR_STATE"
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> LcmChannels:

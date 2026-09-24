@@ -593,7 +593,7 @@ def check_channel_override(ctx: SimpleNamespace) -> None:
     if not MAGNA_LCM_CHANNELS_YAML.is_file():
         raise Skipped(f"{MAGNA_LCM_CHANNELS_YAML} not found")
     n_fields = len(fields(LcmChannels))
-    _require(n_fields == 16, f"LcmChannels has {n_fields} fields, expected 16")
+    _require(n_fields == 19, f"LcmChannels has {n_fields} fields, expected 19")
     overridden = LcmChannels.from_yaml(MAGNA_LCM_CHANNELS_YAML)
     _require(overridden == LcmChannels(), f"LcmChannels.from_yaml(magna) = {overridden} != "
               f"defaults {LcmChannels()}")

@@ -312,11 +312,15 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
             **self._recording_meta(),
         }
 
-    def _start_recording(self, root: Path) -> None:
+    def _start_recording(self, root: Path, extra_meta: dict | None = None) -> None:
         state_every = int(getattr(self.args, "record_state_every", DEFAULT_STATE_EVERY))
         chunk_steps = int(getattr(self.args, "record_chunk_steps", DEFAULT_CHUNK_STEPS))
         label = getattr(self.args, "record_label", None) or "round_belt"
         meta = self.recorder_meta()
+        clash = sorted(set(extra_meta or {}) & set(meta))
+        if clash:
+            raise ValueError(f"extra recording meta keys {clash} would replace existing keys")
+        meta.update(extra_meta or {})
         self.recorder = recorder = RunRecorder(
             root, label, meta, state_every=state_every, chunk_steps=chunk_steps
         )

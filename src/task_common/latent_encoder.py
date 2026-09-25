@@ -2,7 +2,8 @@
 
 ``LatentEncoder`` reproduces ``lcs_learning``'s ``PointNetObsAutoEncoder.encode`` from an exported
 ``deploy.npz`` (BatchNorm folded, float32 inside); ``LearnedLcs`` is the trained PGD forward step
-(float64); ``DemoGoals`` loads the harness's ``demo_goals.npz``. numpy + LCM types only.
+(float64); ``DemoGoals`` loads the harness's ``demo_goals.npz``; ``LatentDecoder`` maps a latent back to
+belt points (``decoder.npz``, exporter ``--decoder-out``). numpy + LCM types only.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ LATENT_STATE_CHANNEL = "LATENT_STATE"
 LATENT_METADATA_NAME = "latent_encoder"
 LATENT_BLOCK_NAMES = ("latent", "ee_pose_franka", "ee_pose_ur", "proprio")
 _ENC = "encoder__"
+_DEC = "decoder__"
 
 
 def resize_points_ordered(xyz, n_points: int) -> np.ndarray:
@@ -122,6 +124,41 @@ class LatentEncoder:
         prop = np.stack([p for p, _ in ins])
         belt = np.stack([b for _, b in ins])
         return self._fuse(self.pc_global(pcs), prop, belt).astype(np.float64)
+
+
+class LatentDecoder:
+    """``dec_mlp`` + ``dec_pc`` of the checkpoint: ``z (16,) -> belt points (150, 3)``, float32."""
+
+    def __init__(self, weights: dict) -> None:
+        self._layers = [
+            (weights[f"{_DEC}{mlp}__{i}__weight"].T.astype(np.float32),
+             weights[f"{_DEC}{mlp}__{i}__bias"].astype(np.float32))
+            for mlp in ("dec_mlp", "dec_pc") for i in (0, 2)]
+        self.num_points = int(_scalar(weights["reconstruction_num_points"]))
+        self.latent_dim = int(self._layers[0][0].shape[0])
+        self.checkpoint_sha256 = str(_scalar(weights["checkpoint_sha256"]))
+        if self._layers[-1][1].shape[0] != 3 * self.num_points:
+            raise ValueError(f"dec_pc output {self._layers[-1][1].shape[0]} != 3 x "
+                             f"{self.num_points} points")
+
+    @classmethod
+    def load(cls, decoder_npz) -> LatentDecoder:
+        return cls(_load_npz(decoder_npz))
+
+    def decode_batch(self, z) -> np.ndarray:
+        """``(B, latent_dim)`` -> ``(B, num_points, 3)`` float32."""
+        x = np.asarray(z, dtype=np.float32)
+        if x.ndim != 2 or x.shape[1] != self.latent_dim:
+            raise ValueError(f"z shape {x.shape}, expected (B, {self.latent_dim})")
+        # ReLU after every layer except the last (dec_mlp ends in a ReLU).
+        for i, (w, b) in enumerate(self._layers):
+            x = x @ w + b
+            if i < len(self._layers) - 1:
+                x = np.maximum(x, 0.0)
+        return x.reshape(-1, self.num_points, 3)
+
+    def decode(self, z) -> np.ndarray:
+        return self.decode_batch(np.asarray(z).reshape(1, -1))[0]
 
 
 class LearnedLcs:

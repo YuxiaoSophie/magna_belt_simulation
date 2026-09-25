@@ -101,6 +101,7 @@ my_projects/
 │   │   ├── check_robotiq_width.py           # Robotiq command byte -> jaw width calibration
 │   │   ├── check_recording.py               # --record output is complete and bounded overhead
 │   │   ├── check_replay_viewer.py           # headless check of the replay app (ReplayApp)
+│   │   ├── check_replay_learned_mpc.py      # headless check of the learned-MPC replay layers
 │   │   ├── check_sim_snapshot.py            # sim state/control snapshot restore fidelity (LCS)
 │   │   ├── check_inproc_motion.py           # in-process waypoint motion: FK/IK, pick, place (LCS)
 │   │   ├── check_commander.py               # emulated magna waypoint/UR-line commander (LCS)
@@ -127,7 +128,8 @@ my_projects/
 │   ├── lcm-simulation.md           # the LCM contract, running, CLI, tuning, divergences
 │   ├── lcs-dataset.md              # the LCS .npz episode format: state/action layout, point clouds
 │   ├── lcs-data-collection.md      # how to collect LCS episodes and hand them to lcs_learning
-│   └── learned-mpc.md              # learned latent-LCS MPC: contract, how-to, 2026-09-24 results
+│   ├── learned-mpc.md              # learned latent-LCS MPC: current status, day-by-day log
+│   └── learned-mpc-reference.md    # its contract/params/how-to reference
 ├── external/newton/                # Newton source (git submodule)
 └── external/task_board_urdf/       # DAIRLab task-board meshes (submodule); not used by the current code
 ```
@@ -156,6 +158,11 @@ uv run python scripts/round_belt_lcm_simulation.py --record
 
 ```bash
 uv run python scripts/replay_viewer.py
+# a learned-MPC eval recording with its plan/target layers (docs/learned-mpc-reference.md §5.10)
+uv run python scripts/replay_viewer.py \
+    --recordings data/lcs/mpc_eval/20260924-223112-replayset-learned/set1/recordings \
+    --run episode_gv_01_0 --port 8082 \
+    --learned-layers planned_belt,planned_ee,actions,target_belt
 ```
 
 ### Collect LCS data
@@ -188,6 +195,8 @@ uv run python scripts/lcs/make_demo_goals.py --episode data/lcs/demo/demo_episod
     --deploy <deploy_demo>/deploy.npz --out data/lcs/demo/demo_goals.npz
 
 # build grasp-varied start states, build the magna worktree (bazel), run the eval harness
+# (its learned defaults: the worktree's round_belt_controller_params_learned_eval.yaml +
+# deploy_v2_flat_pp2 + data/lcs/demo_flat_pp2/demo_goals.npz)
 uv run python scripts/lcs/make_grasp_variants.py --probe --set set1
 uv run python scripts/lcs/make_grasp_variants.py --set set1 --count 12 --seed 0
 uv run python scripts/lcs/eval_learned_mpc.py --mode learned --repeats 2 \
@@ -195,12 +204,12 @@ uv run python scripts/lcs/eval_learned_mpc.py --mode learned --repeats 2 \
     --lcm-url udpm://239.255.76.90:7690?ttl=0
 ```
 
-Full contract (`LATENT_STATE`, the learned LCS yaml, the `learned_mpc:` params block, the u/knot
-semantics, how to read `index.json`) and the 2026-09-24 evaluation — **negative: the tuned
-learned MPC does not beat the waypoint baseline** — are in `docs/learned-mpc.md`; the procman
+Current status and the day-by-day experiment log (best result so far: on par with the waypoint
+baseline, not a demonstrated win — see "Current status") are in `docs/learned-mpc.md`. Full
+contract (`LATENT_STATE`, the learned LCS yaml, the `learned_mpc:` params block, the u/knot
+semantics, how to read `index.json`) is in `docs/learned-mpc-reference.md`; the procman
 deployment against the free-running sim is `docs/lcm-simulation.md` §3. Every process here needs
-its own private LCM URL (never magna's shared group); `docs/learned-mpc.md` §9 lists the ones
-used in the 2026-09-24 run.
+its own private LCM URL (never magna's shared group; see `docs/learned-mpc-reference.md` §6).
 
 ---
 

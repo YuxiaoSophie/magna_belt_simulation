@@ -35,6 +35,7 @@ from task_common.latent_encoder import LATENT_STATE_CHANNEL
 from task_common.lcm_contract import LcmChannels
 
 UR_BASE_JOINT = "base_link-base_fixed_joint"
+MAX_TARGET_QUEUE = 2000
 
 
 def ur_base_world() -> np.ndarray:
@@ -67,6 +68,10 @@ class ControllerBridge(OscBridge):
                  alive_fn=None, ur_state_out_channel: str | None = None) -> None:
         super().__init__(url, channels, timeout_s=timeout_s, alive_fn=alive_fn)
         c = self.channels
+        # True: controller plans + LEARNED_MPC_DEBUG queue for take_targets (the recorder).
+        self.record_targets = False
+        self._targets: list[tuple[str, object]] = []
+        self._targets_warned = False
         self._ur_state_channel = c.ur_state_channel_sim
         # The controller subscribes the hardware name, not the sim's.
         self.ur_state_out_channel = ur_state_out_channel or c.ur_state_channel
@@ -77,7 +82,8 @@ class ControllerBridge(OscBridge):
         for channel, handler in ((self._traj_channel, self._on_franka_traj),
                                  (self._ur_traj_channel, self._on_ur_traj),
                                  (c.franka_hand_input_channel, self._on_hand),
-                                 (c.robotiq_command_channel, self._on_robotiq)):
+                                 (c.robotiq_command_channel, self._on_robotiq),
+                                 (c.learned_mpc_debug_channel, self._on_debug)):
             self.lc.subscribe(channel, handler)
             self.subscribed.append(channel)
         self._held_state = None
@@ -96,6 +102,8 @@ class ControllerBridge(OscBridge):
         self.pair_mismatch = 0
         self.undecodable = 0
         self.empty_trajs = 0
+        self.debug_msgs: list[tuple[float, object]] = []  # (wall, LEARNED_MPC_DEBUG msg)
+        self._targets = []
 
     # --- out ---------------------------------------------------------------------------------
 
@@ -145,11 +153,29 @@ class ControllerBridge(OscBridge):
 
     # --- in ----------------------------------------------------------------------------------
 
-    def _decode_traj(self, data: bytes):
+    def _queue_target(self, channel: str, msg) -> None:
+        if not self.record_targets:
+            return
+        if len(self._targets) >= MAX_TARGET_QUEUE:
+            if not self._targets_warned:
+                logger.warning(f"[CTRL] target queue over {MAX_TARGET_QUEUE} messages (is "
+                               "take_targets called?); dropping the oldest")
+                self._targets_warned = True
+            del self._targets[0]
+        self._targets.append((channel, msg))
+
+    def take_targets(self) -> list[tuple[str, object]]:
+        """Controller plan/debug messages decoded since the last call, in arrival order."""
+        targets, self._targets = self._targets, []
+        return targets
+
+    def _decode_traj(self, data: bytes, channel: str | None = None):
         try:
             msg = lcmt_timestamped_saved_traj.decode(data)
             if msg.saved_traj.metadata.name == METADATA_NAME:
                 return None  # our own hold trajectory looping back
+            if channel is not None:
+                self._queue_target(channel, msg)
             if not msg.saved_traj.trajectories:
                 self.empty_trajs += 1  # the controller's output before its first plan
                 return None
@@ -160,14 +186,14 @@ class ControllerBridge(OscBridge):
             return None
 
     def _on_franka_traj(self, channel: str, data: bytes) -> None:
-        got = self._decode_traj(data)
+        got = self._decode_traj(data, channel)
         if got is not None:
             msg, pos, quat, times = got
             self.franka_trajs.append(FrankaTraj(time.perf_counter(), int(msg.utime), pos, quat,
                                                 times))
 
     def _on_ur_traj(self, channel: str, data: bytes) -> None:
-        got = self._decode_traj(data)
+        got = self._decode_traj(data, channel)
         if got is None:
             return
         msg, pos, quat, times = got
@@ -179,6 +205,15 @@ class ControllerBridge(OscBridge):
                       t0=float(times[0]), p1=world[1][:3, 3].copy(),
                       q1=mat3_to_quat(world[1][:3, :3]), t1=float(times[1]))
         self.ur_lines.append(UrLineMsg(time.perf_counter(), int(msg.utime), line, pos, quat))
+
+    def _on_debug(self, channel: str, data: bytes) -> None:
+        try:
+            msg = lcmt_timestamped_saved_traj.decode(data)
+        except ValueError:
+            self.undecodable += 1
+            return
+        self.debug_msgs.append((time.perf_counter(), msg))
+        self._queue_target(channel, msg)
 
     def _on_hand(self, channel: str, data: bytes) -> None:
         try:
@@ -229,6 +264,7 @@ class ControllerBridge(OscBridge):
                 "hand_commands": len(self.hand_commands),
                 "robotiq_commands": len(self.robotiq_commands),
                 "latents_sent": len(self.sent_latents), "pair_mismatch": self.pair_mismatch,
+                "learned_mpc_debug": len(self.debug_msgs),
                 "undecodable": self.undecodable, "empty_trajs": self.empty_trajs,
                 "traj_after_latent_ms": {
                     "n": len(lat), "mean": float(np.mean(lat)) if lat else math.nan,

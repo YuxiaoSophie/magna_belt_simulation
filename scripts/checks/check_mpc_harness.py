@@ -3,7 +3,8 @@
 
 H0 OSC + assembly controller launch on a private URL; H1 a baseline episode (markers, UR line
 frame, tracking, state/utime layout); H2 a learned episode (``LATENT_STATE`` cadence and bit-exact
-latents, plans answering each latent inside the LCS input bounds); H3 two grasp variants
+latents, plans answering each latent inside the LCS input bounds, recorded UR action == u0 on
+fresh exact-dt lines); H3 two grasp variants
 (``[SKIP]`` without the set); H4 alignment metrics on the demo itself (``[SKIP]`` without it);
 H5 dataset compatibility; H6 hygiene. H1-H3 run the harness as a subprocess while this process
 listens on the same private URL.
@@ -20,6 +21,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -47,6 +49,7 @@ from check_lcs_collector import (
     LOADER_SHAPES,
     Skip,
 )
+from private_url import pgrep_others, url_port
 
 from dairlib import lcmt_robot_output, lcmt_timestamped_saved_traj
 from round_belt_task.arm_kinematics import UrTracking
@@ -76,10 +79,11 @@ from task_common.magna_process import (
 from task_common.osc_process import OscProcess
 
 PRIVATE_LCM_URL = "udpm://239.255.76.89:7689?ttl=0"
-PRIVATE_PORT, SHARED_PORT = "7689", "7667"
+SHARED_PORT = "7667"
 MAIN_MAGNA = Path("/home/hienbui/git/magna")
 VARIANT_SET = sim_snapshot.DEFAULT_START_STATE_DIR / "grasp_variants" / "set1"
 DEMO_EPISODE = REPO_ROOT / "data" / "lcs" / "demo" / "demo_episode.npz"
+DEMO_GOALS = REPO_ROOT / "data" / "lcs" / "demo" / "demo_goals.npz"  # stages = DEMO_EPISODE 0, -1
 OSC_ARGS = ("--input_mode=1", "--osc_debug_level=info")
 TICK_S = lcs.SIM_DT_S
 UR_KNOT0_TOL_MM = 0.5
@@ -89,6 +93,12 @@ BOUND_TOL, UR_BOUND_TOL = 1e-9, 1e-6
 ACTION_TOL = 1e-9
 RUN_TIMEOUT_S = 300.0
 H2_MAX_EPISODE_S = 3.0
+H2_V2_DEPLOY = Path("/home/hienbui/git/lcs_learning/outputs/sim_belt_v2_20260925/"
+                    "deploy_v2_decoded_only/deploy.npz")
+# Archived on purpose: the live yaml's first solves exceed the 75 ms latent period.
+H2_V2_PARAMS = Path("systems/parameters/learned_archive/2026-09-24/learned_tuning/"
+                    "round_belt_controller_params_learned_eval_v2.yaml")
+H2_V2_GOALS = REPO_ROOT / "data" / "lcs" / "demo" / "v2" / "demo_goals.npz"
 RUNTIME_BUDGET_S = 480.0
 FRANKA_TRAJ = "TARGET_CARTESIAN_POSE_TRAJECTORY"
 UR_TRAJ = "UR_TARGET_CARTESIAN_POSE_TRAJECTORY"
@@ -243,20 +253,20 @@ def check_h0(ctx: SimpleNamespace) -> str:
         time.sleep(0.5)
         ports = {pid: _ports_of(pid) for pid in (osc.pid, ctrl.pid)}
         for pid, got in ports.items():
-            _require(any(p.endswith(f":{PRIVATE_PORT}") for p in got),
-                     f"pid {pid} not bound to {PRIVATE_PORT}: {got}")
+            _require(any(p.endswith(f":{ctx.port}") for p in got),
+                     f"pid {pid} not bound to {ctx.port}: {got}")
             _require(not any(p.endswith(f":{SHARED_PORT}") for p in got),
                      f"pid {pid} bound to the shared port: {got}")
-        on_port = _pids_on(PRIVATE_PORT)
+        on_port = _pids_on(ctx.port)
         _require(on_port <= {osc.pid, ctrl.pid, os.getpid()},
-                 f"foreign pids on {PRIVATE_PORT}: {on_port - {osc.pid, ctrl.pid}}")
+                 f"foreign pids on {ctx.port}: {on_port - {osc.pid, ctrl.pid}}")
         argv = " ".join(ctrl.argv)
         _require(f"--lcm_url={ctx.lcm_url}" in argv and f"--local_lcm_url={ctx.lcm_url}" in argv,
                  f"controller argv {argv}")
     finally:
         codes = (ctrl.stop(), osc.stop())
     return (f"OSC pid {ctx.pids[-2]} + controller pid {ctx.pids[-1]} (started in {started:.2f} s)"
-            f"; UDP {ports}; only ours on :{PRIVATE_PORT}; stopped by pid, exit codes {codes}")
+            f"; UDP {ports}; only ours on :{ctx.port}; stopped by pid, exit codes {codes}")
 
 
 @check("H1 baseline episode")
@@ -309,12 +319,15 @@ def check_h1(ctx: SimpleNamespace) -> str:
 
 @check("H2 latent path")
 def check_h2(ctx: SimpleNamespace) -> str:
-    deploy = harness.DEFAULT_DEPLOY
-    if not deploy.is_file():
-        deploy = harness.DEPLOY_ROOT / "deploy" / "deploy.npz"
+    exact = all(p.is_file() for p in (H2_V2_DEPLOY, H2_V2_GOALS, MAGNA_WORKTREE / H2_V2_PARAMS))
+    if exact:  # the v2 yaml draws exact-dt UR lines, so the u0 label check has lines to test
+        deploy = H2_V2_DEPLOY
+        extra = ["--params", str(H2_V2_PARAMS), "--demo-goals", str(H2_V2_GOALS)]
+    else:
+        deploy, extra = harness.DEFAULT_DEPLOY, []
     # Short on purpose: the latent path, not the policy's outcome, is under test here.
     run = _run_harness(ctx, "h2", ["--mode", "learned", "--deploy", str(deploy),
-                                   "--max-episode-s", str(H2_MAX_EPISODE_S)])
+                                   "--max-episode-s", str(H2_MAX_EPISODE_S), *extra])
     ctx.h2 = run
     row = run.rows[0]
     _require(row["status"] in ("ok", "timeout"), f"row {row['status']} {row.get('reason')}")
@@ -347,8 +360,8 @@ def check_h2(ctx: SimpleNamespace) -> str:
     end_t = row["controller_events"].get("mpc_completed")
     end_t = math.inf if end_t is None else t0 + end_t
     X_W_base, X_t0_tr = ur_base_world(), x_tool0_tracking()
-    matched, consumed, knot0_err, ur_err = 0, 0, 0.0, 0.0
-    lags = []
+    matched, consumed, knot0_err, ur_err, u0_err = 0, 0, 0.0, 0.0, 0.0
+    lags, gaps, ur_u0 = [], [], {}
     lb, ub = model.u_lb, model.u_ub
     for j, (order, (_, t, _, ee_f, ee_u, _)) in enumerate(lat_msgs):
         nxt = lat_msgs[j + 1][0] if j + 1 < len(lat_msgs) else len(run.msgs)
@@ -382,7 +395,33 @@ def check_h2(ctx: SimpleNamespace) -> str:
                      and np.all(drot <= ub[9:12] + UR_BOUND_TOL),
                      f"latent t={t:.3f}: UR knot 1 - latent pose {du}, {drot} outside the bounds")
             ur_err = max(ur_err, float(np.abs(du).max()))
+            ts = line[4]
+            if (abs(ts[1] - ts[0] - lcs.ACTION_KNOT_DT_S) <= harness.UR_EXACT_DT_TOL_S
+                    and t - 1e-9 <= ts[0] < t + lcs.ACTION_KNOT_DT_S):
+                rec = d["actions"][j]
+                err = max(float(np.abs(rec[3:6] - du).max()),
+                          float(np.abs(rec[9:12] - drot).max()))
+                _require(err <= ACTION_TOL, f"latent t={t:.3f}: recorded UR action vs u0 from "
+                         f"the raw line off by {err:.2e}")
+                _require(d["sim_cmd_ur_fresh_exact"][j] == 1, f"frame {j} not flagged fresh")
+                own = d["sim_ur_line_own_window_delta"][j]
+                gaps.append(float(np.abs(own[:3] - du).max()))
+                ur_u0[t] = float(np.linalg.norm(du))
+                u0_err = max(u0_err, err)
         matched += 1
+    _require(gaps or not exact, "no fresh exact-dt UR line to check the recorded UR action")
+    # Loose cross-check vs the controller's 1 s log (|u0 ur| printed at cout precision).
+    log_path = run.out / "controller" / (Path(row["file"]).stem + ".log")
+    logged = 0
+    for m in [] if not gaps else re.finditer(r"\[learned-mpc\] t=(\S+) .*? ur=(\S+)mm/", log_path.read_text()):
+        t_log = float(m.group(1))  # context time = latent t + one tick
+        key = next((k for k in ur_u0 if 0.0 <= t_log - k <= TICK_S + 1e-6), None)
+        if key is not None:
+            want = float(m.group(2)) * 1e-3
+            _require(abs(ur_u0[key] - want) <= 1e-4 * max(want, 1e-6) + 1e-9,
+                     f"t={key}: |u0 ur| {ur_u0[key]:.6e} vs controller log {want:.6e}")
+            logged += 1
+    _require(logged > 0 or not gaps, f"no controller |u0| log line matched a fresh line ({log_path})")
     _require(matched > 0, "no latent was answered by a plan")
     _require(knot0_err <= KNOT0_TOL, f"knot 0 vs the latent's ee_pose_franka {knot0_err:.2e}")
     _require(np.isfinite(d["sim_goal_dist"]).all(), "sim_goal_dist not finite")
@@ -391,10 +430,14 @@ def check_h2(ctx: SimpleNamespace) -> str:
     _require(ended, f"episode did not end on a stage marker / max duration: {row['status']}")
     lat = row["osc_stats"]["traj_after_latent_ms"]
     lt = row["latent"]
+    u0_note = (f"recorded UR action == u0 from the raw line on {len(gaps)} fresh exact-dt lines "
+               f"(max {u0_err:.1e}; own-window gap med/max {np.median(gaps) * 1e3:.3f}/"
+               f"{max(gaps) * 1e3:.3f} mm; {logged} matched the controller log)" if gaps else
+               "UR u0 label check skipped (no v2 exact-dt config)")
     return (f"{len(utimes)} latents == frame utimes, z bit-exact; {matched} plans answer their "
             f"latent (t0 - t in [{min(lags) * 1e3:.0f}, {max(lags) * 1e3:.0f}] ms), {consumed} "
             f"consumed at a stage switch/end; knot 0 err {knot0_err:.1e}; deltas within "
-            f"[u_lb, u_ub]; UR |u| max {ur_err * 1e3:.2f} mm; traj_after_latent mean/max "
+            f"[u_lb, u_ub]; UR |u| max {ur_err * 1e3:.2f} mm; {u0_note}; traj_after_latent mean/max "
             f"{lat['mean']:.1f}/{lat['max']:.1f} ms; pred err rms "
             f"{lt['pred_err_rms_whitened']:.2f}; stages {row['stage_ends']} at "
             f"{row['stage_times']} s; goal_dist final {np.round(lt['goal_dist_final'], 2)}; "
@@ -440,9 +483,9 @@ def check_h3(ctx: SimpleNamespace) -> str:
 
 @check("H4 alignment metrics")
 def check_h4(ctx: SimpleNamespace) -> str:
-    if not (DEMO_EPISODE.is_file() and harness.DEFAULT_DEMO_GOALS.is_file()):
-        raise Skip(f"{DEMO_EPISODE} / {harness.DEFAULT_DEMO_GOALS} not found")
-    demo = DemoGoals.load(harness.DEFAULT_DEMO_GOALS)
+    if not (DEMO_EPISODE.is_file() and DEMO_GOALS.is_file()):
+        raise Skip(f"{DEMO_EPISODE} / {DEMO_GOALS} not found")
+    demo = DemoGoals.load(DEMO_GOALS)
     d = _load(DEMO_EPISODE)
     worst = {}
     for frame, stage in ((-1, demo.n_stages - 1), (0, 0)):
@@ -477,15 +520,21 @@ def check_h5(ctx: SimpleNamespace) -> str:
     for path in files:
         d = _load(path)
         T = d["state"].shape[0]
-        want = np.stack([lcs.action_vector(d["sim_ee_franka"][t], d["sim_cmd_knot1_franka"][t],
-                                           d["sim_ee_ur"][t], d["sim_cmd_ur_t1"][t])
-                         for t in range(T)])
-        err = float(np.abs(want - d["actions"]).max())
-        _require(err <= ACTION_TOL, f"{path.name}: actions off by {err:.2e}")
-        worst = max(worst, err)
+        cmd = [d[k] for k in ("sim_cmd_knot0_franka", "sim_cmd_knot1_franka", "sim_cmd_ur_t",
+                              "sim_cmd_ur_t1")]
+        for key, definition in (("actions", "cmd_delta"),
+                                ("sim_action_knot1_minus_measured", "knot1_minus_measured")):
+            want = lcs.command_actions(definition, d["state"], *cmd)
+            err = float(np.abs(want - d[key]).max())
+            _require(err <= ACTION_TOL, f"{path.name}: {key} off {definition} by {err:.2e}")
+            worst = max(worst, err)
+        real = lcs.realised_delta(d["state"])
+        _require(np.array_equal(np.isnan(real), np.isnan(d["sim_realised_delta"]))
+                 and np.allclose(real[:-1], d["sim_realised_delta"][:-1], rtol=0, atol=1e-12),
+                 f"{path.name}: sim_realised_delta != measured_(t+1) - measured_t")
         _require(d["sim_latent"].shape == (T, 16), f"sim_latent {d['sim_latent'].shape}")
         meta = json.loads(str(d["sim_meta"]))
-        _require(meta["lcs_format"].get("action_definition") == "knot1_minus_measured",
+        _require(meta["lcs_format"].get("action_definition") == "cmd_delta",
                  f"action_definition {meta['lcs_format']}")
     loader = "skipped (no lcs_learning venv)"
     if LCS_LEARNING_VENV.is_file():
@@ -507,7 +556,8 @@ def check_h5(ctx: SimpleNamespace) -> str:
         _require(out["len"] == want_len, f"loader len {out['len']} != {want_len}")
         _require(out["shapes"] == LOADER_SHAPES, f"loader shapes {out['shapes']}")
         loader = f"lcs_learning loader len {out['len']}, shapes OK"
-    return (f"{len(files)} files: actions == knot1/line(t+dt) - measured (max {worst:.1e}), "
+    return (f"{len(files)} files: actions == knot1 - knot0 / line(t+dt) - line(t), "
+            f"sim_action_knot1_minus_measured == knot1/line(t+dt) - measured (max {worst:.1e}), "
             f"sim_latent (T, 16); {loader}")
 
 
@@ -519,9 +569,8 @@ def check_h6(ctx: SimpleNamespace) -> str:
         except ProcessLookupError:
             continue
         raise AssertionError(f"pid {pid} still alive")
-    left = subprocess.run(["pgrep", "-f", PRIVATE_PORT], capture_output=True, text=True,
-                          check=False).stdout.split()
-    _require(not left, f"processes on {PRIVATE_PORT}: {left}")
+    left = pgrep_others(ctx.port)
+    _require(not left, f"processes on {ctx.port}: {left}")
     _require(_git_porcelain(MAIN_MAGNA) == ctx.main_porcelain, "magna main checkout changed")
     now = _tree_digest(sim_snapshot.DEFAULT_START_STATE_DIR)
     changed = [k for k, v in ctx.start_states.items() if now.get(k) != v]
@@ -532,7 +581,7 @@ def check_h6(ctx: SimpleNamespace) -> str:
         extra = gpu - ctx.gpu_baseline - {os.getpid()}
         _require(not (extra & set(ctx.pids)), f"our pids on the GPU: {extra & set(ctx.pids)}")
         note = "GPU apps at baseline" + (f" (foreign appeared: {sorted(extra)})" if extra else "")
-    return (f"H0 pids {ctx.pids} gone, pgrep -f {PRIVATE_PORT} empty, {note}; magna main "
+    return (f"H0 pids {ctx.pids} gone, pgrep -f {ctx.port} empty, {note}; magna main "
             f"status unchanged; {len(ctx.start_states)} start-state files unchanged")
 
 
@@ -547,7 +596,8 @@ def main() -> int:
 
     t0 = time.perf_counter()
     tmp_root = Path(tempfile.mkdtemp(prefix="check_mpc_harness_"))
-    ctx = SimpleNamespace(tmp_root=tmp_root, lcm_url=args.lcm_url, gpu_baseline=_gpu_apps(),
+    ctx = SimpleNamespace(tmp_root=tmp_root, lcm_url=args.lcm_url, port=url_port(args.lcm_url),
+                          gpu_baseline=_gpu_apps(),
                           pids=[], main_porcelain=_git_porcelain(MAIN_MAGNA),
                           start_states=_tree_digest(sim_snapshot.DEFAULT_START_STATE_DIR))
     exit_code = 0

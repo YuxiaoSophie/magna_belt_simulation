@@ -223,9 +223,9 @@ external Drake-protocol viewer can render the belt without running this sim's ow
 
 The learned-MPC stack against this free-running sim, close to hardware: asynchronous processes,
 real-time pacing, the encoder as its own LCM node, the controller planning from `LATENT_STATE`
-at 13.3 Hz. `docs/learned-mpc.md` is the architecture/contract/how-to doc for the learned MPC
-itself (encoder, `LATENT_STATE`, the LCS yaml, the eval harness, the 2026-09-24 results); this
-subsection is only the procman deployment.
+at 13.3 Hz. `docs/learned-mpc.md` is the current-status/day-by-day log for the learned MPC work
+and `docs/learned-mpc-reference.md` is its architecture/contract/how-to reference (encoder,
+`LATENT_STATE`, the LCS yaml, the eval harness); this subsection is only the procman deployment.
 
 ```bash
 bot-procman-sheriff -l procman/newton_assembly_learned_sim.pmd
@@ -255,7 +255,8 @@ groups (`debug` = `lcm-spy`, started by hand).
   (the cropped cloud and the 48 belt bodies every 0.075 s, §2), plus `--publish-belt-mesh`
   (the visualizer draws the belt only with it), `--viewer viser --render-every 20 --record
   --record-label learned` (`recordings/<ts>-learned/`, §10).
-- **Encoder node.** `--deploy .../deploy_demo/deploy.npz --ur-state-channel UR_STATE_SIM
+- **Encoder node.** `--deploy .../deploy_v2_flat_pp2/deploy.npz` (it must match the params'
+  `learned_mpc.lcs_file`, `learned_lcs/learned_lcs_v2_flat_pp2.yaml`) `--ur-state-channel UR_STATE_SIM
   --state-match exact --params <same yaml>`. On hardware the same node reads `POINT_CLOUD_CROPPED`
   / `RoundBeltState` (the same types and channel names the sim publishes) and `UR_STATE`
   (`--ur-state-channel UR_STATE --state-match nearest`). The estimator's 150 vertices need
@@ -491,6 +492,7 @@ the repo root; the "extra args" column is what follows the script path.
 | `scripts/checks/check_robotiq_width.py` | the `ROBOTIQ_COMMAND` byte to jaw width map (§2) against a live `RoundBeltLcmSimulation` on a private LCM group: (T0) the 256-entry byte -> driver target table (byte 0 at the open value, 255 at the full-close target, monotone, calibration spanning open to `gripper_drive.stop`), (T1) a 10-byte free-air sweep whose measured pad gap (minimum distance between the two pad collision meshes) is within 1 mm of `open_gap * (1 - byte/255)`, endpoints included, (T2) the `ROBOTIQ_STATUS` position echoes each reached byte to within 3 counts | none |
 | `scripts/checks/check_recording.py` | 10 checks (`R0`-`R9`) against a live, non-realtime `RoundBeltLcmSimulation` recording (`--record`) on a private LCM group: build, a 600-step scripted sequence (a hand command republished unchanged then changed — one `hand_command` event per goal, two Robotiq commands, a deliberate belt trigger), the on-disk files, `Recording.load`, events/signals, `Recording.list_runs`, the recording's per-step overhead against an unrecorded baseline, loading an unfinished copy (chunk discovery) and a copy with a chunk removed (`ValueError`), and run-dir name collisions (§10) | none |
 | `scripts/checks/check_replay_viewer.py` | 11 checks (`V0`-`V10`) against a headless `ReplayApp` (§10) over two recorded runs (a scripted 600-step run and a second, shorter one): run selection, seeking, playback, metrics, events, plots, triads, refusal of a body-label mismatch, per-seek render timing, and synthetic target messages in both runs (target triads vs. `target_world_pose`, a run switch from past the shorter run's end, a failing hook during a GUI run switch), and a 5 s real-time looped playback's rates (redraws/s near `render_fps`, chart updates <= 6/s per chart, no scale resends) | none |
+| `scripts/checks/check_replay_learned_mpc.py` | 5 checks (`X0`-`X4`) of the learned-MPC replay layers (§10) against a headless `ReplayApp` over one learned and one baseline run of the 2026-09-24 replay set and one staged run of `20260925-002801-stages` (read-only, linked into a temp root): (X0) the CLI registers the panel only for learned roots or path flags and drops the removed `readout`/`action_rotation` names, layers default off, action scale defaults to 9, layers are disabled on the baseline run; (X1) at 5 frames the picked solve is the latest with `step <= frame step`, the Franka plan knots match the harness transform (<= 1e-6 m), `planned_ee` holds only the Franka knots and the augmented dots (no paths, no UR knots), the `x_sol` dots match exactly, decoded belts are bit-exact, the one green target tube matches `pcd_belt[59]` (staged run: tubes at frames 13 and 59 of `demo_flat`, opacity follows `stage`, no ref tubes), each arrow starts at its knot (<= 1e-6 m), points along `u_i` (cos > 0.999999), has length scale x `\|u_i\|` (1e-9 relative), tip at base + scale x `u_i` (<= 1e-6 m) and chains tip to tail at scale 1; (X2) toggling and scale changes keep the handle count; at scales 1 and 20 the tips are exact and the shaft/head sizes are the constants (head-only arrows shrunk to their length); redraw < 50 ms; (X3) missing decoder/demo files disable only their layers; (X4) `check_replay_viewer.py` V0-V10 on `--lcm-url` | none (X4: a private LCM group, default `7705`) |
 | `scripts/checks/check_sim_snapshot.py` | 6 checks (`S0`-`S5`) that `task_common.sim_snapshot` restores a `RoundBeltLcmSimulation` state, on a private LCM group: (S0) build + settle, (S1) baseline restore-vs-continue noise, (S2) restore fidelity mid-motion (hand opening, Robotiq closing) in the same sim, (S3) the same restore in a second sim built fresh from the saved `.npz`, (S4) refusal of an edited/truncated snapshot (no side effects), (S5) the CUDA graph is dropped and re-captured and step/time bookkeeping is exact after restore | none |
 | `scripts/checks/check_inproc_motion.py` | 6 checks (`M0`-`M5`) of the in-process waypoint motion (no magna, no LCM): (M0) `pre_mpc_motion` waypoints from magna's yaml, world frame, gripper commands, (M1) numpy FK vs the built model's bodies, (M2) IK round trips at every waypoint + the nominal joint trajectory's per-step jump, (M3) the nominal pick holds the belt and is snapshotted, (M4) restore + `pre_place_1 -> place_3` tracking, the grasp held at `pre_place_2` and belt bodies reaching the large pulley, (M5) two restored replays of M4 agree (determinism) | none |
 | `scripts/checks/check_commander.py` | 7 checks (`N0`-`N6`) of the emulated magna waypoint/UR-line commander (`round_belt_task.commander`), no sim, no LCM: (N0) Franka position knots, (N1) orientation knots, (N2) the reach/latch/dwell/advance state machine, (N3) the UR 2-knot line + regeneration rule + `tool0` frame, (N4) bounded excitation, (N5) the `TARGET_CARTESIAN_POSE_TRAJECTORY` LCM message round trip (plus, if a recorded magna run has target messages, its layout), (N6) OU excitation statistics (stationary std, lag-1 autocorrelation, step std, fade ramp) vs uncorrelated white draws | none |
@@ -499,7 +501,7 @@ the repo root; the "extra args" column is what follows the script path.
 | `scripts/checks/check_lcs_outcome.py` | 7 checks (`O0`-`O6`) of the large-pulley outcome classifier (`round_belt_task.outcome`) on a synthetic 48-body loop, no sim/LCM: seated/lifted/lowered/tilted/pulled-out belts classify `engaged`/`over`/`under`/`slanted`/`outside`, and labels + wrap angle are invariant to the pulley frame's pose (rotated and spun) and to the episode-label majority-vote API; (O6) `slant_metrics` angle/axis/direction on tilted loops, frame-invariant | none |
 | `scripts/checks/check_lcs_collector.py` | 9 checks (`C0`-`C8`) end to end against `scripts/collect_lcs_dataset.py`, default `osc` backend (a private-URL magna OSC child process): (C0) a start-state snapshot (reused if its scene digests match, else built), (C1) one collected episode per intent, (C2) per-file `.npz` contents (shapes, joint limits, `utime` spacing, the osc `action_definition` and its `knot1 - measured` identity), (C3) `index.json`, (C4) `--record` recordings + a headless `ReplayApp`, (C5) a same-seed rerun reproduces the perturbation/outcome/final belt state, (C6) the real `lcs_learning` loader on the written files (skipped if that venv is absent), (C7) the board clearance guard: every C1 episode reports a non-negative `sim_min_board_clearance_mm` and no contact, and a deliberately unsafe UR `dz` of -15 mm is clamped back above `--min-clearance` instead of running into the plate, (C8) one `--backend position` episode (no magna, no LCM) | `--keep --backend {position,osc}` |
 | `scripts/checks/check_latent_encoder.py` | 8 checks (`E0`-`E7`) of the torch-free learned latent encoder / learned-LCS step (`task_common.latent_encoder`) and belt metrics (`task_common.belt_metrics`) against an `lcs_learning` deploy export (`deploy.npz` + `reference_vectors.npz` + `report.json`), no sim/GPU/LCM: (E0) dims vs the checkpoint args, `F` identity, goal source/stage goals, (E1) point-cloud resize bit-exact on the linspace and tiling paths, (E2) `encode`/`pc_global` vs the torch reference (<= 1e-5), (E3) the 25-iteration PGD step vs the trained solver (<= 1e-6) and the 100-it/tol PGD (<= 1e-5), (E4) encode/step timing, (E5) the `LATENT_STATE` message round trip, (E6) `DemoGoals` on a synthetic `demo_goals.npz`, (E7) index-wise / chamfer / best-cyclic-shift belt RMSE and pose error; `[SKIP]` if the export is absent | `--deploy PATH` |
-| `scripts/checks/check_demo_goals.py` | 4 checks (`D0`-`D3`) of the demonstration episode, its demo re-export and `demo_goals.npz` (`docs/learned-mpc.md` §4/§5.5), no sim/GPU/LCM, requires `data/lcs/demo/{demo_episode,demo_goals}.npz` and the `deploy_demo` export (fails, not `[SKIP]`, if absent): (D0) the demo episode validates, is `engaged`, nominal or fallback with excitation off, has a matching recording, frames as defined (`sim_phase` labels, first `hold:place_3`), (D1) the `deploy_demo` yaml/npz carry the stage keys, name the demo in `goal_source` and match `LatentEncoder.encode` on frames `0`/`T-1` (<= 1e-4), (D2) `demo_goals.npz` schema + the tolerance calibration, (D3) re-running `make_demo_goals.py` reproduces every array and the report except `created` | `--demo-dir DIR --deploy PATH` |
+| `scripts/checks/check_demo_goals.py` | 4 checks (`D0`-`D3`) of the demonstration episode, its demo re-export and `demo_goals.npz` (`docs/learned-mpc-reference.md` §4/§5.5), no sim/GPU/LCM, requires `data/lcs/demo/{demo_episode,demo_goals}.npz` and the `deploy_demo` export (fails, not `[SKIP]`, if absent): (D0) the demo episode validates, is `engaged`, nominal or fallback with excitation off, has a matching recording, frames as defined (`sim_phase` labels, first `hold:place_3`), (D1) the `deploy_demo` yaml/npz carry the stage keys, name the demo in `goal_source` and match `LatentEncoder.encode` on frames `0`/`T-1` (<= 1e-4), (D2) `demo_goals.npz` schema + the tolerance calibration, (D3) re-running `make_demo_goals.py` reproduces every array and the report except `created` | `--demo-dir DIR --deploy PATH` |
 | `scripts/checks/check_latent_encoder_node.py` | 5 checks (`L0`-`L4`) of the `LATENT_STATE` encoder node and the sim's opt-in perception publishers, private URL `...97:7697`: (L0) the 3 perception lcmtypes (fingerprints + a 2000-point cloud / 48-point belt round trip), (L1) the default `--test` sim publishes neither channel and exits 0; an in-process sim with `--cameras --publish-point-cloud --publish-belt-state` (300 steps) publishes a cloud + belt at every `step % 15 == 0` with the step's `FRANKA_STATE` utime, cloud bit-exact vs the collector's `pcd`, belt back to world <= 1e-6 m, per-render cost from `[STATS]`, (L2) the node as a subprocess (`--ur-state-channel UR_STATE_SIM --state-match exact`, 630 steps): one latent per cloud with equal, strictly increasing utimes, `z` bit-exact vs `LatentEncoder.encode` on inputs rebuilt from the messages, ee poses / proprio vs the sim FK path <= 1e-9, 0 state-match misses, cloud->latent wall latency (mean < 30 ms, reported), (L3) taskboard->world, `--belt-input points150`, a `PointCloudToLcm` rgb layout and a permuted layout decode to xyz, (L4) node SIGINT exit, no `7697` process, GPU apps at baseline | `--keep --deploy PATH` |
 | `scripts/checks/check_lcs_tuples.py` | 9 checks (`T0`-`T8`) of osc-backend tuple semantics against a small live collection (no magna procman, private LCM URL): (T0) a 3-episode collection (2 sampled intents + 1 `--scenario pure_translation`), (T1) `utime`/`sim_osc_utime`/`sim_time` spacing and monotonicity across files, (T2) `action = knot1/line(t+dt) - measured` per row type and the excitation cap, (T3) the `pure_translation` episode's actions against a closed form, (T4) tracking-error stats and their identity with `sim_tracking_err_mm`, (T5) `pcd_belt` material drift <= 1e-5 body units (float32 floor) on a stretching episode that wraps the pulley, (T6) the real `lcs_learning` loader (skipped if that venv is absent), (T7) OU excitation's action jerk proxy < 50 % of a `--excite-mode white` re-collection, (T8) no process/GPU-app left behind | `--keep --lcm-url URL` |
 | `scripts/checks/check_mpc_harness.py` | 7 checks (`H0`-`H6`) of the MPC evaluation harness (`scripts/lcs/eval_learned_mpc.py`) with magna's real Franka OSC and assembly controller (worktree `magna-deploy-learned-lcs` binary) as child processes on a private LCM URL (`...89:7689`): (H0) OSC + controller launch, both LCM URL flags, only our pids on the port, stop by pid, (H1) a baseline-yaml episode from the nominal start (pre-MPC markers in order, file validates at 75 ms, the controller's UR line knot 0 vs FK of the UR state it came from <= 0.5 mm, move-frame tracking rms <= 3 / 4 mm, `state` ee == frames, every `FRANKA_STATE` paired with a `UR_STATE` utime), (H2) a short learned-yaml episode (`LATENT_STATE` at every sample tick with the frame's OSC utime, `z` bit-exact vs a re-encode of the saved frame, each answering plan's knot 0 == the latent's Franka pose and knot deltas / UR step inside the LCS input bounds, finite `sim_goal_dist`, non-decreasing `sim_stage`), (H3) two grasp variants (`[SKIP]` without `data/lcs/start_states/grasp_variants/set1`), (H4) the alignment metrics are 0 on the demo itself (`[SKIP]` without `data/lcs/demo`), (H5) `actions == knot1/line(t+dt) - measured`, `sim_latent (T, 16)`, the `lcs_learning` loader, (H6) no process/GPU app left, magna main checkout and start states unchanged | `--keep --lcm-url URL` |
@@ -508,7 +510,7 @@ the repo root; the "extra args" column is what follows the script path.
 | `scripts/lcs/make_start_state.py` | not a check — runs the nominal in-process pick and saves the `pre_place_1` start-state snapshot LCS episodes restore from, or (`--backend osc`) settles it under magna's OSC into `pre_place_1_osc.npz` (`docs/lcs-data-collection.md`) | `--backend {position,osc} --lcm-url URL --start PATH --out PATH --record [DIR] --params PATH --arm-ke K --arm-kd K --no-velocity-lead --hold S` |
 | `scripts/lcs/make_grasp_variants.py` | not a check — builds grasp-varied `pre_place_1` start states: each gripper's `pick` pose slid along / rolled about the rest belt's tangent, the pick replayed (position backend) to the nominal `pre_place_1` poses, settled 2 s under magna's OSC, kept only if both grippers hold; writes `data/lcs/start_states/grasp_variants/<set>/gv_<id>_osc.npz` + `index.json` with the measured material slide / roll per gripper vs `pre_place_1_osc.npz`; `--probe` runs single-knob sweeps and writes only `<set>/probe.json` (its feasible box is the default `--box`) | `--probe --set NAME --root DIR --count K --seed S --box 'f_slide f_roll u_slide u_roll' (h or lo:hi each) --lcm-url URL --params PATH --reference PATH` |
 | `scripts/collect_lcs_dataset.py` | not a check — collects LCS episodes of the round-belt engagement segment into `.npz` + `index.json`, default `osc` backend (`docs/lcs-data-collection.md`) | `--out DIR --label L --episodes N --seed S --intents LIST --weights LIST --backend {position,osc} --lcm-url URL --osc-timeout-s S --osc-settle-s S --osc-log PATH --start-state PATH --fresh-pick --record --settle-s S --min-clearance MM --sample-period S --excite-mode {ou,white} --excite-pos-mm MM --excite-rot-deg DEG --excite-tau-s S --excite-cap-factor F --excite-down-mm MM --max-episode-s S --scenario {pure_translation,nominal} --arm-ke K --arm-kd K --params PATH --no-pcd --dry-run --thresholds KEY=VALUE...` |
-| `scripts/lcs/make_demo_goals.py` | not a check — re-encodes every frame of the demonstration episode and writes `demo_goals.npz` (the `DemoGoals` schema: per-stage `z_goals`/`goal_tols`/`max_durations_s`, poses, belts, the whole demo's `z`/`goal_dist` traces) + `<out>_report.json` (calibration, `recommended_learned_mpc_yaml`); stage-0 tol = 1.5x the p90 whitened distance from `z_goal_stage1` to frame 0 of every training episode, stage-1 tol = the export's `goal_tol_whitened` (`docs/learned-mpc.md` §4/§5.5) | `--episode PATH --deploy PATH --train-glob GLOB --out PATH` |
+| `scripts/lcs/make_demo_goals.py` | not a check — re-encodes every frame of the demonstration episode and writes `demo_goals.npz` (the `DemoGoals` schema: per-stage `z_goals`/`goal_tols`/`max_durations_s`, poses, belts, the whole demo's `z`/`goal_dist` traces) + `<out>_report.json` (calibration, `recommended_learned_mpc_yaml`); stage-0 tol = 1.5x the p90 whitened distance from `z_goal_stage1` to frame 0 of every training episode, stage-1 tol = the export's `goal_tol_whitened` (`docs/learned-mpc-reference.md` §4/§5.5) | `--episode PATH --deploy PATH --train-glob GLOB --out PATH` |
 | `scripts/lcs/eval_learned_mpc.py` | not a check — lock-step evaluation of magna's assembly controller (learned staged MPC or the waypoint baseline, chosen by the params yaml) against this sim from a start state or a grasp-variant set: the Franka OSC started once per run and a fresh controller per episode next to it, on one private URL, `LATENT_STATE` from the in-process encoder every 75 ms (learned), UR by IK along the controller's UR line, grippers held; outcome + alignment to the demo's belt/poses; dataset-format episodes + `index.json` (engaged rate with a Wilson 95 % CI, per start state) under `data/lcs/mpc_eval/` | `--mode {learned,baseline} --params PATH --magna-root DIR --deploy NPZ --demo-goals NPZ --start-states PATH --variants IDS --repeats R --seed S --lcm-url URL --osc-binary PATH --osc-timeout-s S --out DIR --label L --max-episode-s S --pace F --settle-s S --record --no-pcd --thresholds KEY=VALUE... --dry-run` |
 | `scripts/lcs/latent_encoder_node.py` | not a check — the learned encoder as an LCM node: `FRANKA_STATE` + `UR_STATE` (sim `UR_STATE_SIM`) + `POINT_CLOUD_CROPPED` + `RoundBeltState` -> `LATENT_STATE` (`utime` = the cloud's), training inputs (`camera_points`, material `belt_points_ordered` of the 48 bodies, `state_vector` with numpy FK), states matched `exact` (sim) or `nearest` (hardware), at most one latent per `--min-period-s`; logs rate, cloud->latent latency, cloud age, misses every `--stats-every` s | `--lcm-url URL` (required) `--deploy --ur-state-channel --state-match exact\|nearest --belt-input bodies48\|points150 --params --min-period-s --stats-every` |
 | `scripts/debug/bench_lcm_sim_settings.py` | rest bench (speed + stability) + the diagnostic grasp-and-drag, per `substeps/vbd_iterations` pair; picks and can write the YAML (§5) | `--settings 2/5,2/10 --write-yaml` |
@@ -790,6 +792,26 @@ the spatial pose is already world. Knot times are on this sim's own clock (verif
 magna's timestamp sources), with a +-0.5 s fallback ("hold the first knot", warned once per
 channel) if a trajectory's own clock assumption does not hold.
 
+**Harness recordings** (`scripts/lcs/eval_learned_mpc.py --record`) get the same streams from
+`ControllerBridge.take_targets()`: every controller message on
+`TARGET_CARTESIAN_POSE_TRAJECTORY` and `UR_TARGET_CARTESIAN_POSE_TRAJECTORY` (not
+`UR_TARGET_SPATIAL_POSE`, which the bridge does not subscribe), plus `LEARNED_MPC_DEBUG`
+(`LcmChannels.learned_mpc_debug_channel`) when the controller's `learned_mpc.debug_channel` is
+set: one message per learned solve, blocks `x_sol`, `u_sol`, `z_ref`, `p_ref`, `scalars`
+(layout: `docs/learned-mpc-reference.md` §3). They are serialised by the same generic block writer, so
+`targets.jsonl` only gains a channel. Their knot times are on the OSC clock, not the recording's
+`sim_time`: `osc_utime = step * control_dt_us + meta["osc_utime_offset_us"]`; a message is
+recorded at the step it arrived (0-0.1 s after its tick). The harness also adds two
+`meta.json` keys:
+
+- `osc_utime_offset_us` (int);
+- `learned_mpc`: `mode`, `params_yaml`, `lcs_yaml`, `demo_traj_yaml`, `deploy`, `demo_goals`,
+  `demo_episode` (absolute paths, each with a `<key>_sha256`), `start_state` (`id`, `file`),
+  `action_definition`, `debug_channel`. Baseline runs: `mode: baseline`, the rest null.
+
+Planned latents decode to belt points offline with `LatentDecoder` (`latent_encoder.py`,
+weights from the exporter's `--decoder-out`, `decoder.npz` next to `deploy.npz`).
+
 **Not captured:** `OSC_TARGET_TRACKING_DEBUG` (magna's assembly controller hard-codes it to a
 separate `local_lcm` on the shared default group, independent of `--lcm-url`) and `OSC_DEBUG`
 (`lcmt_osc_output`, a large nested type) — both out of scope; nor the belt mesh
@@ -853,6 +875,60 @@ Measured on 2026-09-21 (1x, looped, default charts, local headless Chromium, 3-m
 The initial page load still sends the scene meshes (about 6 MB) once. On a very slow link, the
 page takes that long to appear before playback can keep up.
 
+### Learned-MPC layers
+
+Recordings from `eval_learned_mpc.py --record` with the controller's `learned_mpc.debug_channel`
+set carry one `LEARNED_MPC_DEBUG` message per learned solve (layout: `docs/learned-mpc-reference.md` §3).
+For them the viewer adds a **Learned MPC** folder (`src/task_common/replay_learned_mpc.py`,
+`LearnedMpcPanel`). Each frame shows the latest solve with `msg.step <= frame step`; that plan
+stays on screen until the next one. Four checkboxes, all off by default:
+
+| layer | what it draws | colour |
+|---|---|---|
+| Planned belt | `LatentDecoder.decode(x_sol[:16, i])` for `i = 1..N`, closed loops through the 150 material-ordered points | blue 3 mm tubes, opacity 0.9 (step 1) to 0.2 (step N) |
+| Planned EE | dots only, no connecting paths: the published Franka plan knots (`TARGET_CARTESIAN_POSE_TRAJECTORY` with `t[0]` equal to the solve's first knot time) in world, and the augmented `x_sol[16:22, :]` positions (both arms) as small dots. The UR's published 2-knot line is not drawn | Franka knots cyan `(6,182,212)`, augmented dots dark grey |
+| Planned actions | per step `i < N`, a 3D arrow (cylinder + cone mesh) from knot `i` along `u_i[0:3]` (Franka) or `u_i[3:6]` (UR), length **Action scale** (1-100, default 9) x `\|u_i\|`; Franka arrows start at the published plan knots, UR arrows at `x_sol[19:22, i]`, so at scale 1 they chain tip to tail along the planned path; only the length scales: shaft radius 0.8 mm, head 4 mm long and 2 mm in radius at every scale, and an arrow shorter than 4 mm is head only, shrunk uniformly to its length (the tip stays at base + scale x `u_i`); `u0` is opaque with 1.4x the radii, steps 1..N-1 fade 0.75 to 0.2 | Franka dark cyan `(8,145,178)`, UR red `(220,38,38)` |
+| Target belt | the fixed targets only, as the demo's `pcd_belt` at the goal frames (3 mm tubes). Staged run (`demo_traj_yaml` null): one tube per stage goal; the current stage (the solve's `stage` scalar) at opacity 0.9, the others 0.25. Demo-traj run: one opaque tube at the final goal frame. The per-step references are not drawn | green `(22,163,74)` |
+
+The action arrows use one hue per arm (Franka cyan, UR red). The recorded belt is gold, so no layer uses yellow or orange. viser 1.1 line segments have no
+opacity, so the faded loops and the arrows are meshes with per-mesh opacity. viser 1.1 has
+`add_arrows`, but its head cannot shrink for an arrow shorter than the head, so each arrow is
+its own mesh. The arrow meshes are rebuilt only when the shown solve or the scale changes (about
+1 ms).
+
+**Files.** The panel reads `deploy`, `demo_goals` and `demo_episode` from `meta.json`'s
+`learned_mpc` block, and the decoder from `<deploy dir>/decoder.npz`. The flags `--deploy`,
+`--decoder`, `--demo-goals` and `--demo-episode` override them. A missing decoder disables
+Planned belt; a missing demo episode disables Target belt. The goal frames come from the
+deploy's `goal_frames` and `demo_goals.npz`'s `stage_frames` (either falls back to the `#a,b` of
+`goal_source`); Target belt is disabled if neither has them, if they disagree, if they fall outside
+the demo, if the goals were taken from another demo episode (sha256), or if `meta.learned_mpc`
+lacks `demo_traj_yaml`. The folder's
+first line gives the reason, and the other layers still work. A file whose sha256 differs from
+the one the recording lists is noted there too (not checked for CLI overrides).
+
+**When it appears.** `scripts/replay_viewer.py` adds the folder only if a run under
+`--recordings` has `learned_mpc.debug_channel` set in its `meta.json`, or a path flag is given.
+Otherwise (baseline sets, older recordings) the viewer is unchanged. Inside the folder, a run
+without debug messages (a baseline run, or frames before the first solve) disables or hides
+every layer. `--learned-layers planned_belt,planned_ee,actions,target_belt` (any subset)
+pre-enables layers and opens the folder. The removed names `action_rotation` and `readout` are
+ignored with a warning.
+
+**Exactness.** Nothing is recomputed. The geometry is the recorded message, the recorded plan
+and the demo file; only the belts are decoded, once per run at load (about 50 ms for 107
+solves), one latent per `decode` call. `check_replay_learned_mpc.py` X1 measures: planned belts
+bit-exact, target tube centres within float32 (demo-traj: frame 59; staged
+`20260925-002801-stages`: frames 13 and 59 of `demo_flat`, opacity per `stage`); Franka plan knots vs the harness's transform 3e-8 m, no `planned_ee` handles besides the Franka knots and the
+augmented dots; the augmented dots equal `x_sol` (float64 0; float32 buffer 3e-8 m).
+
+**Limits.** Body poses are recorded at 50 Hz and plans arrive at about 13.3 Hz, so the shown plan
+is up to 75 ms old. Messages are placed at the step they arrived,
+5-75 ms after their tick. `x_sol` column N is the model step from `x_{N-1}` (C3 keeps N states),
+so the Franka plan has N knots but `x_sol` has N+1 dots. At scale 1,
+arrows are sub-millimetre to a few millimetres, hence the default 9x. The rotation part of `u`
+(`u[6:12]`) is not drawn.
+
 ### Known limits
 
 - Target-pose replay was validated on synthetic target data only: magna's own assembly
@@ -880,3 +956,10 @@ way, then drives a headless `ReplayApp` (no browser) through run selection, seek
 metrics, events, plots, triads (including synthetic target messages), a label-mismatch
 refusal and the playback redraw/chart-update rates. Both use a private LCM group and never open
 a browser or touch `recordings/` in the repo. See §8 for what each checks in detail.
+`scripts/checks/check_replay_learned_mpc.py` links one learned and one baseline run of the
+2026-09-24 replay set, plus one staged run (`--staged`), into a temp root (read-only) and drives a headless `ReplayApp` with a
+`LearnedMpcPanel`. X0 checks that the panel registers and is disabled on the baseline run. X1
+checks that the geometry at 5 frames equals the recorded solve, plan, decoder and demo. X2
+checks that toggling keeps the handle count, and times the redraw. X3 checks that missing files
+degrade cleanly. X4 runs `check_replay_viewer.py` V0-V10 on `--lcm-url` (default
+`udpm://239.255.76.105:7705?ttl=0`); `--skip-x4` skips it.

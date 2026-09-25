@@ -10,6 +10,8 @@ unchanged, temp set removed.
 Run:
     uv run python scripts/checks/check_grasp_variants.py
     uv run python scripts/checks/check_grasp_variants.py --keep
+    uv run python scripts/checks/check_grasp_variants.py \\
+        --lcm-url 'udpm://239.255.76.100:7700?ttl=0'
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from loguru import logger
+from private_url import pgrep_others, url_port
 
 from round_belt_task import arm_kinematics as ak
 from task_common import sim_snapshot
@@ -217,9 +220,8 @@ def check_g3(ctx: SimpleNamespace) -> str:
             pass
         else:
             raise AssertionError(f"OSC pid {ctx.osc_pid} still alive")
-    left = subprocess.run(["pgrep", "-f", PRIVATE_PORT], capture_output=True, text=True,
-                          check=False).stdout
-    _require(not left.strip(), f"processes on {PRIVATE_PORT}: {left.split()}")
+    left = pgrep_others(PRIVATE_PORT)
+    _require(not left, f"processes on {PRIVATE_PORT}: {left}")
     changed = [p.name for p in PROTECTED if _sha256(p) != ctx.hashes[p]]
     _require(not changed, f"changed: {changed}")
     gpu = _gpu_apps()
@@ -239,9 +241,12 @@ def check_g3(ctx: SimpleNamespace) -> str:
 
 
 def main() -> int:
+    global PRIVATE_LCM_URL, PRIVATE_PORT
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--keep", action="store_true", help="keep the temp set and logs")
+    parser.add_argument("--lcm-url", default=PRIVATE_LCM_URL)
     args = parser.parse_args()
+    PRIVATE_LCM_URL, PRIVATE_PORT = args.lcm_url, url_port(args.lcm_url)
     logger.remove()
     logger.add(sys.stdout, level="WARNING", format="{level: <7} | {message}")
 

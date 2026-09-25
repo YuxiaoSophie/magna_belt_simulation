@@ -86,10 +86,10 @@ from task_common.osc_process import MAGNA_ROOT, OSC_BINARY
 
 MODES = ("learned", "baseline")
 DEFAULT_LCM_URL = "udpm://239.255.76.88:7688?ttl=0"
-DEPLOY_ROOT = Path("/home/hienbui/git/lcs_learning/outputs/sim_belt_ablation_20260924/"
-                   "ckpt_decoded_only")
-DEFAULT_DEPLOY = DEPLOY_ROOT / "deploy_demo" / "deploy.npz"
-DEFAULT_DEMO_GOALS = REPO_ROOT / "data" / "lcs" / "demo" / "demo_goals.npz"
+# Must match DEFAULT_PARAMS["learned"]'s lcs_file (learned_lcs_v2_flat_pp2.yaml).
+DEFAULT_DEPLOY = Path("/home/hienbui/git/lcs_learning/outputs/sim_belt_v2_20260925/"
+                      "deploy_v2_flat_pp2/deploy.npz")
+DEFAULT_DEMO_GOALS = REPO_ROOT / "data" / "lcs" / "demo_flat_pp2" / "demo_goals.npz"
 DEFAULT_START_STATE = sim_snapshot.DEFAULT_START_STATE_DIR / "pre_place_1_osc.npz"
 DEFAULT_OUT_ROOT = REPO_ROOT / "data" / "lcs" / "mpc_eval"
 DEFAULT_PARAMS = {
@@ -107,6 +107,7 @@ BOARD_NEGATIVE_STEPS = 40
 PRED_ITERS = 25
 N_KNOTS = 7
 END_POLL_S = 0.05
+UR_EXACT_DT_TOL_S = 1e-6  # line knot times are utime-quantised (1 us)
 # Where the frame's command comes from (sim_cmd_source).
 CMD_RESPONSE, CMD_IN_FORCE, CMD_NONE = 0, 1, 2
 
@@ -144,6 +145,12 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--thresholds", nargs="*", default=[], metavar="KEY=VALUE",
                    help="OutcomeThresholds overrides")
     p.add_argument("--dry-run", action="store_true", help="print the episode plan and exit")
+    p.add_argument("--action-definition", choices=lcs.CMD_ACTION_DEFINITIONS,
+                   default=lcs.DEFAULT_ACTION_DEFINITION,
+                   help="recorded actions (and the latent_pred input): cmd_delta = knot1 - knot0 "
+                        "of the plan in force / line(t+dt) - line(t) (fresh exact-dt line: line "
+                        "end - latent ee_ur = u0); knot1_minus_measured = the pre-2026-09-25 "
+                        "definition (matches models trained on it)")
     return p
 
 
@@ -297,6 +304,7 @@ class EvalContext:
     stage_labels: list[str]
     snaps: dict = dataclasses.field(default_factory=dict)
     controller_info: dict | None = None
+    learned_mpc_meta: dict | None = None  # recording meta.json "learned_mpc" (sans start)
 
     @property
     def plate_top_z(self) -> float:
@@ -384,14 +392,31 @@ def _resolve_commands(frames: list[dict], bridge: ControllerBridge, dt_step: flo
         else:
             earlier = [m for m in lines if m.wall <= fr["wall"]]
             line = earlier[-1] if earlier else None
+        fr["ur_fresh_exact"] = False
+        fr["ur_own_delta"] = np.full(6, np.nan)
         if line is None:
             fr["ur_t"] = fr["ur_t1"] = fr["ee_u"].copy()
             fr["ur_line"] = np.full(16, np.nan)
         else:
             ln = line.line
-            fr["ur_t"] = pose7_mat(bridge.tracking_pose(ln, t))
-            fr["ur_t1"] = pose7_mat(bridge.tracking_pose(ln, t + lcs.ACTION_KNOT_DT_S))
             fr["ur_line"] = np.concatenate([ln.p0, ln.q0, ln.p1, ln.q1, [ln.t0, ln.t1]])
+            if _fresh_exact_dt(ln, t):
+                # Line starts at the measured tool0 ~5 ms late; anchor at the latent pose => u0.
+                end = pose7_mat(bridge.tracking_pose(ln, ln.t1))
+                own = lcs.action_vector(end, end, pose7_mat(bridge.tracking_pose(ln, ln.t0)),
+                                        end)
+                fr["ur_t"], fr["ur_t1"] = fr["ee_u"].copy(), end
+                fr["ur_fresh_exact"] = True
+                fr["ur_own_delta"] = own[[3, 4, 5, 9, 10, 11]]
+            else:
+                fr["ur_t"] = pose7_mat(bridge.tracking_pose(ln, t))
+                fr["ur_t1"] = pose7_mat(bridge.tracking_pose(ln, t + lcs.ACTION_KNOT_DT_S))
+
+
+def _fresh_exact_dt(ln, t: float) -> bool:
+    """A learned-MPC UR line of exactly one knot dt that starts inside this frame."""
+    dt = lcs.ACTION_KNOT_DT_S
+    return abs((ln.t1 - ln.t0) - dt) <= UR_EXACT_DT_TOL_S and t - 1e-9 <= ln.t0 < t + dt
 
 
 def _gripper_at(bridge: ControllerBridge, wall: float) -> tuple[float, int]:
@@ -400,12 +425,19 @@ def _gripper_at(bridge: ControllerBridge, wall: float) -> tuple[float, int]:
     return (hand[-1][2] if hand else math.nan), (rq[-1][1] if rq else -1)
 
 
-def build_writer(frames: list[dict], pcd: bool) -> tuple[lcs.EpisodeWriter, np.ndarray]:
-    writer = lcs.EpisodeWriter(sample_steps=SAMPLE_STEPS,
-                               action_definition=cli.OSC_ACTION_DEFINITION)
+def frame_action(fr: dict, definition: str) -> np.ndarray:
+    return lcs.command_action(definition, fr["ee_f"], fr["ee_u"], fr["knot0"], fr["knot1"],
+                              fr["ur_t"], fr["ur_t1"])
+
+
+def build_writer(frames: list[dict], pcd: bool,
+                 definition: str = lcs.DEFAULT_ACTION_DEFINITION
+                 ) -> tuple[lcs.EpisodeWriter, np.ndarray]:
+    writer = lcs.EpisodeWriter(sample_steps=SAMPLE_STEPS, action_definition=definition)
     track = cli.tracking_errors(frames)
+    realised = lcs.realised_delta(np.stack([fr["prop"] for fr in frames]))
     for t, fr in enumerate(frames):
-        action = lcs.action_vector(fr["ee_f"], fr["knot1"], fr["ee_u"], fr["ur_t1"])
+        action = frame_action(fr, definition)
         cloud = fr["cloud"] if pcd else np.zeros((1, 3), np.float32)
         writer.add_frame(fr["sim_step"], fr["time"], fr["prop"], action, cloud, fr["belt_pts"],
                          lcs.kinematic_points(), pcd_rgb=fr.get("pcd_rgb") if pcd else None,
@@ -418,6 +450,8 @@ def build_writer(frames: list[dict], pcd: bool) -> tuple[lcs.EpisodeWriter, np.n
                              "cmd_traj_utime": np.int64(fr["traj_utime"]),
                              "cmd_ur_t": fr["ur_t"], "cmd_ur_t1": fr["ur_t1"],
                              "cmd_ur_line": fr["ur_line"],
+                             "cmd_ur_fresh_exact": np.int8(fr["ur_fresh_exact"]),
+                             "ur_line_own_window_delta": fr["ur_own_delta"],
                              "cmd_source": np.int8(fr["cmd_source"]),
                              "cmd_ctrl_hand_mm": np.float32(fr["ctrl_hand_mm"]),
                              "cmd_ctrl_robotiq_byte": np.int16(fr["ctrl_robotiq"]),
@@ -434,6 +468,9 @@ def build_writer(frames: list[dict], pcd: bool) -> tuple[lcs.EpisodeWriter, np.n
                              "board_clearance_mm": np.float32(fr["clearance_mm"]),
                              "franka_tip_clearance_mm": np.float32(fr["tip_clearance_mm"]),
                              "tracking_err_mm": track[t],
+                             "action_knot1_minus_measured":
+                                 frame_action(fr, "knot1_minus_measured"),
+                             "realised_delta": realised[t],
                          })
     return writer, track
 
@@ -474,7 +511,10 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int) -> dict:
             ctx.controller_info = ctrl.describe()
         timing["controller_start"] = time.perf_counter() - t2
         if args.record:
-            sim.start_recording(ctx.out / "recordings", name)
+            # Plan/debug times are OSC clock: osc_utime = step * control_dt_us + offset.
+            sim.start_recording(ctx.out / "recordings", name, extra_meta={
+                "learned_mpc": _recording_learned_meta(ctx, state),
+                "osc_utime_offset_us": int(bridge.utime_offset_us)})
         sampler = cli.EpisodeSampler(sim, n, pcd=not args.no_pcd,
                                      traj_phase=np.zeros(0, np.int64), phase_offset=0,
                                      board=ctx.board, gripper=ctx.gripper)
@@ -531,9 +571,16 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int) -> dict:
         "reason": reason, "start_state": state.to_dict(), "repeat": repeat, "backend": "osc",
         "controller": ctx.controller_info, "controller_events": ctrl_events,
         "ee_pose_source": "measured finger_tip / tracking frame (FK of the measured joints)",
-        "action_source": "knot 1 of the controller's TARGET_CARTESIAN_POSE_TRAJECTORY answering "
-                         "the sample tick (else the plan in force) / the controller's UR line at "
-                         "t + knot dt (tracking frame, world), minus the measured pose at t",
+        "action_source": (
+            "knot 1 - knot 0 of the controller's TARGET_CARTESIAN_POSE_TRAJECTORY answering the "
+            "sample tick (else the plan in force) / the controller's UR line at t + knot dt minus "
+            "at t (tracking frame, world); a fresh exact-dt line starting in the frame "
+            "(sim_cmd_ur_fresh_exact): its end minus the frame's ee_ur (= the latent's "
+            "ee_pose_ur, so u0), own-window span in sim_ur_line_own_window_delta"
+            if args.action_definition == "cmd_delta" else
+            "knot 1 of the controller's TARGET_CARTESIAN_POSE_TRAJECTORY answering "
+            "the sample tick (else the plan in force) / the controller's UR line at "
+            "t + knot dt (tracking frame, world), minus the measured pose at t"),
         "cmd_source_codes": {"response": CMD_RESPONSE, "in_force": CMD_IN_FORCE,
                              "none": CMD_NONE},
         "latent_source": ("in-process LatentEncoder, published as LATENT_STATE"
@@ -559,7 +606,7 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int) -> dict:
         post["sim_no_pcd"] = np.array(True)
         omit = ("pcd", "pcd_rgb")
     path = ctx.out / row["file"]
-    writer, track = build_writer(frames, pcd=not args.no_pcd)
+    writer, track = build_writer(frames, pcd=not args.no_pcd, definition=args.action_definition)
     writer.write(path, label, extras_meta, arrays=post, omit=omit)
     if not args.no_pcd:
         lcs.validate_episode(path, period_us=round(n * lcs.SIM_DT_S * 1e6))
@@ -632,7 +679,7 @@ def _latent_diagnostics(ctx: EvalContext, frames: list[dict]) -> dict | None:
             fr["goal_dist"] = np.array([ctx.lcs_model.whitened_dist(z, g)
                                         for g in ctx.lcs_model.stage_goals])
         if prev is not None and ctx.lcs_model is not None:
-            u = lcs.action_vector(prev["ee_f"], prev["knot1"], prev["ee_u"], prev["ur_t1"])
+            u = frame_action(prev, ctx.args.action_definition)
             fr["latent_pred"] = ctx.lcs_model.step(prev["latent"], u, iters=PRED_ITERS)[0]
             errs.append(float(np.linalg.norm((fr["latent_pred"] - z) / ctx.lcs_model.z_std)))
         prev = fr
@@ -789,6 +836,45 @@ def _sample(sim, ctx: EvalContext, sampler, k: int, s0: int, publish: bool,
 
 # --- run --------------------------------------------------------------------------------------
 
+def _file_ref(path: Path | None) -> tuple[str | None, str | None]:
+    if path is None or not Path(path).is_file():
+        return None, None
+    path = Path(path).resolve()
+    return str(path), sha256_file(path)
+
+
+def learned_mpc_meta(args: argparse.Namespace, mode: str, params_rel: Path, params: dict,
+                     demo: DemoGoals | None) -> dict:
+    """Run-level part of a recording's ``meta.json`` ``learned_mpc`` block (baseline: nulls)."""
+    keys = ("params_yaml", "lcs_yaml", "demo_traj_yaml", "deploy", "demo_goals", "demo_episode")
+    out = {"mode": mode, **{k: None for k in keys}, **{f"{k}_sha256": None for k in keys},
+           "action_definition": None, "debug_channel": None}
+    if mode != "learned":
+        return out
+    block = params["learned_mpc"]
+    root = Path(args.magna_root)
+    demo_traj = (block.get("demo_traj") or {}).get("file")
+    episode = None
+    if demo is not None:
+        episode = Path(demo.demo_episode)
+        episode = episode if episode.is_absolute() else REPO_ROOT / episode
+    files = {"params_yaml": root / params_rel, "lcs_yaml": root / block["lcs_file"],
+             "demo_traj_yaml": root / demo_traj if demo_traj else None,
+             "deploy": args.deploy, "demo_goals": args.demo_goals, "demo_episode": episode}
+    for k, path in files.items():
+        out[k], out[f"{k}_sha256"] = _file_ref(path)
+    out["action_definition"] = args.action_definition
+    out["debug_channel"] = block.get("debug_channel")
+    return out
+
+
+def _recording_learned_meta(ctx: EvalContext, state: StartState) -> dict:
+    meta = dict(ctx.learned_mpc_meta or {"mode": ctx.mode})
+    meta["start_state"] = ({"id": state.id, "file": str(state.file)}
+                           if ctx.mode == "learned" else None)
+    return meta
+
+
 def _controller_yaml(root: Path, rel: Path) -> dict:
     return yaml.safe_load((root / rel).read_text()) or {}
 
@@ -863,7 +949,7 @@ def evaluate(args: argparse.Namespace) -> dict:
                        "params_sha256": sha256(args.magna_root / params_rel)},
         "deploy": deploy_meta, "demo_goals": demo_meta,
         "sample_period_s": SAMPLE_STEPS * lcs.SIM_DT_S, "sample_steps": SAMPLE_STEPS,
-        "action_definition": cli.OSC_ACTION_DEFINITION, "belt_sampling": lcs.BELT_SAMPLING,
+        "action_definition": args.action_definition, "belt_sampling": lcs.BELT_SAMPLING,
         "thresholds": dataclasses.asdict(thresholds), "labels": list(LABELS),
         "phase_labels": phase_labels, "belt_tangent": tangent, "episodes": [],
     }
@@ -875,6 +961,7 @@ def evaluate(args: argparse.Namespace) -> dict:
     sim = RoundBeltOscSimulation.build(lcm_url=args.lcm_url, osc_timeout_s=args.osc_timeout_s,
                                        bridge_cls=ControllerBridge)
     sim.args.record_state_every = cli.RECORD_STATE_EVERY
+    sim.bridge.record_targets = bool(args.record)
     t_run = time.perf_counter()
     rows = index["episodes"]
     try:
@@ -888,7 +975,8 @@ def evaluate(args: argparse.Namespace) -> dict:
                           thresholds=thresholds, tangent=tangent, board=board, gripper=gripper,
                           encoder=encoder, lcs_model=lcs_model, demo=demo,
                           phase_labels=phase_labels, n_pre=len(pre_labels), n_stages=n_stages,
-                          stage_labels=stage_labels)
+                          stage_labels=stage_labels,
+                          learned_mpc_meta=learned_mpc_meta(args, mode, params_rel, params, demo))
         for s, r in plan:
             try:
                 row = run_episode(sim, ctx, s, r)

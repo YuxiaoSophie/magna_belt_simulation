@@ -103,13 +103,37 @@ Each file records its choice in `sim_meta["lcs_format"]["action_definition"]`, a
 
 | `action_definition` | Pose 0 | Pose 1 | Written by |
 |---|---|---|---|
-| `knot1_minus_measured` | measured EE pose at `t` (= `state[:, 26:33]` / `state[:, 33:40]`) | Franka: knot 1 of the command published at `t`; UR: the commanded line at `t + 0.075 s` | `--backend osc` (default) |
+| `cmd_delta` | Franka: knot 0 of the command published at `t`; UR: the line in force at `t`, sampled at `t` | Franka: knot 1 of that command; UR: the same line at `t + 0.075 s` | `--backend osc` (default since 2026-09-25), `eval_learned_mpc.py` (default), `rewrite_actions.py` |
+| `knot1_minus_measured` | measured EE pose at `t` (= `state[:, 26:33]` / `state[:, 33:40]`) | Franka: knot 1 of the command published at `t`; UR: the commanded line at `t + 0.075 s` | `--backend osc` / harness before 2026-09-25, or `--action-definition knot1_minus_measured`; always kept as the extra `sim_action_knot1_minus_measured` |
 | `knot1_minus_knot0` | knot 0 | knot 1 | magna's reference collector (not written by the sim) |
 | `cmd_t1_minus_cmd_t` | commanded target at sample `t` | commanded target at `t+1` | `--backend position` (no key in the file) |
 
 Files without the key (the position backend, older runs, magna logs) are accepted.
+`command_action(definition, ...)` / `command_actions(...)` compute either OSC definition from the
+stored `sim_cmd_*` and the measured poses; `realised_delta(state)` is `measured_{t+1} -
+measured_t` in the action layout (last row NaN), stored as `sim_realised_delta`.
 
-**osc backend (`knot1_minus_measured`).** `u_t = knot1_t - ee_t`: the pose the controller is
+**osc backend (`cmd_delta`, default).** `u_t` = what the controller commands the arm to do over
+the next 0.075 s: Franka `knot1_t - knot0_t`, UR `line_t(t + dt) - line_t(t)`. Why: under
+`knot1_minus_measured` the steady tracking lag is part of `u` (hold rows and the UR between line
+regenerations are dominated by it: UR x slope -0.01, -0.8 mm mean offset against 0.1 mm realised
+motion), while at deployment knots and lines are re-anchored at the measured pose every replan, so
+the same `u` is realised ~1:1 — a train/deploy mismatch. The difference of two commanded poses
+cancels the lag, is exactly 0 on holds (`delta_rotvec` returns exact zeros for equal quaternions),
+and is what the deployed controller already realises (knot 0 = the measured pose at the replan;
+a UR line spanning exactly `dt`). The realised delta is only a diagnostic (an MPC output must be
+a command); a per-arm hybrid was rejected. Row types: pre-hold (`sim_episode_step < 0`, phase
+`prehold`): both arms exactly 0; free move: the `lin_speed * dt` step (+ excitation); reached
+while moving / quiet hold (`sim_cmd_hold`, no excitation): Franka exactly 0 (the UR is 0 once its
+line has ended). On the converted 2026-09-23 run (19 387 tuples) the realised-vs-`u` OLS slopes
+are Franka x/y/z 0.89/0.92/0.94, rot 0.75/0.85/0.76; UR x/y/z 0.92/0.94/1.00, rot 0.98/0.90/1.11
+(UR x/y/rot-y/rot-z have `u` std <= 0.4 mm / 1.4 mrad: never excited there), printed by
+`check_lcs_tuples.py --causality-dir <run>`. `scripts/lcs/rewrite_actions.py` converts older
+files into NEW dirs (`data/lcs/20260925-ep300-ou-cmd_delta/`, `data/lcs/demo/
+20260925-nominal-cmd_delta/`, `data/lcs/demo/demo_episode_cmd_delta.npz`), non-action keys
+byte-identical, provenance in `sim_meta["action_rewrites"]`.
+
+**`knot1_minus_measured` (osc backend before 2026-09-25).** `u_t = knot1_t - ee_t`: the pose the controller is
 told to reach one C3 step ahead, minus where the EE is now. This matches MPC, whose `x_sol[0]` is
 the current (measured) state. It also makes the one-step residual exactly the tracking error:
 `ee_{t+1} - (ee_t + u_t) = ee_{t+1} - knot1_t`, which is `sim_tracking_err_mm[t+1]` (Franka
@@ -230,12 +254,14 @@ The other logs in that directory have the same keys:
 
 Same on-disk format (`EpisodeWriter` / `validate_episode`); the harness's `actions` come from the
 **controller's own published messages** (its Franka trajectory's knot 1, its UR line's target),
-not the offline commander's — `action = knot1/line(t+dt) - measured`, identically to the
-`osc_action_definition` used elsewhere. Extra `sim_*` keys per frame, on top of §1's:
+not the offline commander's — `--action-definition` (default `cmd_delta`: `knot1 - knot0` of the
+plan answering the tick, else the plan in force / `line(t+dt) - line(t)` of the UR line;
+`knot1_minus_measured` for models trained on it, which also feeds `sim_latent_pred`), plus the
+extras `sim_action_knot1_minus_measured` and `sim_realised_delta`. Extra `sim_*` keys per frame, on top of §1's:
 `sim_latent` (16, the encoder's `z`; NaN in baseline mode — no encoder runs), `sim_latent_pred`
 (16, the learned LCS's one-step-ahead prediction from the previous latent, learned mode only),
 `sim_goal_dist` (per-stage whitened distance to that stage's goal, learned mode only) and
 `sim_stage` (int, non-decreasing, `mpc_current_target_idx`; always 0 in baseline mode, which has
-no stages). See `docs/learned-mpc.md` for the full contract and how to run the harness; the
+no stages). See `docs/learned-mpc-reference.md` for the full contract and how to run the harness; the
 demonstration episode itself is collected with `--scenario nominal` (no perturbation, no
 excitation) and lives under `data/lcs/demo/`, never inside a training data dir.

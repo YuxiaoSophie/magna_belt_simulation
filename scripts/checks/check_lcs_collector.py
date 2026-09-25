@@ -241,13 +241,22 @@ def _check_tuples(name: str, data, backend: str) -> None:
     _require(np.array_equal(state[:, 33:40], data["sim_ee_ur"]),
              f"{name}: state[:, 33:40] != sim_ee_ur")
     definition = meta.get("lcs_format", {}).get("action_definition")
-    _require(definition == "knot1_minus_measured", f"{name}: action_definition {definition!r}")
-    k1 = np.asarray(data["sim_cmd_knot1_franka"])
-    err = float(np.abs(actions[:, :3] - (k1[:, :3] - state[:, 26:29])).max())
-    _require(err <= ACTION_TOL, f"{name}: actions[:, :3] != knot1 - measured ({err:.2e})")
-    ur1 = np.asarray(data["sim_cmd_ur_t1"])
-    err = float(np.abs(actions[:, 3:6] - (ur1[:, :3] - state[:, 33:36])).max())
-    _require(err <= ACTION_TOL, f"{name}: actions[:, 3:6] != UR line(t+dt) - measured ({err:.2e})")
+    _require(definition == "cmd_delta", f"{name}: action_definition {definition!r}")
+    k0, k1 = np.asarray(data["sim_cmd_knot0_franka"]), np.asarray(data["sim_cmd_knot1_franka"])
+    ur0, ur1 = np.asarray(data["sim_cmd_ur_t"]), np.asarray(data["sim_cmd_ur_t1"])
+    err = float(np.abs(actions[:, :3] - (k1[:, :3] - k0[:, :3])).max())
+    _require(err <= ACTION_TOL, f"{name}: actions[:, :3] != knot1 - knot0 ({err:.2e})")
+    err = float(np.abs(actions[:, 3:6] - (ur1[:, :3] - ur0[:, :3])).max())
+    _require(err <= ACTION_TOL, f"{name}: actions[:, 3:6] != UR line(t+dt) - line(t) ({err:.2e})")
+    old = np.asarray(data["sim_action_knot1_minus_measured"])
+    err = float(np.abs(old[:, :3] - (k1[:, :3] - state[:, 26:29])).max())
+    _require(err <= ACTION_TOL, f"{name}: old action[:, :3] != knot1 - measured ({err:.2e})")
+    err = float(np.abs(old[:, 3:6] - (ur1[:, :3] - state[:, 33:36])).max())
+    _require(err <= ACTION_TOL, f"{name}: old action[:, 3:6] != line(t+dt) - measured ({err:.2e})")
+    pre = np.asarray(data["sim_episode_step"]) < 0
+    _require(pre.any() and np.all(actions[pre] == 0.0),
+             f"{name}: no pre-hold rows or pre-hold actions not exactly 0")
+    _require(np.all(np.isnan(data["sim_realised_delta"][-1])), f"{name}: realised last row")
     _require(np.asarray(data["sim_cmd_knot0_franka"]).shape == k1.shape,
              f"{name}: sim_cmd_knot0_franka missing its (T, 7) shape")
     _require(np.array_equal(data["sim_render_step"], data["sim_step"]),
@@ -437,11 +446,14 @@ def check_c8(ctx: SimpleNamespace) -> str:
 
 def main() -> int:
     import argparse
+    global PRIVATE_LCM_URL
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--keep", action="store_true", help="keep the temp dir")
     parser.add_argument("--backend", choices=cli.BACKENDS, default="osc",
                         help="backend of C1-C7 (C8 always runs position)")
+    parser.add_argument("--lcm-url", default=PRIVATE_LCM_URL)
     args = parser.parse_args()
+    PRIVATE_LCM_URL = args.lcm_url
 
     from loguru import logger
     logger.remove()

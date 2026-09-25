@@ -223,8 +223,48 @@ def check_f2(ctx: SimpleNamespace) -> str:
     _require(err < 1e-9, f"action_vector error {err:.3e} >= 1e-9")
     _require(abs(np.linalg.norm(got[9:12]) - (2 * np.pi - 6.0)) < 1e-9,
              "UR delta across +-pi did not take the short way")
+    cmd_err = _cmd_delta_round_trip(ctx, frames)
     return (f"T {summary['T']}, utime step {summary['period_us']} us, "
-            f"pcd {summary['points']['pcd']}, action err {err:.1e}")
+            f"pcd {summary['points']['pcd']}, action err {err:.1e}; cmd_delta round trip "
+            f"err {cmd_err:.1e}, equal knots -> exactly 0")
+
+
+def _cmd_delta_round_trip(ctx: SimpleNamespace, frames: list[dict]) -> float:
+    """A ``cmd_delta`` episode: knots/lines from the synthetic poses, the helpers read back."""
+    _require(ld.DEFAULT_ACTION_DEFINITION == "cmd_delta", "default definition not cmd_delta")
+    writer = ld.EpisodeWriter(action_definition="cmd_delta")
+    rows = []
+    for i in range(N_FRAMES):
+        f, g = frames[i], frames[i + 1]
+        # Last row: a hold (knot1 == knot0, constant line) must give exactly 0.
+        k0, k1 = (f["ee_f"], g["ee_f"]) if i < N_FRAMES - 1 else (f["ee_f"], f["ee_f"])
+        u0, u1 = (f["ee_u"], g["ee_u"]) if i < N_FRAMES - 1 else (f["ee_u"], f["ee_u"])
+        rows.append((k0, k1, u0, u1))
+        state = f["state"].copy()
+        state[26:33], state[33:40] = f["ee_f"], f["ee_u"]
+        action = ld.command_action("cmd_delta", f["ee_f"], f["ee_u"], k0, k1, u0, u1)
+        step = 2700 + i * ld.SAMPLE_STEPS
+        writer.add_frame(step, step * ld.SIM_DT_S, state, action, f["pcd"], f["belt"],
+                         extras={"cmd_knot0_franka": k0, "cmd_knot1_franka": k1,
+                                 "cmd_ur_t": u0, "cmd_ur_t1": u1})
+    path = writer.write(ctx.tmp / "episode_cmd_delta.npz", "engaged")
+    summary = ld.validate_episode(path)
+    _require(summary["action_definition"] == "cmd_delta",
+             f"action_definition {summary['action_definition']!r}")
+    with np.load(path, allow_pickle=True) as d:
+        cmd = [d[k] for k in ("sim_cmd_knot0_franka", "sim_cmd_knot1_franka", "sim_cmd_ur_t",
+                              "sim_cmd_ur_t1")]
+        want = ld.command_actions("cmd_delta", d["state"], *cmd)
+        err = float(np.abs(want - d["actions"]).max())
+        _require(err == 0.0, f"cmd_delta re-derivation off by {err:.2e}")
+        _require(np.all(d["actions"][-1] == 0.0), "hold row cmd_delta not exactly 0")
+        k1m = ld.command_actions("knot1_minus_measured", d["state"], *cmd)
+        real = ld.realised_delta(d["state"])
+        _require(np.isnan(real[-1]).all() and np.isfinite(real[:-1]).all(),
+                 "realised_delta: last row not NaN")
+        # Synthetic knots are the next measured pose: knot1 - measured == realised.
+        _require(float(np.abs(k1m[:-1] - real[:-1]).max()) < 1e-12, "realised != knot1 - ee")
+    return err
 
 
 def _broken_copy(src: Path, dst: Path, mutate) -> Path:

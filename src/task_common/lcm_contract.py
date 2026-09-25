@@ -69,6 +69,8 @@ class LcmChannels:
     round_belt_state_channel: str = "RoundBeltState"
     # Hardware UR state; the sim keeps publishing ur_state_channel_sim.
     ur_state_channel: str = "UR_STATE"
+    # Opt-in per-solve debug of the learned MPC (magna learned_mpc.debug_channel).
+    learned_mpc_debug_channel: str = "LEARNED_MPC_DEBUG"
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> LcmChannels:

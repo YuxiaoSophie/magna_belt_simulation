@@ -15,7 +15,7 @@ group "simulation subsystems" {
 
 group "perception" {
     cmd "latent-encoder" {
-        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_learned_encoder.sh --lcm-url udpm://239.255.76.95:7695?ttl=0 --deploy /home/hienbui/git/lcs_learning/outputs/sim_belt_ablation_20260924/ckpt_decoded_only/deploy_demo/deploy.npz --ur-state-channel UR_STATE_SIM --state-match exact --params /home/hienbui/git/magna-deploy-learned-lcs/systems/parameters/round_belt_controller_params_learned_sim.yaml";
+        exec = "/home/hienbui/git/magna_belt_simulation-main/procman/run_learned_encoder.sh --lcm-url udpm://239.255.76.95:7695?ttl=0 --deploy /home/hienbui/git/lcs_learning/outputs/sim_belt_v2_20260925/deploy_v2_flat_pp2/deploy.npz --ur-state-channel UR_STATE_SIM --state-match exact --params /home/hienbui/git/magna-deploy-learned-lcs/systems/parameters/round_belt_controller_params_learned_sim.yaml";
         host = "localhost";
     }
 }

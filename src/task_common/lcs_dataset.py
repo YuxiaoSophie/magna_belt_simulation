@@ -31,7 +31,12 @@ ACTION_DEFINITIONS = {
     "knot1_minus_measured": "commanded pose one knot dt ahead - measured EE pose at t",
     "knot1_minus_knot0": "knot 1 - knot 0 of the command published at t",
     "cmd_t1_minus_cmd_t": "commanded target at t+1 - commanded target at t",
+    "cmd_delta": "Franka knot1 - knot0 of the command published at t; UR line(t+dt) - line(t) "
+                 "of the line in force at t",
 }
+DEFAULT_ACTION_DEFINITION = "cmd_delta"
+# Definitions computable from the OSC collector's / harness's ``sim_cmd_*`` + measured poses.
+CMD_ACTION_DEFINITIONS = ("cmd_delta", "knot1_minus_measured")
 
 STATE_DIM = 40
 ACTION_DIM = 12
@@ -106,6 +111,8 @@ def delta_rotvec(quat0_wxyz, quat1_wxyz) -> np.ndarray:
     """Rotation vector of ``R1 * R0^T`` (world-frame delta), angle in ``[0, pi]``."""
     q0 = _as_vec(quat0_wxyz, 4, "quat0")
     q1 = _as_vec(quat1_wxyz, 4, "quat1")
+    if np.array_equal(q0, q1):
+        return np.zeros(3)  # the product below leaves ~1e-16 residue; holds must be exactly 0
     q0, q1 = q0 / np.linalg.norm(q0), q1 / np.linalg.norm(q1)
     q = _quat_mul_wxyz(q1, q0 * np.array([1.0, -1.0, -1.0, -1.0]))
     if q[0] < 0.0:
@@ -143,6 +150,68 @@ def action_vector(pose_franka_t, pose_franka_t1, pose_ur_t, pose_ur_t1) -> np.nd
         f1[:3] - f0[:3], u1[:3] - u0[:3],
         delta_rotvec(f0[3:], f1[3:]), delta_rotvec(u0[3:], u1[3:]),
     ])
+
+
+def command_action(definition: str, ee_f, ee_u, knot0, knot1, ur_t, ur_t1) -> np.ndarray:
+    """One row's action under ``definition`` (``CMD_ACTION_DEFINITIONS``); poses ``xyz_wxyz``."""
+    if definition == "cmd_delta":
+        return action_vector(knot0, knot1, ur_t, ur_t1)
+    if definition == "knot1_minus_measured":
+        return action_vector(ee_f, knot1, ee_u, ur_t1)
+    raise ValueError(f"action_definition {definition!r} not in {CMD_ACTION_DEFINITIONS}")
+
+
+def command_actions(definition: str, state, knot0, knot1, ur_t, ur_t1) -> np.ndarray:
+    """``(T, 12)`` :func:`command_action` over an episode (measured poses from ``state``)."""
+    state = np.asarray(state, dtype=np.float64)
+    return np.stack([command_action(definition, state[t, 26:33], state[t, 33:40], knot0[t],
+                                    knot1[t], ur_t[t], ur_t1[t]) for t in range(len(state))])
+
+
+def realised_delta(state) -> np.ndarray:
+    """``(T, 12)`` ``measured_{t+1} - measured_t`` in the action layout; last row NaN."""
+    state = np.asarray(state, dtype=np.float64)
+    out = np.full((len(state), ACTION_DIM), np.nan)
+    for t in range(len(state) - 1):
+        out[t] = action_vector(state[t, 26:33], state[t + 1, 26:33], state[t, 33:40],
+                               state[t + 1, 33:40])
+    return out
+
+
+ACTION_DIM_NAMES = ("f_x", "f_y", "f_z", "u_x", "u_y", "u_z",
+                    "f_rx", "f_ry", "f_rz", "u_rx", "u_ry", "u_rz")
+
+
+def causality_slopes(actions, realised) -> list[dict]:
+    """Per action dim: OLS slope (with intercept) of realised vs ``u``, ``r``, ``u`` std, rows.
+
+    Rows with a non-finite realised delta (each episode's last) are dropped.
+    """
+    u = np.asarray(actions, dtype=np.float64)
+    r = np.asarray(realised, dtype=np.float64)
+    keep = np.all(np.isfinite(r), axis=1) & np.all(np.isfinite(u), axis=1)
+    u, r = u[keep], r[keep]
+    out = []
+    for j, name in enumerate(ACTION_DIM_NAMES):
+        du, dr = u[:, j] - u[:, j].mean(), r[:, j] - r[:, j].mean()
+        var = float(du @ du)
+        slope = float(du @ dr) / var if var > 0.0 else math.nan
+        denom = math.sqrt(var * float(dr @ dr))
+        out.append({"dim": name, "slope": slope,
+                    "r": float(du @ dr) / denom if denom > 0.0 else math.nan,
+                    "u_std": float(u[:, j].std()), "realised_std": float(r[:, j].std()),
+                    "rows": len(u)})
+    return out
+
+
+def causality_table(rows: list[dict]) -> str:
+    """:func:`causality_slopes` as text (rotations in mrad, translations in mm)."""
+    lines = [f"{'dim':<6}{'slope':>8}{'r':>7}{'u std':>9}{'real std':>10}  (mm / mrad)"]
+    for row in rows:
+        lines.append(f"{row['dim']:<6}{row['slope']:>8.3f}{row['r']:>7.3f}"
+                     f"{row['u_std'] * 1e3:>9.3f}{row['realised_std'] * 1e3:>10.3f}")
+    lines.append(f"rows {rows[0]['rows'] if rows else 0}")
+    return "\n".join(lines)
 
 
 def rest_belt_bodies(n_bodies: int = BELT_BODIES) -> np.ndarray:

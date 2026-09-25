@@ -11,10 +11,14 @@ camera point cloud, labels the outcome (``round_belt_task.outcome``) and writes
 ``--backend osc`` (default): the Franka is torque-driven by magna's Cartesian OSC (child process
 on the private ``--lcm-url``, lock-step), commanded by an emulation of magna's waypoint generator
 (``round_belt_task.commander``) from the MEASURED pose every control step; the UR follows magna's
-2-knot line by per-step IK. ``state`` holds the measured poses, ``action`` = the commanded pose one
-knot dt ahead minus the measured pose at the sample tick: knot 1 of the published command (Franka)
-and the UR line at t + dt (``action_definition`` ``knot1_minus_measured``); knot 0 / the line at t
-are kept as ``sim_cmd_*``. Optional bounded excitation of Franka knots 1..6.
+2-knot line by per-step IK. ``state`` holds the measured poses, ``action`` (``--action-definition``)
+= ``cmd_delta`` (default): the commanded per-dt displacement, Franka knot 1 - knot 0 of the command
+published at the sample tick, UR line(t + dt) - line(t) of the line in force; or
+``knot1_minus_measured``: knot 1 / line(t + dt) minus the measured pose. Both, the raw commands
+(``sim_cmd_*``) and the realised ``measured_{t+1} - measured_t`` are always stored. Each episode
+starts with ``--pre-hold-s`` of hold frames (``sim_episode_step < 0``, phase ``prehold``, u = 0).
+Optional OU excitation of Franka knots 1..6 and of the UR target pose (``--excite-ur-*``); the
+UR offset is scaled down per sample so the excited target keeps the guard's min clearance.
 The board clearance guard models only the 2F-85 (UR); the Franka is bounded by the excitation
 cap + z-floor and its measured finger_tip-to-plate clearance is recorded.
 
@@ -26,6 +30,8 @@ Run:
     uv run python scripts/collect_lcs_dataset.py --episodes 4 --seed 1 --dry-run
     uv run python scripts/collect_lcs_dataset.py --episodes 4 --record --out data/lcs/smoke
     uv run python scripts/collect_lcs_dataset.py --backend position --episodes 4
+    uv run python scripts/collect_lcs_dataset.py --episodes 24 \\
+        --start-states data/lcs/start_states/grasp_variants/set2 --variants gv_01,gv_02
 """
 
 from __future__ import annotations
@@ -33,6 +39,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import math
 import sys
 import time
 from collections import Counter
@@ -53,14 +60,21 @@ from round_belt_task.commander import (
     EXCITE_MODES,
     EXCITE_RAMP_S,
     CommanderParams,
+    FrankaCommand,
     FrankaTarget,
     FrankaWaypointCommander,
     OuExcitation,
+    UrCommand,
+    UrLine,
     UrLineCommander,
     UrTarget,
     angular_distance,
     draw_excite,
     mat3_to_quat,
+    parse_saved_traj_message,
+    pose_mat,
+    quat_axis_angle,
+    quat_to_mat3,
     saved_traj_message,
     targets_from_waypoints,
     x_tool0_tracking,
@@ -103,8 +117,12 @@ PURE_TRANSLATION_DWELL_S = 0.5
 UR_IK_POS_TOL, UR_IK_ROT_TOL = 1e-4, 7.5e-4
 UR_VELOCITY_LEAD = 1.0
 OSC_LOG_ERRORS = ("resetting", "Exception caught")
-OSC_ACTION_DEFINITION = "knot1_minus_measured"
+OSC_ACTION_DEFINITION = lcs.DEFAULT_ACTION_DEFINITION
 EXCITE_DEFAULTS = {"ou": (1.5, 1.0), "white": (4.0, 2.0)}  # (pos mm, rot deg)
+EXCITE_UR_DEFAULTS = (2.0, 1.0)  # ou only: per-axis std (mm, deg)
+UR_SCALE_BISECT = 12
+PRE_HOLD_S = 1.5
+PREHOLD_PHASE = "prehold"
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -139,6 +157,11 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--start-state", type=Path, default=None,
                    help=f"default {DEFAULT_START_STATES['osc'].name} (osc) / "
                         f"{DEFAULT_START_STATES['position'].name} (position)")
+    p.add_argument("--start-states", type=Path, default=None,
+                   help="snapshot .npz or a grasp-variant set dir (index.json); episodes "
+                        "round-robin over its held states (osc only, excludes --start-state)")
+    p.add_argument("--variants", default=None,
+                   help="comma list of variant ids of --start-states (default: all held)")
     p.add_argument("--fresh-pick", action="store_true",
                    help="position backend only: run the nominal pick per episode (slow)")
     p.add_argument("--record", action="store_true",
@@ -164,11 +187,24 @@ def create_parser() -> argparse.ArgumentParser:
                    help="knot step capped to factor * speed * dt")
     p.add_argument("--excite-down-mm", type=float, default=2.0,
                    help="largest downward excitation offset")
+    p.add_argument("--excite-ur-pos-mm", type=float, default=EXCITE_UR_DEFAULTS[0],
+                   help="osc + ou: UR target offset per-axis std (z clipped >= 0); 0 with "
+                        "--excite-ur-rot-deg 0 = off")
+    p.add_argument("--excite-ur-rot-deg", type=float, default=EXCITE_UR_DEFAULTS[1],
+                   help="osc + ou: UR target rotation-vector per-axis std")
+    p.add_argument("--action-definition", choices=lcs.CMD_ACTION_DEFINITIONS,
+                   default=lcs.DEFAULT_ACTION_DEFINITION, help="osc: the recorded actions")
+    p.add_argument("--pre-hold-s", type=float, default=PRE_HOLD_S,
+                   help="osc: hold frames sampled after the settle, before the first move")
     p.add_argument("--max-episode-s", type=float, default=20.0,
                    help="osc: skip an episode whose targets are not all reached by then")
     p.add_argument("--scenario", choices=SCENARIOS, default=None,
                    help="osc: pure_translation = one Franka target 30 mm -x, 10 mm +z, UR still; "
                         "nominal = the unperturbed waypoints (intents ignored, excitation off)")
+    p.add_argument("--hold-ur-gripper", action="store_true",
+                   help="osc: keep the start-state UR byte (waypoint bytes logged, not applied)")
+    p.add_argument("--nominal-ur-dz-mm", default=None, metavar="A[:B]",
+                   help="nominal scenario: UR z offset (mm) of pre_place_2 (A) and place_3 (B = A)")
     p.add_argument("--arm-ke", type=float, default=ARM_TARGET_KE)
     p.add_argument("--arm-kd", type=float, default=ARM_TARGET_KD)
     p.add_argument("--params", type=Path, default=MAGNA_PARAMS_SIM_YAML)
@@ -190,6 +226,45 @@ def parse_thresholds(pairs: list[str]) -> OutcomeThresholds:
             raise ValueError(f"--thresholds {pair!r}: expected KEY=VALUE, KEY in {list(fields)}")
         kw[key] = int(value) if fields[key] in (int, "int") else float(value)
     return dataclasses.replace(DEFAULT_THRESHOLDS, **kw)
+
+
+def parse_ur_dz(text: str | None) -> dict[str, float] | None:
+    """``"A[:B]"`` -> ``{pre_place_2: A, place_3: B}`` in mm (B defaults to A)."""
+    if text is None:
+        return None
+    parts = [float(v) for v in str(text).split(":")]
+    if len(parts) not in (1, 2):
+        raise ValueError(f"--nominal-ur-dz-mm {text!r}: want A or A:B")
+    return dict(zip(pert.PERTURBED_LABELS, (parts[0], parts[-1])))
+
+
+def hold_options(args, scenario: str | None) -> dict:
+    """The opt-in UR options; ``{}`` when both are off (outputs unchanged)."""
+    out = {}
+    if getattr(args, "hold_ur_gripper", False):
+        out["hold_ur_gripper"] = True
+    dz = parse_ur_dz(getattr(args, "nominal_ur_dz_mm", None))
+    if dz is not None:
+        if scenario != "nominal":
+            raise ValueError("--nominal-ur-dz-mm needs --scenario nominal")
+        out["nominal_ur_dz_mm"] = dz
+    return out
+
+
+def override_waypoints(waypoints: list, opts: dict) -> tuple[list, dict | None]:
+    """UR z offsets and/or stripped UR gripper bytes; ``(waypoints, stripped bytes or None)``."""
+    dz = opts.get("nominal_ur_dz_mm") or {}
+    hold = opts.get("hold_ur_gripper", False)
+    out, stripped = [], {}
+    for w in waypoints:
+        if w.label in dz and w.ur_pos is not None:
+            w = dataclasses.replace(w, ur_pos=np.asarray(w.ur_pos, float)
+                                    + np.array([0.0, 0.0, dz[w.label] * 1e-3]))
+        if hold and w.ur_gripper_byte is not None:
+            stripped[w.label] = int(w.ur_gripper_byte)
+            w = dataclasses.replace(w, ur_gripper_byte=None)
+        out.append(w)
+    return out, (stripped if hold else None)
 
 
 def sample_steps(period_s: float) -> int:
@@ -373,6 +448,47 @@ def resolve_start_state(args) -> Path:
     return Path(args.start_state) if args.start_state else DEFAULT_START_STATES[args.backend]
 
 
+def _resolve_file(base: Path, file: str) -> Path:
+    path = Path(file)
+    if path.is_absolute():
+        return path
+    for root in (base, REPO_ROOT):
+        if (root / path).exists():
+            return root / path
+    return base / path
+
+
+def load_start_set(path: Path, variants: str | None) -> tuple[list[tuple[str, Path]], dict]:
+    """``([(id, file)], meta)`` from a snapshot ``.npz`` or a variant-set dir (``index.json``)."""
+    path = Path(path)
+    if path.is_file():
+        if variants:
+            raise ValueError("--variants needs a variant-set dir for --start-states")
+        return [(path.stem, path)], {"kind": "snapshot", "path": str(path)}
+    index_path = path / "index.json"
+    if not index_path.is_file():
+        raise FileNotFoundError(f"{path}: neither a snapshot .npz nor a dir with index.json")
+    index = json.loads(index_path.read_text())
+    by_id = {str(r["id"]): r for r in index.get("variants", [])}
+    wanted = _csv(variants) if variants else list(by_id)
+    missing = [v for v in wanted if v not in by_id]
+    if missing:
+        raise ValueError(f"variants {missing} not in {index_path} ({sorted(by_id)})")
+    states = []
+    for vid in wanted:
+        row = by_id[vid]
+        if row.get("file") is None or row.get("held") is False:
+            logger.warning(f"[LCS] variant {vid} has no held start state; skipped")
+            continue
+        states.append((vid, _resolve_file(path, row["file"])))
+    if not states:
+        raise ValueError(f"{path}: no held start state among {wanted}")
+    meta = {"kind": "variant_set", "path": str(path), "set": index.get("set"),
+            "index_sha256": _sha256(index_path), "variants": [v for v, _ in states],
+            "assignment": "round-robin: episode i uses variants[i % len(variants)]"}
+    return states, meta
+
+
 def excitation_config(args, scenario: str | None) -> dict:
     mode = getattr(args, "excite_mode", "white")
     pos_mm, rot_deg = EXCITE_DEFAULTS[mode]
@@ -388,6 +504,18 @@ def excitation_config(args, scenario: str | None) -> dict:
                    pos_meaning="per-axis stationary std", rot_meaning="per-axis rotvec std")
     else:
         cfg.update(pos_meaning="ball radius", rot_meaning="max angle")
+    ur_pos = getattr(args, "excite_ur_pos_mm", 0.0)
+    ur_rot = getattr(args, "excite_ur_rot_deg", 0.0)
+    cfg["ur"] = {
+        "on": scenario is None and mode == "ou" and (ur_pos > 0.0 or ur_rot > 0.0),
+        "pos_mm": ur_pos, "rot_deg": ur_rot, "z_floor_mm": 0.0, "rng_stream": 11,
+        "target": "UR tracking-frame target fed to UrLineCommander.tick (regenerates the line "
+                  "every sample)",
+        "guard": "per sample, the offset is scaled so the excited target keeps >= "
+                 "min_clearance (clearance.required_lift on the offset pose); the scale falls "
+                 "at once and recovers at 1/ramp_s per second",
+        "recover_s": EXCITE_RAMP_S,
+    }
     return cfg
 
 
@@ -418,26 +546,43 @@ def collect(args: argparse.Namespace, ranges: dict | None = None,
     out = args.out or DEFAULT_OUT_ROOT / f"{time.strftime('%Y%m%d-%H%M%S')}-{args.label}"
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
-    start_state = resolve_start_state(args)
+    start_states = getattr(args, "start_states", None)
+    set_states: list[tuple[str, Path, object]] = []
+    if start_states is not None:
+        if backend != "osc" or args.start_state is not None:
+            raise ValueError("--start-states needs --backend osc and no --start-state")
+        states, set_meta = load_start_set(start_states, getattr(args, "variants", None))
+        set_states = [(vid, f, sim_snapshot.load(f)) for vid, f in states]
+    elif getattr(args, "variants", None):
+        raise ValueError("--variants needs --start-states")
+    start_state = set_states[0][1] if set_states else resolve_start_state(args)
     start_meta: dict = {"path": None if args.fresh_pick else str(start_state)}
     snap = None
     if not args.fresh_pick:
-        snap = sim_snapshot.load(start_state)
+        snap = set_states[0][2] if set_states else sim_snapshot.load(start_state)
         start_meta.update(sha256=_sha256(start_state), label=snap.meta.get("label"),
                           notes=snap.meta.get("notes"), created=snap.meta.get("created"),
                           git_commit=snap.meta.get("git_commit"),
                           step_index=snap.step_index, sim_time=snap.sim_time)
+    if set_states:
+        start_meta = {**set_meta, "states": [{"id": v, "file": str(f), "sha256": _sha256(f)}
+                                             for v, f, _ in set_states]}
     excite = excitation_config(args, scenario) if backend == "osc" else None
+    opts = hold_options(args, scenario)
+    if opts and backend != "osc":
+        raise ValueError("--hold-ur-gripper / --nominal-ur-dz-mm need --backend osc")
     index = {
         "args": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
         "git": _git(), "backend": backend, "scenario": scenario, "start_state": start_meta,
         "sample_period_s": n * lcs.SIM_DT_S,
         "sample_steps": n, "thresholds": dataclasses.asdict(thresholds),
-        "action_definition": OSC_ACTION_DEFINITION if backend == "osc" else None,
+        "action_definition": (getattr(args, "action_definition", OSC_ACTION_DEFINITION)
+                              if backend == "osc" else None),
+        "pre_hold_s": getattr(args, "pre_hold_s", 0.0) if backend == "osc" else None,
         "belt_sampling": lcs.BELT_SAMPLING,
         "ranges": pert.ranges_to_dict(ranges), "labels": list(LABELS),
         "belt_tangent": tangent, "min_clearance_mm": args.min_clearance,
-        "clearance_every": CLEARANCE_EVERY, "excitation": excite, "episodes": [],
+        "clearance_every": CLEARANCE_EVERY, "excitation": excite, **opts, "episodes": [],
     }
     index_path = out / "index.json"
     _write_json(index_path, index)
@@ -475,12 +620,15 @@ def collect(args: argparse.Namespace, ranges: dict | None = None,
             ctx = OscContext(args=args, out=out, n=n, thresholds=thresholds, tangent=tangent,
                              snap=snap, nominal=nominal, board=board, gripper=gripper,
                              excite=excite, scenario=scenario, osc=osc_info,
-                             start_state=start_state)
+                             start_state=start_state, opts=opts)
         for i, p in enumerate(perts):
             if ctx is None:
                 row = run_episode(sim, i, p, args, out, n, thresholds, tangent, snap, initial,
                                   nominal, board, gripper)
             else:
+                variant = None
+                if set_states:
+                    variant, ctx.start_state, ctx.snap = set_states[i % len(set_states)]
                 try:
                     row = run_osc_episode(sim, ctx, i, p)
                 except OscTimeout as exc:
@@ -496,6 +644,8 @@ def collect(args: argparse.Namespace, ranges: dict | None = None,
                     row = {"file": None, "intent": p.intent, "perturbation": p.to_dict(),
                            "backend": backend, "status": "skipped", "reason": "osc timeout",
                            "error": str(exc)}
+                if variant is not None:
+                    row["start_variant"] = variant
             index["episodes"].append(row)
             _write_json(index_path, index)
             if row["status"] == "ok":
@@ -692,6 +842,7 @@ class OscContext:
     scenario: str | None
     osc: dict
     start_state: Path
+    opts: dict = dataclasses.field(default_factory=dict)
     params: CommanderParams = dataclasses.field(default_factory=CommanderParams)
     x_tool0: np.ndarray = dataclasses.field(default_factory=x_tool0_tracking)
 
@@ -711,6 +862,9 @@ class OscTick:
     X_u: np.ndarray
     cmd: object
     ur: object
+    ur_raw: np.ndarray | None = None
+    ur_applied: np.ndarray | None = None
+    ur_scale: float = 1.0
 
 
 class OscEpisodeSampler(EpisodeSampler):
@@ -742,6 +896,9 @@ class OscEpisodeSampler(EpisodeSampler):
             "hold": bool(cmd.hold), "phase": self.phase_index[cmd.phase],
             "excite_dpos": np.zeros(3) if ex is None else np.asarray(ex.dpos, np.float64),
             "excite_rotvec": np.zeros(3) if ex is None else np.asarray(ex.axis) * ex.angle,
+            "excite_ur_raw": np.zeros(6) if tick.ur_raw is None else tick.ur_raw.copy(),
+            "excite_ur": np.zeros(6) if tick.ur_applied is None else tick.ur_applied.copy(),
+            "ur_excite_scale": float(tick.ur_scale),
             "osc_utime": round(tick.t * 1e6),
             "belt": body_q[sim.info.belt_bodies, :3].astype(np.float64),
             "pulley_raw": body_q[self._large].astype(np.float64),
@@ -763,7 +920,8 @@ class OscEpisodeSampler(EpisodeSampler):
 def tracking_errors(frames: list[dict]) -> np.ndarray:
     """``(T, 2)`` mm, 0 at t=0: Franka ``|ee_t - knot1_{t-1}|``, UR ``|ee_u_t - line_{t-1}(t)|``.
 
-    Equals ``|ee_t - (ee_{t-1} + u_{t-1})|`` (position part) under ``knot1_minus_measured``.
+    Equals ``|ee_t - (ee_{t-1} + u_{t-1})|`` (position part) under ``knot1_minus_measured``
+    (``sim_action_knot1_minus_measured``).
     """
     out = np.zeros((len(frames), 2))
     for t in range(1, len(frames)):
@@ -773,15 +931,23 @@ def tracking_errors(frames: list[dict]) -> np.ndarray:
     return out
 
 
-def build_osc_writer(frames: list[dict], n: int, pcd: bool
+def frame_action(fr: dict, definition: str) -> np.ndarray:
+    return lcs.command_action(definition, fr["ee_f"], fr["ee_u"], fr["knot0"], fr["knot1"],
+                              fr["ur_t"], fr["ur_t1"])
+
+
+def build_osc_writer(frames: list[dict], n: int, pcd: bool,
+                     definition: str = OSC_ACTION_DEFINITION
                      ) -> tuple[lcs.EpisodeWriter, np.ndarray]:
-    writer = lcs.EpisodeWriter(sample_steps=n, action_definition=OSC_ACTION_DEFINITION)
+    writer = lcs.EpisodeWriter(sample_steps=n, action_definition=definition)
     track = tracking_errors(frames)
+    states = [lcs.state_vector(fr["q_f"], fr["q_u"], fr["v_f"], fr["v_u"], fr["ee_f"], fr["ee_u"])
+              for fr in frames]
+    realised = lcs.realised_delta(np.stack(states))
     for t, fr in enumerate(frames):
-        state = lcs.state_vector(fr["q_f"], fr["q_u"], fr["v_f"], fr["v_u"], fr["ee_f"],
-                                 fr["ee_u"])
+        state = states[t]
         # Every row, the last included: the command published at this tick (no zero padding).
-        action = lcs.action_vector(fr["ee_f"], fr["knot1"], fr["ee_u"], fr["ur_t1"])
+        action = frame_action(fr, definition)
         cloud = lcs.camera_points(fr["pcd"]) if pcd else np.zeros((1, 3), np.float32)
         writer.add_frame(fr["sim_step"], fr["time"], state, action, cloud,
                          lcs.belt_points_ordered(fr["belt"]), lcs.kinematic_points(),
@@ -803,8 +969,64 @@ def build_osc_writer(frames: list[dict], n: int, pcd: bool
                              "board_clearance_mm": np.float32(fr["clearance_mm"]),
                              "franka_tip_clearance_mm": np.float32(fr["tip_clearance_mm"]),
                              "tracking_err_mm": track[t],
+                             "action_knot1_minus_measured":
+                                 frame_action(fr, "knot1_minus_measured"),
+                             "realised_delta": realised[t],
+                             "excite_ur_dpos_m": fr["excite_ur"][:3],
+                             "excite_ur_rotvec": fr["excite_ur"][3:],
+                             "excite_ur_raw": fr["excite_ur_raw"],
+                             "ur_excite_scale": np.float64(fr["ur_excite_scale"]),
                          })
     return writer, track
+
+
+class UrExciteGuard:
+    """Scales the UR target offset so the excited target keeps ``min_clearance`` (smoothly).
+
+    The required scale is the largest ``s`` in [0, 1] whose offset pose needs no
+    :func:`clearance.required_lift`; the applied scale falls to it at once and recovers at
+    ``1 / recover_s`` per second, so a binding guard never snaps the offset back.
+    """
+
+    def __init__(self, board, gripper, min_clearance_m: float, recover_s: float) -> None:
+        self.board, self.gripper, self.min_c = board, gripper, float(min_clearance_m)
+        self.rate = 1.0 / recover_s if recover_s > 0.0 else math.inf
+        self.scale, self.t = 1.0, None
+        self._raw: np.ndarray | None = None
+
+    @staticmethod
+    def target(base: UrTarget, offset: np.ndarray) -> UrTarget:
+        """``base`` moved by ``offset = (dpos, rotvec)``, rotation applied on the left (world)."""
+        angle = float(np.linalg.norm(offset[3:]))
+        R = quat_to_mat3(base.quat_wxyz)
+        if angle > 0.0:
+            R = quat_to_mat3(quat_axis_angle(offset[3:], angle)) @ R
+        return UrTarget(pos=base.pos + offset[:3], quat_wxyz=mat3_to_quat(R), byte=base.byte)
+
+    def _clear(self, base: UrTarget, offset: np.ndarray, jaws) -> bool:
+        tgt = self.target(base, offset)
+        X = pose_mat(tgt.pos, tgt.quat_wxyz)
+        return all(clr.required_lift(self.board, self.gripper, X, self.min_c, jaw)
+                   <= clr.CLAMP_TOL_M for jaw in jaws)
+
+    def required(self, base: UrTarget, raw: np.ndarray, jaws) -> float:
+        if self.min_c <= 0.0 or not np.any(raw) or self._clear(base, raw, jaws):
+            return 1.0
+        if not self._clear(base, 0.0 * raw, jaws):
+            return 0.0
+        lo, hi = 0.0, 1.0
+        for _ in range(UR_SCALE_BISECT):
+            mid = 0.5 * (lo + hi)
+            lo, hi = (mid, hi) if self._clear(base, mid * raw, jaws) else (lo, mid)
+        return lo
+
+    def apply(self, t: float, base: UrTarget, raw: np.ndarray, jaws) -> np.ndarray:
+        """The applied offset for this tick (re-evaluated only when ``raw`` changes)."""
+        if self._raw is None or not np.array_equal(raw, self._raw):
+            rise = math.inf if self.t is None else self.rate * (t - self.t)
+            self.scale = min(self.required(base, raw, jaws), self.scale + rise)
+            self.t, self._raw = t, raw.copy()
+        return self.scale * raw
 
 
 def _scenario_targets(sim) -> tuple[list[FrankaTarget], list[UrTarget | None]]:
@@ -820,7 +1042,8 @@ def _scenario_targets(sim) -> tuple[list[FrankaTarget], list[UrTarget | None]]:
 def _guard(sim, ctx: OscContext, p: pert.Perturbation):
     """Perturbed, clamped waypoints + the path check on straight lines from the measured poses."""
     args = ctx.args
-    waypoints, clamp = clr.clamp_waypoints(ctx.nominal, p, ctx.tangent, ctx.board, ctx.gripper,
+    nominal, _ = override_waypoints(ctx.nominal, ctx.opts) if ctx.opts else (ctx.nominal, None)
+    waypoints, clamp = clr.clamp_waypoints(nominal, p, ctx.tangent, ctx.board, ctx.gripper,
                                            min_clearance=args.min_clearance * 1e-3)
     q_f, q_u = sim.arm_positions()
     meas_f, meas_u = FrankaTip.fk(q_f), UrTracking.fk(q_u)
@@ -858,6 +1081,10 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
     name = f"episode_{i:04d}"
     row = {"file": f"{name}.npz", "intent": p.intent, "perturbation": p.to_dict(),
            "backend": "osc", "scenario": ctx.scenario, "excite": bool(ctx.excite["on"])}
+    opts_meta = dict(ctx.opts)
+    if ctx.opts.get("hold_ur_gripper"):
+        opts_meta["ur_gripper_bytes_not_applied"] = override_waypoints(ctx.nominal, ctx.opts)[1]
+    row.update(opts_meta)
     sim.restore(ctx.snap, settle_steps=0)
     timing["restore"] = time.perf_counter() - t0
     t1 = time.perf_counter()
@@ -878,7 +1105,7 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
     timing["guard"] = time.perf_counter() - t2
     last = len(f_targets) - 1
     phase_labels = [f"{kind}:{t.label}" for t in f_targets for kind in ("move", "hold")]
-    phase_labels.append("done")
+    phase_labels += ["done", PREHOLD_PHASE]
 
     hand0, byte0 = sim.gripper_commands()
     franka = FrankaWaypointCommander(f_targets, params, hand_mm=hand0)
@@ -893,12 +1120,24 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
         ou = OuExcitation(ex_rng, ex_args[0], ex_args[1], ex_cfg["tau_s"], n * lcs.SIM_DT_S,
                           ex_args[2], ex_args[3], ramp_s=ex_cfg["ramp_s"])
     fade_m = ex_cfg.get("fade_dist_mm", 0.0) * 1e-3
+    ur_cfg = ex_cfg.get("ur") or {"on": False}
+    ou_ur = guard = None
+    if ur_cfg["on"]:
+        ou_ur = OuExcitation(np.random.default_rng([args.seed, i, ur_cfg["rng_stream"]]),
+                             ur_cfg["pos_mm"] * 1e-3, np.radians(ur_cfg["rot_deg"]),
+                             ex_cfg["tau_s"], n * lcs.SIM_DT_S, 1.0, 0.0,
+                             ramp_s=ex_cfg["ramp_s"])
+        guard = UrExciteGuard(ctx.board, ctx.gripper, args.min_clearance * 1e-3,
+                              ur_cfg["recover_s"])
     clip = {"active_steps": 0, "floor_steps": 0, "cap_steps": 0}
     u_coords = sim.arm_coords()[1]
     plate_top = ctx.plate_top_z
-    s0 = sim.step_index + 1  # the hook runs after control_step advanced the counter
+    pre_n = max(0, round(getattr(args, "pre_hold_s", 0.0) / (n * lcs.SIM_DT_S)))
+    # The hook runs after control_step advanced the counter; step 0 = first commander tick.
+    s0 = sim.step_index + 1 + pre_n * n
     t_start = sim.osc_time_s(s0)
-    state = {"tick": None, "excite": None, "hook_s": 0.0, "tip_min": float("inf")}
+    state = {"tick": None, "excite": None, "hook_s": 0.0, "tip_min": float("inf"),
+             "ur_raw": np.zeros(6), "ur_base": None}
     latched_at: dict[str, float] = {}
     latch_err: dict[str, float] = {}
 
@@ -918,10 +1157,10 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
         # Excite knots 1..6 except in the last target's hold/dwell/settle (outcome window).
         quiet = franka.index == last and (
             franka.latched or franka.is_reached(pos_f, quat_f, e_pos, e_ori))
+        # Fade so the offset is 0 by the place_3 reach: a held offset would shift the latch.
+        fade = quiet or (franka.index == last and float(
+            np.linalg.norm(pos_f - f_targets[last].pos)) <= fade_m)
         if ou is not None:
-            # Fade so the offset is 0 by the place_3 reach: a held offset would shift the latch.
-            fade = quiet or (franka.index == last and float(
-                np.linalg.norm(pos_f - f_targets[last].pos)) <= fade_m)
             if fade:
                 state["excite"] = ou.fade(t)
             elif k % n == 0:
@@ -948,8 +1187,29 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
             latch_err[label] = float(np.linalg.norm(pos_f - f_targets[cmd.latched_index].pos)
                                      ) * 1e3
         ur.on_latch(cmd.latched_index)
-        ur_cmd = ur.tick(t, X_u, u_targets[cmd.target_index])
-        state["tick"] = OscTick(k, t, ee_f, X_u, cmd, ur_cmd)
+        ur_target = u_targets[cmd.target_index]
+        state["ur_base"] = ur_target if ur_target is not None else state["ur_base"]
+        applied, scale = None, 1.0
+        if ou_ur is not None and state["ur_base"] is not None:
+            ex_ur = None
+            if fade:
+                ex_ur = ou_ur.fade(t)
+            elif k % n == 0:
+                ex_ur = ou_ur.step() if k > 0 else ou_ur.excite()
+            if fade or k % n == 0:
+                raw = np.zeros(6) if ex_ur is None else np.concatenate(
+                    [ex_ur.dpos, np.asarray(ex_ur.axis) * ex_ur.angle])
+                raw[2] = max(raw[2], 0.0)  # never below the nominal target
+                state["ur_raw"] = raw
+            base = state["ur_base"]
+            jaws = tuple(dict.fromkeys(b for b in (ur.byte, base.byte) if b is not None)) \
+                or (None,)
+            applied = guard.apply(t, base, state["ur_raw"], jaws)
+            scale = guard.scale
+            ur_target = UrExciteGuard.target(base, applied)
+        ur_cmd = ur.tick(t, X_u, ur_target)
+        state["tick"] = OscTick(k, t, ee_f, X_u, cmd, ur_cmd, state["ur_raw"].copy(),
+                                applied, scale)
         msg = saved_traj_message(round(t * 1e6), cmd.knots_pos, cmd.knots_quat, cmd.times)
         state["hook_s"] += time.perf_counter() - h0
         return msg
@@ -958,6 +1218,8 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
         sim.start_recording(ctx.out / "recordings", f"{name}-{p.intent}")
     sampler = OscEpisodeSampler(sim, ctx, phase_labels)
     q_ur = sim.arm_targets()[1]
+    if pre_n > 0:
+        _pre_hold(sim, ctx, sampler, state, pre_n * n, s0, q_ur, ur, hand0, byte0)
     lead_gain = sim.arm_kd / sim.arm_ke / sim.frame_dt
     lead_line = None
     settle_steps = round(args.settle_s / sim.frame_dt)
@@ -1018,16 +1280,36 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
 
     t3 = time.perf_counter()
     frames = sampler.frames
+    definition = getattr(args, "action_definition", OSC_ACTION_DEFINITION)
+    pre = np.array([phase_labels[fr["phase"]] == PREHOLD_PHASE for fr in frames])
+    if pre.any():
+        u_pre = np.stack([frame_action(fr, "cmd_delta") for fr, m in zip(frames, pre) if m])
+        if np.any(u_pre != 0.0):
+            bad = np.argwhere(u_pre != 0.0)
+            raise RuntimeError(f"pre-hold cmd_delta not 0 ({np.abs(u_pre).max():.2e} at "
+                               f"[row, dim] {bad[:4].tolist()})")
     label, metrics, min_clear_mm, contact = _classify(sampler, ctx.thresholds, ctx.tangent)
     tip_min_mm = state["tip_min"] * 1e3
     clamp_dict = None if clamp is None else clamp.to_dict()
+    ur_scale = np.array([fr["ur_excite_scale"] for fr in frames])
+    ur_active = np.array([bool(np.any(fr["excite_ur_raw"])) for fr in frames])
+    ur_stats = {"frames_active": int(ur_active.sum()),
+                "frames_scaled": int((ur_active & (ur_scale < 1.0)).sum()),
+                "scale_mean_active": float(ur_scale[ur_active].mean()) if ur_active.any()
+                else None,
+                "scale_min": float(ur_scale.min())}
     extras_meta = {
         "phase_labels": phase_labels, "intent": p.intent, "outcome": label,
         "perturbation": p.to_dict(), "backend": "osc", "scenario": ctx.scenario,
         "ee_pose_source": "measured finger_tip / tracking frame (FK of the measured joints)",
-        "action_source": "knot 1 of the TARGET_CARTESIAN_POSE_TRAJECTORY published at the sample "
-                         "tick (Franka) / UR line at t + knot dt (tracking frame), minus the "
-                         "measured pose at t; knot 0 / line(t) kept as sim_cmd_*",
+        "action_source": (
+            "knot 1 - knot 0 of the TARGET_CARTESIAN_POSE_TRAJECTORY published at the sample tick "
+            "(Franka) / UR line(t + knot dt) - line(t) of the line in force (tracking frame)"
+            if definition == "cmd_delta" else
+            "knot 1 of the TARGET_CARTESIAN_POSE_TRAJECTORY published at the sample "
+            "tick (Franka) / UR line at t + knot dt (tracking frame), minus the "
+            "measured pose at t; knot 0 / line(t) kept as sim_cmd_*"),
+        "pre_hold_frames": int(pre.sum()), "ur_excite": ur_stats,
         "osc": ctx.osc, "commander": dataclasses.asdict(params), "excitation": ctx.excite,
         "excite_clip": clip, "sample_period_s": n * lcs.SIM_DT_S,
         "time_source": "OSC clock (FRANKA_STATE utime)",
@@ -1037,12 +1319,13 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
         "clearance_source": "2F-85 colliders vs the board plate box and the two pulleys, "
                             f"sampled every {CLEARANCE_EVERY} control steps",
         "franka_tip_clearance_source": "finger_tip z - board plate top z, every control step",
+        **opts_meta,
     }
     osc_post = {"backend": np.array("osc"),
                 "osc_utime_offset_us": np.int64(sim.bridge.utime_offset_us),
                 "min_franka_tip_clearance_mm": np.float32(tip_min_mm)}
     path = ctx.out / row["file"]
-    writer, track = build_osc_writer(frames, n, pcd=not args.no_pcd)
+    writer, track = build_osc_writer(frames, n, pcd=not args.no_pcd, definition=definition)
     steps = frames[-1]["step"] + 1
     detail = (f", tip {tip_min_mm:5.1f} mm, latched "
               + ", ".join(f"{k} {v:.2f} s ({latch_err[k]:.1f} mm)" for k, v in latched_at.items())
@@ -1061,12 +1344,48 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
             "final_wrap_deg": wrap, "final_h_median_mm": h_med, **_slant_row(metrics),
             "min_board_clearance_mm": min_clear_mm, "board_contact": contact,
             "min_franka_tip_clearance_mm": tip_min_mm, "excite_clip": clip,
+            "pre_hold_frames": int(pre.sum()), "ur_excite": ur_stats,
             "clamp_lift_mm": 0.0 if clamp is None else clamp.max_lift_mm,
             "clamp_tilt_scale": 1.0 if clamp is None else clamp.tilt_scale,
             "grasp_ok_final": [bool(v) for v in frames[-1]["grasp_ok"]],
             "osc_stats": sim.bridge.stats(),
             "size_bytes": path.stat().st_size, "recording": recording,
             "timing_s": timing, "status": "ok"}
+
+
+def _pre_hold(sim, ctx: OscContext, sampler, state: dict, steps: int, s0: int, q_ur,
+              ur: UrLineCommander, hand_mm, byte) -> None:
+    """``steps`` control steps under the settle's hold (Franka latched, UR target unchanged),
+    sampled like the episode; ``k = step - s0 < 0``. Knots and the UR line are constant, so the
+    ``cmd_delta`` of these frames is exactly 0."""
+    hold = sim.commander_hook
+    n, u_coords = ctx.n, sim.arm_coords()[1]
+    p_u, q_u = ur.to_tool0(UrTracking.fk(q_ur))
+    line = UrLine(p0=p_u, q0=q_u, t0=0.0, p1=p_u, q1=q_u, t1=0.0)
+
+    def pre_hook(step, t, joint_q, body_q):
+        msg = hold(step, t, joint_q, body_q)
+        pos, quat, times = parse_saved_traj_message(msg)
+        cmd = FrankaCommand(knots_pos=pos, knots_quat=quat, times=times, hold=True,
+                            target_index=0, phase=PREHOLD_PHASE, hand_mm=hand_mm)
+        urc = UrCommand(line=line, regenerated=False, byte=byte, t=float(t),
+                        X_tool0_tracking=ctx.x_tool0)
+        state["tick"] = OscTick(step - s0, t, sim.franka_measured_pose7(joint_q),
+                                UrTracking.fk(joint_q[u_coords]), cmd, urc)
+        return msg
+
+    sim.commander_hook = pre_hook
+    try:
+        for _ in range(steps):
+            sim.control_step()
+            k = state["tick"].k
+            if k % CLEARANCE_EVERY == 0 or k % n == 0:
+                sampler.clearance(sim.state_0.body_q.numpy())
+            if k % n == 0:
+                sampler.sample_tick(state["tick"])
+    finally:
+        sim.commander_hook = hold
+        state["tick"] = None
 
 
 def main() -> int:

@@ -14,6 +14,8 @@ Run:
         --deploy <deploy_demo>/deploy.npz \\
         --train-glob 'data/lcs/20260923-210508-ep300-ou/*/episode_*.npz' \\
         --out data/lcs/demo/demo_goals.npz
+``--traj-out <yaml>`` also (or only) writes the per-frame latent trajectory (``z``, both EE poses,
+``dt``) as a flat Drake yaml for ``learned_mpc.demo_traj``.
 """
 
 from __future__ import annotations
@@ -223,18 +225,61 @@ def write(arrays: dict, report: dict, out: Path) -> tuple[Path, Path]:
     return out, rep
 
 
+def traj_doc(arrays: dict, episode: Path) -> dict:
+    """Per-frame reference trajectory: ``z`` (T, nx) and both EE poses (T, 7)."""
+    with np.load(episode, allow_pickle=True) as d:
+        ee_f = np.asarray(d["sim_ee_franka"], dtype=np.float64)
+        ee_u = np.asarray(d["sim_ee_ur"], dtype=np.float64)
+        dt = np.diff(np.asarray(d["utime"], dtype=np.int64)) * 1e-6
+    z = np.asarray(arrays["z"], dtype=np.float64)
+    _require(len(z) == len(ee_f) == len(ee_u), "z / ee pose frame counts differ")
+    _require(bool(np.allclose(dt, dt[0], atol=1e-6)), "demo frames not evenly spaced")
+    return {"n_frames": len(z), "dt": round(float(dt[0]), 6), "z": z,
+            "ee_pose_franka": ee_f, "ee_pose_ur": ee_u,
+            "demo_episode": str(arrays["demo_episode"]),
+            "demo_sha256": str(arrays["demo_sha256"]),
+            "deploy_sha256": str(arrays["deploy_sha256"]), "created": str(arrays["created"])}
+
+
+def write_traj(doc: dict, out: Path) -> Path:
+    def rows(a: np.ndarray) -> str:
+        return "".join(f"\n  - [{', '.join(repr(float(v)) for v in r)}]" for r in a)
+
+    lines = []
+    for key, val in doc.items():
+        if isinstance(val, np.ndarray):
+            lines.append(f"{key}:{rows(val)}")
+        elif isinstance(val, str):
+            lines.append(f"{key}: {json.dumps(val)}")
+        else:
+            lines.append(f"{key}: {val!r}")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("\n".join(lines) + "\n")
+    return out
+
+
 def create_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--episode", type=Path, required=True)
     p.add_argument("--deploy", type=Path, required=True)
     p.add_argument("--train-glob", default=TRAIN_GLOB)
-    p.add_argument("--out", type=Path, required=True)
+    p.add_argument("--out", type=Path, help="demo_goals.npz (+ report); optional with --traj-out")
+    p.add_argument("--traj-out", type=Path, help="per-frame demo trajectory yaml")
     return p
 
 
 def main() -> int:
-    args = create_parser().parse_args()
+    parser = create_parser()
+    args = parser.parse_args()
+    if args.out is None and args.traj_out is None:
+        parser.error("need --out and/or --traj-out")
     arrays, report = build(args.episode, args.deploy, args.train_glob)
+    if args.traj_out is not None:
+        doc = traj_doc(arrays, args.episode)
+        print(f"wrote {write_traj(doc, args.traj_out)} ({doc['n_frames']} frames, "
+              f"dt {doc['dt']})")
+    if args.out is None:
+        return 0
     out, rep = write(arrays, report, args.out)
     s0, s1 = report["stage_0_pre_place_1"], report["stage_1_place_3"]
     print(f"wrote {out} and {rep}")

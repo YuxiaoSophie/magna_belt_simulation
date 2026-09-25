@@ -3,7 +3,8 @@
 
 No sim, no GPU, no LCM traffic. Against an ``lcs_learning`` deploy export: E0 load + dims,
 E1 preprocessing bit-exact, E2 encoder vs the torch reference ``z``, E3 LCS step vs the torch PGD,
-E4 timing, E5 ``LATENT_STATE`` round trip, E6 ``DemoGoals`` on a synthetic file, E7 belt metrics.
+E4 timing, E5 ``LATENT_STATE`` round trip, E6 ``DemoGoals`` on a synthetic file, E7 belt metrics,
+E8 ``LatentDecoder`` vs the torch decodes in ``decoder.npz`` beside the deploy (``[SKIP]`` without it).
 ``[SKIP]`` (exit 0) if the deploy export is absent.
 
 Run:
@@ -43,6 +44,10 @@ def _require(ok: bool, message: str) -> None:
 
 
 CHECKS: list[tuple[str, callable]] = []
+
+
+class Skip(Exception):
+    pass
 
 
 def check(title: str):
@@ -276,6 +281,27 @@ def check_e7(ctx: SimpleNamespace) -> str:
             f"{cham:.1e} mm; 3 mm z: {t_idx:.3f}/{t_cham:.3f}/{t_best:.3f} mm; pose 3 mm/10 deg")
 
 
+@check("E8 LatentDecoder")
+def check_e8(ctx: SimpleNamespace) -> str:
+    path = ctx.deploy.parent / "decoder.npz"
+    if not path.is_file():
+        raise Skip(f"{path} absent")
+    dec = le.LatentDecoder.load(path)
+    with np.load(path, allow_pickle=False) as d:
+        z_ref, belt_ref = d["z_ref"], d["belt_dec_ref"]
+    with np.load(ctx.deploy, allow_pickle=False) as d:
+        deploy_sha = str(d["checkpoint_sha256"])
+    _require(dec.checkpoint_sha256 == deploy_sha, "decoder and deploy checkpoints differ")
+    belts = dec.decode_batch(z_ref)
+    _require(belts.dtype == np.float32 and belts.shape == (len(z_ref), dec.num_points, 3),
+             f"decode_batch {belts.dtype} {belts.shape}")
+    err = float(np.abs(belts - belt_ref).max())
+    one = float(np.abs(dec.decode(z_ref[0]) - belt_ref[0]).max())
+    _require(err <= 1e-5 and one <= 1e-5, f"max |decode - torch| {err:.2e} / {one:.2e} > 1e-5 m")
+    return (f"K={len(z_ref)} decodes ({dec.num_points} pts) vs torch max {err:.2e} m, "
+            f"decode() {one:.2e} m; checkpoint sha matches the deploy")
+
+
 def _quat_z(deg: float) -> list[float]:
     h = math.radians(deg) / 2.0
     return [math.cos(h), 0.0, 0.0, math.sin(h)]
@@ -304,6 +330,9 @@ def main() -> int:
         for name, fn in CHECKS:
             try:
                 detail = fn(ctx)
+            except Skip as exc:
+                print(f"[SKIP] {name}: {exc}")
+                continue
             except AssertionError as exc:
                 print(f"[FAIL] {name}: {exc}", file=sys.stderr)
                 exit_code = 1

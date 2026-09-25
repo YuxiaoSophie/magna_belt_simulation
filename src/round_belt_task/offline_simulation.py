@@ -410,9 +410,10 @@ class RoundBeltOfflineSimulation(RoundBeltLcmSimulation):
         viewer = newton.viewer.ViewerNull(num_frames=getattr(args, "num_frames", 100))
         return cls(viewer, args, **options)
 
-    def start_recording(self, root: Path, label: str) -> None:
+    def start_recording(self, root: Path, label: str, extra_meta: dict | None = None) -> None:
+        """``extra_meta``: additional ``meta.json`` keys (must not replace existing ones)."""
         self.args.record_label = label
-        self._start_recording(Path(root))
+        self._start_recording(Path(root), extra_meta)
 
     def close(self, reason: str = "closed") -> None:
         self.close_recording(reason)

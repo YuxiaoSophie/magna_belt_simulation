@@ -36,7 +36,6 @@ for _p in (REPO_ROOT / "src", REPO_ROOT / "scripts" / "lcs"):
         sys.path.insert(0, str(_p))
 
 import lcm
-from latent_encoder_node import DEFAULT_DEPLOY
 
 import task_common  # noqa: F401  (puts lcmtypes/ on sys.path)
 from dairlib import lcmt_robot_output, lcmt_timestamped_saved_traj
@@ -64,6 +63,9 @@ DEFAULT_URL = "udpm://239.255.76.96:7696?ttl=0"
 SHERIFF_CONFIG = Path("/opt/libbot2/0.0.1.20221116/lib/python3/dist-packages/bot_procman/"
                       "sheriff_config.py")
 LEARNED_SIM_PARAMS = "systems/parameters/round_belt_controller_params_learned_sim.yaml"
+# The encoder deploy matching LEARNED_SIM_PARAMS' lcs_file (learned_lcs_v2_flat_pp2.yaml).
+DEFAULT_DEPLOY = Path("/home/hienbui/git/lcs_learning/outputs/sim_belt_v2_20260925/"
+                      "deploy_v2_flat_pp2/deploy.npz")
 VIS_PARAMS = "systems/parameters/assembly_visualization_params.yaml"
 DEFAULT_LABEL = "learned"
 SHARED_PORT = "7667"

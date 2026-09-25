@@ -18,7 +18,7 @@ Two backends (`--backend`):
 
 - **`osc`** (default): the Franka is torque-driven by magna's real `franka_cartesian_osc_controller`
   over LCM, lock-step, exactly as on hardware; `state` is the measured pose, `action` is the
-  commanded pose one C3 step ahead minus the measured pose (§3, `docs/lcs-dataset.md` §3).
+  commanded displacement over one C3 step, `cmd_delta` (§3, `docs/lcs-dataset.md` §3).
 - **`position`** (legacy): both arms are joint-PD driven along a precomputed Cartesian trajectory,
   no magna, no LCM; `state`/`action` are the commanded targets (§3.1).
 
@@ -35,8 +35,9 @@ Two backends (`--backend`):
      clamp the perturbed UR waypoints so the 2F-85 stays clear of the board (§5.1);
    - drive the Franka torque through magna's real OSC controller in lock-step (§3), commanded every
      control step by an emulation of magna's waypoint generator (`round_belt_task.commander`) from
-     the MEASURED pose, with optional bounded excitation of Franka knots 1..6 (§5.2); drive the UR
-     by per-step IK to magna's 2-knot line;
+     the MEASURED pose, with optional bounded excitation of Franka knots 1..6 and of the UR
+     target (§5.2); drive the UR by per-step IK to magna's 2-knot line; `--pre-hold-s` of hold
+     frames come first;
    - sample every `--sample-period` (default 0.075 s = 15 control steps, the C3 knot spacing): the
      measured state, the commanded action, a camera point cloud render, and (optionally) a
      `RunRecorder` frame; track clearances every 4 control steps;
@@ -131,7 +132,7 @@ one exists: it loads `--start` (default `pre_place_1.npz`) and writes `pre_place
 
 `scripts/lcs/make_grasp_variants.py` builds *grasp-varied* `pre_place_1` start states from
 `pre_place_1_osc.npz` (each gripper holding the belt elsewhere, same nominal target poses),
-for the learned-MPC evaluation harness — see `docs/learned-mpc.md` §5.6.
+for the learned-MPC evaluation harness — see `docs/learned-mpc-reference.md` §5.6.
 
 ### 4.2 Collect episodes
 
@@ -154,6 +155,7 @@ uv run python scripts/collect_lcs_dataset.py --backend position --episodes 40 --
 | `--osc-settle-s` | `0.5` | osc backend: hold under the OSC after each restore |
 | `--osc-log` | `<out>/osc.log` | osc backend: OSC process log path |
 | `--start-state` | `pre_place_1_osc.npz` (osc) / `pre_place_1.npz` (position) | snapshot from 4.1 |
+| `--start-states` / `--variants` | off | osc: a snapshot or a grasp-variant set dir (`make_grasp_variants.py`); episode `i` restores `variants[i % len]` (held states only), recorded as `start_variant` in `index.json` and `start_state` in `sim_meta` |
 | `--fresh-pick` | off | position backend only: re-run the nominal pick per episode instead of restoring (slow) |
 | `--record` | off | a `RunRecorder` run per episode under `<out>/recordings/` |
 | `--settle-s` | `1.0` | dwell at the end of the move before the last sample |
@@ -165,8 +167,12 @@ uv run python scripts/collect_lcs_dataset.py --backend position --episodes 40 --
 | `--excite-tau-s` | `0.4` | osc backend, ou: correlation time |
 | `--excite-cap-factor` | `2.0` | osc backend: knot step capped to `factor * speed * dt` |
 | `--excite-down-mm` | `2.0` | osc backend: largest downward excitation offset |
+| `--excite-ur-pos-mm` | `2.0` | osc backend, `ou` only: UR target offset per-axis std (z clipped >= 0, never below the nominal target); `0` with `--excite-ur-rot-deg 0` = off (§5.2) |
+| `--excite-ur-rot-deg` | `1.0` | osc backend, `ou` only: UR target rotation-vector per-axis std |
+| `--action-definition` | `cmd_delta` | osc backend: recorded `actions`, `cmd_delta` or `knot1_minus_measured` (`docs/lcs-dataset.md` §3); both, `sim_cmd_*` and `sim_realised_delta` are always stored |
+| `--pre-hold-s` | `1.5` | osc backend: after the settle, `round(S / 0.075)` frames under the hold before the first move (`sim_episode_step < 0`, phase `prehold`, `u = 0` exactly, asserted) |
 | `--max-episode-s` | `20.0` | osc backend: skip an episode whose targets are not all reached by then |
-| `--scenario` | none | osc backend: `pure_translation` = one Franka target 30 mm -x / 10 mm +z, UR still, excitation forced off; `nominal` = the unperturbed waypoints, excitation off — used to record the learned-MPC demonstration episode, `docs/learned-mpc.md` §5.3 |
+| `--scenario` | none | osc backend: `pure_translation` = one Franka target 30 mm -x / 10 mm +z, UR still, excitation forced off; `nominal` = the unperturbed waypoints, excitation off — used to record the learned-MPC demonstration episode, `docs/learned-mpc-reference.md` §5.3 |
 | `--arm-ke` / `--arm-kd` | `700.0` / `110.0` | arm position-drive gains (UR, and the Franka under the position backend) |
 | `--params` | magna's `round_belt_controller_params_sim.yaml` | waypoints source (read-only) |
 | `--no-pcd` | off | skip camera renders (files then fail dataset validation; speed tests only) |
@@ -386,6 +392,20 @@ pose) every control step, independently of the episode's `pre_place_2`/`place_3`
   `sim_excite_dpos_m` / `sim_excite_rotvec`.
 - **How to disable:** `--excite-pos-mm 0 --excite-rot-deg 0` (also off automatically under
   `--scenario`).
+- **UR (`--excite-ur-pos-mm 2 --excite-ur-rot-deg 1`, `ou` mode only):** a second
+  `OuExcitation` (own RNG stream `[seed, episode_index, 11]`, same `tau`/fade) offsets the UR
+  TARGET pose fed to `UrLineCommander.tick` (`dpos` added, rotation applied on the left in the
+  world frame); its z offset is clipped to >= 0 and it fades out like the Franka's near
+  `place_3`. The target then moves every sample, so the UR line regenerates every sample (from
+  the measured pose), which is intended. Clearance: the guard's margin is unchanged; instead
+  `UrExciteGuard` scales the offset each time it changes to the largest `s` in [0, 1] whose
+  excited target needs no `clearance.required_lift` (the 2F-85 colliders, so a rotation's lever
+  arm counts), checked with both the current and the target's Robotiq byte. The applied scale
+  falls to that value at once and recovers at `1 / ramp_s` per second; `check_lcs_tuples.py` T7
+  checks this adds no jerk (a synthetic binding guard: 45 % of samples scaled, jerk ratio 0.82).
+  Recorded: `excitation["ur"]`, `sim_excite_ur_raw` (6, before the scale), `sim_excite_ur_dpos_m`
+  / `sim_excite_ur_rotvec` (applied), `sim_ur_excite_scale`, and per episode `ur_excite`
+  (`frames_active`, `frames_scaled`, `scale_mean_active`, `scale_min`) in `index.json`.
 
 Measured 2026-09-23, `--episodes 20 --seed 1000` (same perturbations in all rows). Move frames
 only. "Jerk" is the RMS of the Franka action's second difference
@@ -532,5 +552,8 @@ lock-step OSC child process), `check_sim_snapshot.py` (restore fidelity), `check
 (waypoints, FK/IK, the nominal pick and a placement move), `check_lcs_dataset.py` (the `.npz`
 writer/validator), `check_lcs_outcome.py` (the outcome classifier), `check_lcs_collector.py` (an
 end-to-end collection run on both backends, the clearance guard and an optional `lcs_learning`
-loader smoke test), `check_lcs_tuples.py` (osc-backend tuple semantics: timing, action alignment,
-tracking error, belt-point identity, the `lcs_learning` loader).
+loader smoke test), `check_lcs_tuples.py` (osc-backend tuple semantics: timing, `cmd_delta` and
+old-definition alignment, pre-hold/hold zeros, tracking error, belt-point identity, the
+`lcs_learning` loader, Franka + UR excitation smoothness, the `rewrite_actions.py` round trip,
+and the realised-vs-`u` causality table; `--causality-dir <run>` prints only the table). The live
+checks take `--lcm-url` (use a private group per run).

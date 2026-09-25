@@ -9,6 +9,7 @@ Run:
     uv run python scripts/replay_viewer.py --recordings /path/to/recordings --run NAME
     uv run python scripts/replay_viewer.py --port 8082 --show-collision --point-cloud
     uv run python scripts/replay_viewer.py --render-fps 15 --stats   # slow link / client
+    uv run python scripts/replay_viewer.py --recordings DIR --learned-layers planned_belt,actions
 """
 
 from __future__ import annotations
@@ -30,6 +31,12 @@ from task_common.cameras import RgbdCameras
 from task_common.point_cloud import CroppedPointCloud
 from task_common.recording import Recording
 from task_common.replay_app import DEFAULT_DEVICE, DEFAULT_RENDER_FPS, ReplayApp
+from task_common.replay_learned_mpc import (
+    LAYERS,
+    LearnedMpcPanel,
+    any_learned_runs,
+    parse_layers,
+)
 from task_common.scene import make_builder
 from utils.viewer_patches import (
     patch_viewer_shape_names,
@@ -77,7 +84,31 @@ def create_parser() -> argparse.ArgumentParser:
                         help="max 3D redraws per second during playback (default %(default)g)")
     parser.add_argument("--stats", action="store_true",
                         help="log tick/render/plot rates every 10 s")
+    learned = parser.add_argument_group(
+        "learned MPC layers", "shown when a run has LEARNED_MPC_DEBUG or a path is given; "
+        "paths default to the run's meta.json learned_mpc block")
+    learned.add_argument("--deploy", type=Path, default=None, help="deploy.npz")
+    learned.add_argument("--decoder", type=Path, default=None,
+                         help="decoder.npz (default: next to the deploy)")
+    learned.add_argument("--demo-goals", type=Path, default=None, help="demo_goals.npz")
+    learned.add_argument("--demo-episode", type=Path, default=None,
+                         help="demo episode npz with pcd_belt")
+    learned.add_argument("--learned-layers", default="",
+                         help=f"comma list to pre-enable, from {','.join(LAYERS)}")
     return parser
+
+
+def learned_hooks(args: argparse.Namespace) -> list[LearnedMpcPanel]:
+    """The learned-MPC panel, only if a run under the root has it or a path is given."""
+    paths = {"deploy": args.deploy, "decoder": args.decoder, "demo_goals": args.demo_goals,
+             "demo_episode": args.demo_episode}
+    layers = parse_layers(args.learned_layers)
+    if not any(paths.values()) and not any_learned_runs(args.recordings):
+        if layers:
+            logger.warning("--learned-layers ignored: no learned-MPC runs under "
+                           f"{args.recordings}")
+        return []
+    return [LearnedMpcPanel(**paths, layers=layers)]
 
 
 if __name__ == "__main__":
@@ -88,10 +119,15 @@ if __name__ == "__main__":
                      "(record one with round_belt_lcm_simulation.py --record)")
         sys.exit(2)
     # Before the viewer exists: set_model populates shapes through the patched method.
+    try:
+        hooks = learned_hooks(args)
+    except ValueError as exc:
+        logger.error(str(exc))
+        sys.exit(2)
     patch_viewer_shape_names()
     patch_viser_texture_material()
     app = ReplayApp(args.recordings, build_model, port=args.port,
-                    show_collision=args.show_collision, run=args.run,
+                    show_collision=args.show_collision, run=args.run, hooks=hooks,
                     build_point_clouds=build_point_clouds, show_point_cloud=args.point_cloud,
                     render_fps=args.render_fps, device=args.device)
     app.run_forever(stats=args.stats)

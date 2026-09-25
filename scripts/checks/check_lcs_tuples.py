@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Tuple verification for the OSC-backend LCS dataset: timing, action alignment
-(``knot1_minus_measured``), tracking error, belt-point identity, the ``lcs_learning`` loader and
-the OU excitation's smoothness against white excitation.
+"""Tuple verification for the OSC-backend LCS dataset: timing, action alignment (``cmd_delta``,
+and ``knot1_minus_measured`` on its extra), pre-hold/hold zeros, tracking error, belt-point
+identity, the ``lcs_learning`` loader, the Franka + UR OU excitation's smoothness, and the
+``rewrite_actions.py`` round trip (T9). Prints the realised-vs-u causality table.
 
 Collects 2 episodes (``--intents engaged,over``) plus 1 ``--scenario pure_translation`` episode
 into a temp dir and asserts that every ``(x_t, u_t, x_{t+1})`` tuple is what MPC will query; T7
 re-collects the 2 episodes with ``--excite-mode white`` for the jerk comparison.
 
 Run:
-    uv run python scripts/checks/check_lcs_tuples.py
+    uv run python scripts/checks/check_lcs_tuples.py --lcm-url "udpm://239.255.76.99:7699?ttl=0"
     uv run python scripts/checks/check_lcs_tuples.py --keep
+    uv run python scripts/checks/check_lcs_tuples.py --causality-dir data/lcs/<run>  # table only
 """
 
 from __future__ import annotations
@@ -35,6 +37,8 @@ if str(REPO_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
 if str(REPO_ROOT / "scripts" / "checks") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "scripts" / "checks"))
+if str(REPO_ROOT / "scripts" / "lcs") not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT / "scripts" / "lcs"))
 
 import collect_lcs_dataset as cli
 from check_lcs_collector import (
@@ -44,13 +48,18 @@ from check_lcs_collector import (
     Skip,
     _require,
 )
+from private_url import pgrep_others, url_port
 
-from round_belt_task.commander import CommanderParams
+from round_belt_task.commander import (
+    EXCITE_RAMP_S,
+    CommanderParams,
+    OuExcitation,
+    UrTarget,
+)
 from task_common import lcs_dataset as lcs
 
 # A private multicast group so this check never disturbs a running magna stack.
 PRIVATE_LCM_URL = "udpm://239.255.76.86:7686?ttl=0"
-PRIVATE_PORT = "7686"
 RUNTIME_BUDGET_S = 300.0
 PARAMS = CommanderParams()
 
@@ -83,6 +92,10 @@ T6_TIMEOUT_S = 120.0
 T6_ACTION_TOL = 1e-6
 T6_STATE_TOL = 1e-5  # float32 loader cast
 JERK_RATIO_MAX = 0.5
+# UR offset: 2nd-difference RMS / (sqrt(6) * RMS); 1 for white noise, ~0.36 for this OU.
+UR_NORM_JERK_MAX = 0.5
+UR_SCALE_JERK_RATIO_MAX = 1.1  # the clearance scale may not add jerk to the raw OU offset
+PREHOLD_BELT_DRIFT_MM = 1.0
 
 RUN_ARGV = ["--backend", "osc", "--episodes", "2", "--seed", "3",
             "--intents", "engaged,over", "--weights", "1,1"]
@@ -218,28 +231,31 @@ def _free_move(d: dict) -> np.ndarray:
 
 @check("T2 action alignment")
 def check_t2(ctx: SimpleNamespace) -> str:
-    free_n = hold_n = reached_n = 0
-    hold_max = reached_max = 0.0
+    free_n = hold_n = reached_n = pre_n = 0
+    hold_max = reached_max = drift_max = 0.0
+    worst = {"cmd_delta": 0.0, "knot1_minus_measured": 0.0}
     for name, _ in ctx.order:
         d = ctx.data[name]
         state, actions = d["state"], d["actions"]
+        old = d["sim_action_knot1_minus_measured"]
         meta = json.loads(str(d["sim_meta"]))
         definition = meta["lcs_format"].get("action_definition")
         _require(definition == ACTION_DEFINITION, f"{name}: action_definition {definition!r}")
         k0, k1 = d["sim_cmd_knot0_franka"], d["sim_cmd_knot1_franka"]
-        u1 = d["sim_cmd_ur_t1"]
+        u0, u1 = d["sim_cmd_ur_t"], d["sim_cmd_ur_t1"]
 
-        err = float(np.abs(actions[:, 0:3] - (k1[:, :3] - state[:, 26:29])).max())
-        _require(err <= ACTION_TOL, f"{name}: dxyz_f != knot1 - measured ({err:.2e})")
-        rot_err = float(np.abs(actions[:, 6:9]
-                               - _delta_rotvec_batch(state[:, 29:33], k1[:, 3:])).max())
-        _require(rot_err <= ACTION_TOL, f"{name}: drotvec_f != knot1 - measured ({rot_err:.2e})")
-        err = float(np.abs(actions[:, 3:6] - (u1[:, :3] - state[:, 33:36])).max())
-        _require(err <= ACTION_TOL, f"{name}: dxyz_ur != line(t+dt) - measured ({err:.2e})")
-        rot_err = float(np.abs(actions[:, 9:12]
-                               - _delta_rotvec_batch(state[:, 36:40], u1[:, 3:])).max())
-        _require(rot_err <= ACTION_TOL, f"{name}: drotvec_ur != line(t+dt) - measured "
-                                        f"({rot_err:.2e})")
+        for key, arr, pf, pu, rf, ru in (
+                ("cmd_delta", actions, k0[:, :3], u0[:, :3], k0[:, 3:], u0[:, 3:]),
+                ("knot1_minus_measured", old, state[:, 26:29], state[:, 33:36], state[:, 29:33],
+                 state[:, 36:40])):
+            errs = (np.abs(arr[:, 0:3] - (k1[:, :3] - pf)).max(),
+                    np.abs(arr[:, 6:9] - _delta_rotvec_batch(rf, k1[:, 3:])).max(),
+                    np.abs(arr[:, 3:6] - (u1[:, :3] - pu)).max(),
+                    np.abs(arr[:, 9:12] - _delta_rotvec_batch(ru, u1[:, 3:])).max())
+            err = float(max(errs))
+            _require(err <= ACTION_TOL, f"{name}: {key} identity off by {err:.2e} "
+                                        f"(dxyz_f, drot_f, dxyz_ur, drot_ur = {errs})")
+            worst[key] = max(worst[key], err)
 
         # knot0 vs measured: equal on free-move rows, within the reach tolerance otherwise.
         pos_err = float(np.linalg.norm(state[:, 26:29] - k0[:, :3], axis=1).max())
@@ -252,46 +268,63 @@ def check_t2(ctx: SimpleNamespace) -> str:
                  f"{name}: measured ori vs knot0 off by {ori_err:.4f} rad > {KNOT0_ORI_TOL_RAD:g}")
         free = _free_move(d)
         if free.any():
-            err = float(np.abs(actions[free, 0:3] - (k1[free, :3] - k0[free, :3])).max())
-            _require(err <= ACTION_TOL, f"{name}: free-move dxyz_f != knot1 - knot0 ({err:.2e})")
-            rot_err = float(np.abs(actions[free, 6:9]
-                                   - _delta_rotvec_batch(k0[free, 3:], k1[free, 3:])).max())
-            _require(rot_err <= ACTION_TOL,
-                     f"{name}: free-move drotvec_f != knot1 - knot0 ({rot_err:.2e})")
+            err = float(np.abs(old[free, 0:3] - actions[free, 0:3]).max())
+            _require(err <= ACTION_TOL, f"{name}: free-move knot1 - measured != cmd_delta "
+                                        f"({err:.2e})")
         free_n += int(free.sum())
 
         cap_factor = meta["excitation"]["cap_factor"]
-        cap = PARAMS.lin_speed * PARAMS.dt * cap_factor + KNOT0_POS_TOL_M
+        cap = PARAMS.lin_speed * PARAMS.dt * cap_factor + 1e-9
         _require(bool(np.all(np.linalg.norm(actions[:, 0:3], axis=1) <= cap)),
-                 f"{name}: |dxyz_f| exceeds cap + reach tol {cap * 1e3:.2f} mm")
+                 f"{name}: |knot1 - knot0| exceeds the excitation cap {cap * 1e3:.2f} mm")
 
-        # Quiet hold rows: knot1 == knot0 == latched pose, so u = latched - measured.
-        hold = np.asarray(d["sim_cmd_hold"])
+        # Pre-hold rows: both arms exactly 0, the scene static.
+        pre = np.asarray(d["sim_episode_step"]) < 0
+        labels = meta["phase_labels"]
+        _require(pre.any(), f"{name}: no pre-hold rows")
+        _require(all(labels[int(p)] == cli.PREHOLD_PHASE for p in d["sim_phase"][pre]),
+                 f"{name}: pre-hold rows not labelled {cli.PREHOLD_PHASE!r}")
+        _require(np.all(actions[pre] == 0.0), f"{name}: pre-hold cmd_delta not exactly 0")
+        belt = np.asarray(d["sim_belt_xyz"], dtype=np.float64)[pre]
+        drift = float(np.linalg.norm(belt - belt[0], axis=2).max()) * 1e3
+        _require(drift < PREHOLD_BELT_DRIFT_MM, f"{name}: pre-hold belt drift {drift:.2f} mm")
+        drift_max, pre_n = max(drift_max, drift), pre_n + int(pre.sum())
+        _require(int(d["sim_episode_step"][pre.sum()]) == 0, f"{name}: step 0 not after pre-hold")
+
+        # Quiet hold rows: knot1 == knot0 == latched pose -> Franka u exactly 0; old u =
+        # latched - measured.
+        hold = np.asarray(d["sim_cmd_hold"]) & ~pre
         no_excite = (np.abs(d["sim_excite_dpos_m"]).max(axis=1) == 0.0) & \
                     (np.abs(d["sim_excite_rotvec"]).max(axis=1) == 0.0)
         quiet = hold & no_excite
         if quiet.any():
-            err = float(np.abs(actions[quiet, 0:3]
-                               - (k0[quiet, :3] - state[quiet, 26:29])).max())
-            _require(err <= ACTION_TOL, f"{name}: quiet hold dxyz_f != latched - measured")
-            hold_max = max(hold_max, float(np.linalg.norm(actions[quiet, 0:3], axis=1).max()))
+            _require(np.all(actions[quiet][:, [0, 1, 2, 6, 7, 8]] == 0.0),
+                     f"{name}: quiet hold Franka cmd_delta not exactly 0")
+            err = float(np.abs(old[quiet, 0:3] - (k0[quiet, :3] - state[quiet, 26:29])).max())
+            _require(err <= ACTION_TOL, f"{name}: quiet hold old dxyz_f != latched - measured")
+            hold_max = max(hold_max, float(np.linalg.norm(old[quiet, 0:3], axis=1).max()))
             hold_n += int(quiet.sum())
-        # Reached-while-moving rows (all knots = target): u = target - measured.
+        # Reached-while-moving rows (all knots = target): cmd_delta 0, old = target - measured.
         knots = np.asarray(d["sim_cmd_knots_franka"])
-        reached = ~hold & no_excite & np.all(np.abs(knots - knots[:, :1]) == 0.0, axis=(1, 2))
+        reached = ~hold & ~pre & no_excite & np.all(np.abs(knots - knots[:, :1]) == 0.0,
+                                                    axis=(1, 2))
         if reached.any():
-            err = float(np.abs(actions[reached, 0:3]
+            _require(np.all(actions[reached][:, [0, 1, 2, 6, 7, 8]] == 0.0),
+                     f"{name}: reached Franka cmd_delta not exactly 0")
+            err = float(np.abs(old[reached, 0:3]
                                - (knots[reached, -1, :3] - state[reached, 26:29])).max())
-            _require(err <= ACTION_TOL, f"{name}: reached dxyz_f != target - measured")
+            _require(err <= ACTION_TOL, f"{name}: reached old dxyz_f != target - measured")
             reached_max = max(reached_max,
-                              float(np.linalg.norm(actions[reached, 0:3], axis=1).max()))
+                              float(np.linalg.norm(old[reached, 0:3], axis=1).max()))
             reached_n += int(reached.sum())
     _require(free_n > 0, "no free-move rows found")
-    _require(hold_n > 0 and hold_max > 0.0, "no quiet hold row with a non-zero Franka action")
-    return (f"u == knot1/line(t+dt) - measured (both arms); {free_n} free-move rows == knot1 - "
-            f"knot0; {hold_n} quiet hold rows == latched - measured (max "
-            f"{hold_max * 1e3:.2f} mm); {reached_n} reached rows == target - measured (max "
-            f"{reached_max * 1e3:.2f} mm)")
+    _require(hold_n > 0 and hold_max > 0.0, "no quiet hold row with a non-zero old Franka action")
+    return (f"u == knot1 - knot0 / line(t+dt) - line(t) (max {worst['cmd_delta']:.1e}); "
+            f"extra == knot1/line(t+dt) - measured (max {worst['knot1_minus_measured']:.1e}); "
+            f"{pre_n} pre-hold rows u == 0 exactly, belt drift <= {drift_max:.2f} mm; "
+            f"{hold_n} quiet hold rows Franka u == 0 (old = latched - measured, max "
+            f"{hold_max * 1e3:.2f} mm); {reached_n} reached rows u == 0 (old max "
+            f"{reached_max * 1e3:.2f} mm); {free_n} free-move rows old == cmd_delta")
 
 
 @check("T3 closed form (pure_translation)")
@@ -301,6 +334,7 @@ def check_t3(ctx: SimpleNamespace) -> str:
     labels = meta["phase_labels"]
     phase = np.asarray(d["sim_phase"])
     state, actions = d["state"], d["actions"]
+    old = d["sim_action_knot1_minus_measured"]
     k0 = np.asarray(d["sim_cmd_knot0_franka"])
 
     target = meta.get("target")
@@ -324,8 +358,13 @@ def check_t3(ctx: SimpleNamespace) -> str:
             dist = float(np.linalg.norm(d_vec))
             if dist < 1e-9:
                 continue
-            # Also covers dist < pos_tol (all knots = target): u = target - measured.
+            # Also covers dist < pos_tol (all knots = target): old u = target - measured.
             expected = min(PARAMS.lin_speed * PARAMS.dt, dist) * (d_vec / dist)
+            err = float(np.abs(old[t, 0:3] - expected).max())
+            _require(err <= T3_POS_TOL, f"pure t={t}: old dxyz_f off by {err:.2e} m")
+            # cmd_delta: the same step from knot 0 = measured, 0 once all knots = target.
+            if dist < PARAMS.pos_tol:
+                expected = np.zeros(3)
             err = float(np.abs(actions[t, 0:3] - expected).max())
             _require(err <= T3_POS_TOL, f"pure t={t}: dxyz_f off by {err:.2e} m")
 
@@ -339,8 +378,9 @@ def check_t3(ctx: SimpleNamespace) -> str:
                 expected_rot = rv / ang * (ang * s)
             else:
                 expected_rot = np.zeros(3)
-            err_rot = float(np.abs(actions[t, 6:9] - expected_rot).max())
-            _require(err_rot <= T3_ROT_TOL, f"pure t={t}: drotvec_f off by {err_rot:.2e} rad")
+            for arr in (old, actions):
+                err_rot = float(np.abs(arr[t, 6:9] - expected_rot).max())
+                _require(err_rot <= T3_ROT_TOL, f"pure t={t}: drotvec_f off by {err_rot:.2e} rad")
             move_n += 1
         elif label.startswith("hold") or label == "done":
             # One latched pose for the whole hold, within the reach tolerance of the target.
@@ -350,19 +390,22 @@ def check_t3(ctx: SimpleNamespace) -> str:
                 _require(off < PARAMS.pos_tol, f"pure t={t}: latched {off * 1e3:.2f} mm from "
                                                f"target >= {PARAMS.pos_tol * 1e3:g} mm")
             _require(np.array_equal(k0[t], latched), f"pure t={t}: latched pose changed")
-            err = float(np.abs(actions[t, 0:3] - (latched[:3] - ee_pos)).max())
-            _require(err <= T3_HOLD_TOL, f"pure t={t} ({label}): dxyz_f {err:.2e} from "
+            _require(np.all(actions[t, [0, 1, 2, 6, 7, 8]] == 0.0),
+                     f"pure t={t} ({label}): Franka cmd_delta not exactly 0")
+            err = float(np.abs(old[t, 0:3] - (latched[:3] - ee_pos)).max())
+            _require(err <= T3_HOLD_TOL, f"pure t={t} ({label}): old dxyz_f {err:.2e} from "
                                          "latched - measured")
-            err = float(np.abs(actions[t, 6:9] - lcs.delta_rotvec(ee_quat, latched[3:])).max())
-            _require(err <= T3_HOLD_TOL, f"pure t={t} ({label}): drotvec_f {err:.2e} from "
+            err = float(np.abs(old[t, 6:9] - lcs.delta_rotvec(ee_quat, latched[3:])).max())
+            _require(err <= T3_HOLD_TOL, f"pure t={t} ({label}): old drotvec_f {err:.2e} from "
                                          "latched - measured")
-            hold_max = max(hold_max, float(np.linalg.norm(actions[t, 0:3])))
+            hold_max = max(hold_max, float(np.linalg.norm(old[t, 0:3])))
             hold_n += 1
     _require(move_n >= T3_MIN_MOVE_ROWS,
              f"only {move_n} move rows tested, need >= {T3_MIN_MOVE_ROWS} (scenario too short)")
     _require(hold_n > 0 and hold_max > 0.0, "no hold row with a non-zero Franka action")
-    return (f"{move_n} move rows closed form, {hold_n} hold/done rows == latched - measured "
-            f"(max {hold_max * 1e3:.3f} mm), target from {note}")
+    return (f"{move_n} move rows closed form (cmd_delta + old), {hold_n} hold/done rows "
+            f"cmd_delta == 0, old == latched - measured (max {hold_max * 1e3:.3f} mm), target "
+            f"from {note}")
 
 
 @check("T4 tracking error")
@@ -371,13 +414,13 @@ def check_t4(ctx: SimpleNamespace) -> str:
     ident = diag_max = 0.0
     for name, _ in ctx.order:
         d = ctx.data[name]
-        state, actions = d["state"], d["actions"]
+        state, actions = d["state"], d["sim_action_knot1_minus_measured"]
         ee_f, q_f, ee_u = state[:, 26:29], state[:, 29:33], state[:, 33:36]
         k1 = np.asarray(d["sim_cmd_knot1_franka"])
         u1 = np.asarray(d["sim_cmd_ur_t1"])
         e_f = ee_f[1:] - (ee_f[:-1] + actions[:-1, 0:3])
         e_u = ee_u[1:] - (ee_u[:-1] + actions[:-1, 3:6])
-        # Under knot1_minus_measured the tuple residual IS the tracking error.
+        # Under knot1_minus_measured (the extra) the tuple residual IS the tracking error.
         # Consistency guard only: implied by T2's action == knot1 - measured.
         for arm, e, ref in (("franka", e_f, ee_f[1:] - k1[:-1, :3]),
                             ("ur", e_u, ee_u[1:] - u1[:-1, :3])):
@@ -524,15 +567,84 @@ def check_t7(ctx: SimpleNamespace) -> str:
     j_ou, j_white = _jerk_rms_mm(ou), _jerk_rms_mm(white)
     _require(j_ou < JERK_RATIO_MAX * j_white,
              f"ou jerk proxy {j_ou:.2f} mm >= {JERK_RATIO_MAX:g} x white {j_white:.2f} mm")
+    ur = _ur_excite_smoothness(ou)
     return (f"Franka action 2nd-difference RMS on move rows: ou {j_ou:.2f} mm vs white "
-            f"{j_white:.2f} mm ({j_ou / j_white:.0%}); ou offset 0 at the episode end")
+            f"{j_white:.2f} mm ({j_ou / j_white:.0%}); ou offset 0 at the episode end; {ur}")
+
+
+def _norm_jerk(x: np.ndarray) -> float:
+    """2nd-difference RMS / (sqrt(6) RMS about the mean): 1 for white noise."""
+    d2 = x[2:] - 2.0 * x[1:-1] + x[:-2]
+    dev = x - x.mean(axis=0)
+    return float(np.sqrt(np.mean(np.sum(d2 ** 2, axis=1)))
+                 / (np.sqrt(6.0) * np.sqrt(np.mean(np.sum(dev ** 2, axis=1)))))
+
+
+def _jerk(x: np.ndarray) -> float:
+    return float(np.sqrt(np.mean(np.sum((x[2:] - 2.0 * x[1:-1] + x[:-2]) ** 2, axis=1))))
+
+
+class _BallGripper:
+    """Fake clearance: min_clearance + limit - |offset position| (binds past ``limit``)."""
+
+    def __init__(self, p0: np.ndarray, min_c: float, limit: float) -> None:
+        self.p0, self.min_c, self.limit = p0, min_c, limit
+
+    def predict(self, board, X, jaw=None) -> float:
+        return self.min_c + self.limit - float(np.linalg.norm(np.asarray(X)[:3, 3] - self.p0))
+
+
+def _ur_excite_smoothness(datas: list[dict]) -> str:
+    """UR offset: OU-smooth on the run files, and the clearance scale adds no jerk (a synthetic
+    binding guard exercises the scale; the run episodes rarely bind)."""
+    raw_all, app_all, scale_all = [], [], []
+    for d in datas:
+        raw = np.asarray(d["sim_excite_ur_raw"])
+        app = np.hstack([d["sim_excite_ur_dpos_m"], d["sim_excite_ur_rotvec"]])
+        scale = np.asarray(d["sim_ur_excite_scale"])
+        active = np.any(raw != 0.0, axis=1)
+        _require(active.any(), "no UR excitation in the run (defaults should be on)")
+        _require(np.allclose(app, scale[:, None] * raw, rtol=0.0, atol=1e-15),
+                 "sim_excite_ur != scale * raw")
+        _require(not np.any(raw[:, 2] < 0.0), "UR z offset below the nominal target")
+        raw_all.append(raw[active])
+        app_all.append(app[active])
+        scale_all.append(scale[active])
+    raw, app, scale = (np.vstack(raw_all), np.vstack(app_all), np.concatenate(scale_all))
+    nj = _norm_jerk(app[:, :3])
+    _require(nj < UR_NORM_JERK_MAX, f"UR offset normalised jerk {nj:.2f} >= {UR_NORM_JERK_MAX}")
+    ratio = _jerk(app[:, :3]) / _jerk(raw[:, :3])
+    _require(ratio <= UR_SCALE_JERK_RATIO_MAX, f"UR scale adds jerk: ratio {ratio:.2f}")
+
+    base = UrTarget(pos=np.array([0.5, 0.0, 0.03]), quat_wxyz=np.array([1.0, 0.0, 0.0, 0.0]),
+                    byte=None)
+    guard = cli.UrExciteGuard(None, _BallGripper(base.pos, 4e-3, 3e-3), 4e-3, EXCITE_RAMP_S)
+    ou = OuExcitation(np.random.default_rng(0), 2e-3, np.radians(1.0), 0.4, lcs.SAMPLE_PERIOD_S,
+                      1.0, 0.0)
+    s_raw, s_app, s_scale = [], [], []
+    for k in range(1000):
+        e = ou.step()
+        r = np.concatenate([e.dpos, e.axis * e.angle])
+        r[2] = max(r[2], 0.0)
+        s_app.append(guard.apply(k * lcs.SAMPLE_PERIOD_S, base, r, (None,)))
+        s_raw.append(r)
+        s_scale.append(guard.scale)
+    s_raw, s_app, s_scale = np.array(s_raw), np.array(s_app), np.array(s_scale)
+    s_nj, s_ratio = _norm_jerk(s_app[:, :3]), _jerk(s_app[:, :3]) / _jerk(s_raw[:, :3])
+    _require(float(np.linalg.norm(s_app[:, :3], axis=1).max()) <= 3e-3 + 2e-5,
+             "synthetic guard let the offset past its clearance limit")
+    _require(s_nj < UR_NORM_JERK_MAX and s_ratio <= UR_SCALE_JERK_RATIO_MAX,
+             f"synthetic binding guard: normalised jerk {s_nj:.2f}, ratio {s_ratio:.2f}")
+    return (f"UR offset normalised jerk {nj:.2f} (white 1), scale jerk ratio {ratio:.2f}, "
+            f"scaled {np.mean(scale < 1.0):.1%} of {len(scale)} active frames (mean scale "
+            f"{scale.mean():.3f}); synthetic binding guard: scaled {np.mean(s_scale < 1.0):.0%}, "
+            f"mean {s_scale.mean():.2f}, normalised jerk {s_nj:.2f}, ratio {s_ratio:.2f}")
 
 
 @check("T8 hygiene")
 def check_t8(ctx: SimpleNamespace) -> str:
-    left = subprocess.run(["pgrep", "-f", PRIVATE_PORT], capture_output=True, text=True,
-                          check=False).stdout
-    _require(not left.strip(), f"processes with {PRIVATE_PORT} in cmdline: pids {left.split()}")
+    left = pgrep_others(ctx.port)
+    _require(not left, f"processes with {ctx.port} in cmdline: pids {left}")
     log_text = ctx.run_log.read_text() if ctx.run_log.is_file() else ""
     errors = [e for e in cli.OSC_LOG_ERRORS if e in log_text]
     _require(not errors, f"{ctx.run_log}: log has {errors}")
@@ -540,14 +652,52 @@ def check_t8(ctx: SimpleNamespace) -> str:
     if gpu is not None and ctx.gpu_baseline is not None:
         extra = gpu - ctx.gpu_baseline - {os.getpid()}
         _require(not extra, f"foreign GPU compute apps appeared: {sorted(extra)}")
-    return f"pgrep -f {PRIVATE_PORT} empty, osc.log clean, GPU apps at baseline"
+    return f"pgrep -f {ctx.port} empty (self excluded), osc.log clean, GPU apps at baseline"
+
+
+@check("T9 rewrite_actions round trip")
+def check_t9(ctx: SimpleNamespace) -> str:
+    import rewrite_actions as rw
+
+    identical = 0
+    for name, path in ctx.order:
+        dst = ctx.tmp_root / "rewrite" / f"{name}.npz"
+        stats = rw.rewrite_file(path, dst, "cmd_delta")
+        src, got = ctx.data[name], _load(dst)
+        for key in ("actions", "sim_action_knot1_minus_measured"):
+            _require(rw.same_array(src[key], got[key]), f"{name}: rewritten {key} differs")
+        _require(np.array_equal(src["sim_realised_delta"], got["sim_realised_delta"],
+                                equal_nan=True), f"{name}: rewritten sim_realised_delta differs")
+        diff = [k for k in src if k not in rw.REWRITTEN and not rw.same_array(src[k], got[k])]
+        _require(not diff, f"{name}: non-action keys changed {diff}")
+        identical += stats["keys_identical"]
+    return (f"{len(ctx.order)} files: cmd_delta / old extra / realised bit-identical to the "
+            f"collector's, {identical} non-action keys byte-identical")
+
+
+def causality_report(files: list[Path]) -> str:
+    u, r = [], []
+    for path in files:
+        d = _load(path)
+        u.append(d["actions"])
+        r.append(d["sim_realised_delta"] if "sim_realised_delta" in d
+                 else lcs.realised_delta(d["state"]))
+    return lcs.causality_table(lcs.causality_slopes(np.vstack(u), np.vstack(r)))
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--keep", action="store_true", help="keep the temp dir")
     parser.add_argument("--lcm-url", default=PRIVATE_LCM_URL)
+    parser.add_argument("--causality-dir", type=Path, default=None,
+                        help="only print the realised-vs-u table of every .npz under this dir")
     args = parser.parse_args()
+    if args.causality_dir is not None:
+        files = sorted(p for p in args.causality_dir.rglob("*.npz")
+                       if "recordings" not in p.parts)
+        print(f"{len(files)} files under {args.causality_dir}")
+        print(causality_report(files))
+        return 0
 
     from loguru import logger
     logger.remove()
@@ -555,7 +705,8 @@ def main() -> int:
 
     t0 = time.perf_counter()
     tmp_root = Path(tempfile.mkdtemp(prefix="check_lcs_tuples_"))
-    ctx = SimpleNamespace(tmp_root=tmp_root, lcm_url=args.lcm_url, gpu_baseline=_gpu_apps())
+    ctx = SimpleNamespace(tmp_root=tmp_root, lcm_url=args.lcm_url, port=url_port(args.lcm_url),
+                          gpu_baseline=_gpu_apps())
     exit_code = 0
     for name, fn in CHECKS:
         try:
@@ -573,6 +724,9 @@ def main() -> int:
             exit_code = 1
             break
         print(f"[PASS] {name}: {detail}", flush=True)
+    if exit_code == 0 and getattr(ctx, "order", None):
+        print("[INFO] causality (realised vs u, T0 files):")
+        print(causality_report([path for _, path in ctx.order]))
 
     if args.keep:
         print(f"[INFO] kept {tmp_root}")

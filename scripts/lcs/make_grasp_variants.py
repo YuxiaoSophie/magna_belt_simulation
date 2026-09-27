@@ -15,9 +15,16 @@ under the OSC hold, require ``held() == (True, True)``, measure the grasp offset
 ``--probe`` runs single-knob sweeps instead and writes only ``<root>/<set>/probe.json``; its
 feasible box is the default ``--box`` of a later set run.
 
+``--ur-depth-mm 3,6,9`` (opt-in) builds nominal + one variant per depth (``--repeats`` each): the
+UR ``pre_pick_1``/``pick`` poses move back along the tracking +z (tip -> wrist), so the jaw closes
+nearer the fingertips. It logs the grasp and the belt's depth in the jaw at the end of every pick
+phase, then settles under the OSC and saves the held states + ``index.json``.
+
 Run:
     uv run python scripts/lcs/make_grasp_variants.py --probe
     uv run python scripts/lcs/make_grasp_variants.py --set set1 --count 12 --seed 0
+    uv run python scripts/lcs/make_grasp_variants.py --root data/lcs/start_states --set ur_depth \
+        --ur-depth-mm 3,6,9 --repeats 2
 """
 
 from __future__ import annotations
@@ -79,9 +86,13 @@ class Variant:
     franka_roll_deg: float = 0.0
     ur_slide_mm: float = 0.0
     ur_roll_deg: float = 0.0
+    ur_depth_mm: float = 0.0  # + = shallower: pick moved back along the UR tracking +z
 
     def commanded(self) -> dict:
-        return {k: float(getattr(self, k)) for k in KNOBS}
+        out = {k: float(getattr(self, k)) for k in KNOBS}
+        if self.ur_depth_mm:
+            out["ur_depth_mm"] = float(self.ur_depth_mm)
+        return out
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -140,6 +151,8 @@ def variant_waypoints(nominal: list[Waypoint], frames: dict, v: Variant) -> list
                                                           w.franka_mat())
         if w.label in ("pre_pick_1", "pick"):
             w.ur_pos, w.ur_quat_xyzw = apply_pose(T_u, w.ur_pos, w.ur_quat_xyzw, w.ur_mat())
+            if v.ur_depth_mm:
+                w.ur_pos = np.asarray(w.ur_pos, float) + v.ur_depth_mm * 1e-3 * w.ur_mat()[:3, 2]
     return out
 
 
@@ -214,6 +227,40 @@ def offsets(m: dict, ref: dict) -> dict:
     return out
 
 
+_GRIPPERS: dict = {}
+
+
+def ur_jaw_depth(sim, body_q: np.ndarray) -> dict:
+    """Belt centreline point nearest the 2F-85 finger axis (tracking origin, along the approach =
+    tracking -z). ``depth_mm`` = its distance back from the physical fingertip (the furthest
+    collider point along the approach), ``past_origin_mm`` = past the tracking origin,
+    ``lateral_mm`` = off the axis."""
+    from round_belt_task import clearance
+
+    body_q = np.asarray(body_q, dtype=np.float64)
+    X = model_pose_ur_tracking(body_q, sim._ur_wrist_body)
+    tip, u = X[:3, 3], -X[:3, 2]
+    if id(sim) not in _GRIPPERS:
+        _GRIPPERS[id(sim)] = clearance.gripper_geometry(sim.model, body_q, X)
+    along = (_GRIPPERS[id(sim)].world_points(body_q) - tip) @ u
+    reach = float(along.max())
+    a = body_q[sim.info.belt_bodies, :3]
+    ab = np.roll(a, -1, axis=0) - a
+    w = a - tip
+    # closest points between each segment a + s ab (s in [0, 1]) and the line tip + t u
+    bb, bu = np.einsum("ij,ij->i", ab, ab), ab @ u
+    den = np.maximum(bb - bu * bu, 1e-12)
+    s = np.clip((bu * (w @ u) - np.einsum("ij,ij->i", ab, w)) / den, 0.0, 1.0)
+    c = a + s[:, None] * ab
+    t = (c - tip) @ u
+    miss = np.linalg.norm(c - tip - t[:, None] * u, axis=1)
+    k = int(np.argmin(miss))
+    return {"depth_mm": (reach - float(t[k])) * 1e3, "past_origin_mm": float(t[k]) * 1e3,
+            "finger_reach_mm": reach * 1e3, "lateral_mm": float(miss[k]) * 1e3,
+            "fingertip_xyz": _GRIPPERS[id(sim)].world_points(body_q)[int(along.argmax())].tolist(),
+            "segment": k + float(s[k])}
+
+
 def measured_record(sim, body_q, ref: dict, grasp) -> dict:
     m = measure(sim, body_q)
     rec = {"offsets": offsets(m, ref), "absolute": m, "grasp": grasp.describe(),
@@ -235,8 +282,20 @@ def short(rec: dict | None) -> str:
 # --- phases ---------------------------------------------------------------------------------------
 
 
-def phase_a(variants: list[Variant], params: Path) -> tuple[dict, dict]:
-    """Position-backend picks: ``({id: snapshot}, {id: failure reason})``."""
+def stage_tracer(sim, out: dict):
+    """``on_step`` for ``play``: grasp + jaw depth at the last step of every phase label."""
+    def on_step(i, info):
+        g = sim.grasp_state(info["body_q"])
+        out[info["phase"]] = {"step": i, "held": list(g.held()), "grasp": g.describe(),
+                              "belt_min_z": g.belt_min_z,
+                              "jaw": ur_jaw_depth(sim, info["body_q"])}
+    return on_step
+
+
+def phase_a(variants: list[Variant], params: Path, stages: dict | None = None
+            ) -> tuple[dict, dict]:
+    """Position-backend picks: ``({id: snapshot}, {id: failure reason})``; ``stages`` (opt-in)
+    collects ``{id: {phase: grasp/jaw}}``."""
     sim = RoundBeltOfflineSimulation.build()
     snaps, failed = {}, {}
     try:
@@ -255,7 +314,9 @@ def phase_a(variants: list[Variant], params: Path) -> tuple[dict, dict]:
                 sim.bridge = OfflineBridge()  # a fresh sim has no gripper command yet
             t0 = time.perf_counter()
             traj = sim.plan(variant_waypoints(nominal, frames, v), settle_s=PICK_HOLD_S)
-            sim.play(traj, log_every_s=0)
+            trace = None if stages is None else stages.setdefault(v.id, {})
+            sim.play(traj, on_step=None if trace is None else stage_tracer(sim, trace),
+                     log_every_s=0)
             grasp = sim.grasp_state()
             fails = grasp.failures()
             took = time.perf_counter() - t0
@@ -274,7 +335,7 @@ def phase_a(variants: list[Variant], params: Path) -> tuple[dict, dict]:
 
 
 def phase_b(variants: list[Variant], snaps: dict, failed: dict, lcm_url: str,
-            reference: Path, out_dir: Path | None) -> dict:
+            reference: Path, out_dir: Path | None, jaw: bool = False) -> dict:
     """OSC settle + measure; saves ``gv_<id>_osc.npz`` if ``out_dir``. ``{id: row}``."""
     from round_belt_task.osc_simulation import RoundBeltOscSimulation
 
@@ -304,6 +365,8 @@ def phase_b(variants: list[Variant], snaps: dict, failed: dict, lcm_url: str,
             if bad:
                 raise RuntimeError(f"OSC log has {bad} ({log_path})")
             row["measured"] = measured_record(sim, sim.state_0.body_q.numpy(), ref, grasp)
+            if jaw:
+                row["measured"]["ur_jaw"] = ur_jaw_depth(sim, sim.state_0.body_q.numpy())
             if fails:
                 row["reason"] = "osc: " + "; ".join(fails)
                 logger.warning(f"[B] {v.id} FAILED: {row['reason']}")
@@ -441,6 +504,41 @@ def run_set(args: argparse.Namespace, set_dir: Path) -> int:
     return 0 if rows[0]["held"] else 1
 
 
+def run_depth(args: argparse.Namespace, set_dir: Path) -> int:
+    depths = [float(x) for x in args.ur_depth_mm.split(",") if x.strip()]
+    variants = [Variant(f"ud{0:+g}_r{r}") for r in range(args.repeats)]
+    variants += [Variant(f"ud{d:+g}_r{r}", ur_depth_mm=d) for d in depths
+                 for r in range(args.repeats)]
+    logger.info(f"[DEPTH] {args.set}: {[v.id for v in variants]}")
+    set_dir.mkdir(parents=True, exist_ok=True)
+    stages: dict = {}
+    snaps, failed = phase_a(variants, args.params, stages)
+    rows = list(phase_b(variants, snaps, failed, args.lcm_url, args.reference, set_dir,
+                        jaw=True).values())
+    for r in rows:
+        r["stages"] = stages.get(r["id"], {})
+        if r["measured"] is None:
+            continue
+        jaw = r["measured"]["ur_jaw"]
+        pick = r["stages"].get("dwell:pick", {}).get("jaw", {})
+        print(f"{r['id']:<12} held {r['held']!s:<5} jaw depth: pick {pick.get('depth_mm', 0):5.1f}"
+              f" mm, osc {jaw['depth_mm']:5.1f} mm (lateral {jaw['lateral_mm']:.1f}) | "
+              f"{short(r['measured'])}")
+    index = {"set": args.set, "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+             "kind": "ur_depth", "depths_mm": depths, "repeats": args.repeats,
+             "params": str(args.params), "params_sha256": sha256(args.params),
+             "nominal_start": str(args.reference),
+             "nominal_start_sha256": sha256(args.reference),
+             "ur_depth_mm": "pre_pick_1 + pick UR poses moved this far along the tracking +z "
+                            "(tip -> wrist); + = shallower",
+             "ur_jaw": "belt centreline point nearest the 2F-85 finger axis: depth_mm behind "
+                       "the fingertip point along the approach, lateral_mm off the axis",
+             "variants": rows}
+    (set_dir / "index.json").write_text(json.dumps(index, indent=2) + "\n")
+    logger.success(f"[DEPTH] {set_dir}: {sum(r['held'] for r in rows)}/{len(rows)} held")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--probe", action="store_true", help="single-knob feasibility sweep")
@@ -456,9 +554,14 @@ def main() -> int:
     parser.add_argument("--params", type=Path, default=MAGNA_PARAMS_SIM_YAML)
     parser.add_argument("--reference", type=Path, default=DEFAULT_REFERENCE,
                         help="nominal start state the offsets are measured against")
+    parser.add_argument("--ur-depth-mm", default=None,
+                        help="opt-in: comma list of shallower UR pick depths (mm) to build")
+    parser.add_argument("--repeats", type=int, default=1, help="--ur-depth-mm runs per depth")
     args = parser.parse_args()
     configure_logging()
     set_dir = args.root / args.set
+    if args.ur_depth_mm is not None:
+        return run_depth(args, set_dir)
     return run_probe(args, set_dir) if args.probe else run_set(args, set_dir)
 
 

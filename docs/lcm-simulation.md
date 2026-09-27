@@ -472,7 +472,7 @@ the hand at the holder. See §8 (check 9) for a synthetic reproduction of the tr
 | Robotiq `speed`/`force` command bytes are ignored by the physics, only echoed on status | same here | Drake's own behaviour, reproduced verbatim |
 | simplified two-finger Robotiq collision model | the full 2F-85 linkage (proxied into the VBD entry alongside the Franka long fingers) | this repo keeps the full gripper mesh; contact is real, not scripted |
 | no belt state estimation channels | none here either | out of scope for both sims |
-| task-board pulleys: the Drake sim on the local magna branch has them fixed (magna `2d9b0ca` makes them revolute) | the pulleys rotate freely: VBD bodies on world revolute axles at their centres (axis = board normal, SDF inertials, axle damping 0.001 N m s/rad from the URDF, applied as a zero-stiffness VBD drive because `SolverVBD` ignores `joint_damping`), in the VBD entry with the belt; each carries a thin marker strip | as `2d9b0ca`, except the damping (magna: 0): undamped, a pulley kicked by the Franka fingers or the belt free-spun for minutes; 0.001 stops it in ~0.2 s (time constant Izz/c = 60 ms) and resists a belt-driven turn with only 1e-3 N m per rad/s. The axle anchor is a hard AL constraint (steady sag ~0.1-0.2 mm under gravity); costs ~0.33 ms/step (two more VBD bodies + the damper row) |
+| task-board pulleys: the Drake sim on the local magna branch has them fixed (magna `2d9b0ca` makes them revolute) | the pulleys rotate freely: VBD bodies on world revolute axles at their centres (axis = board normal, SDF inertials, axle damping 0.001 N m s/rad from the URDF, applied as a zero-stiffness VBD drive because `SolverVBD` ignores `joint_damping`), in the VBD entry with the belt; each carries a thin marker strip | as `2d9b0ca`, except the damping (magna: 0): undamped, a pulley kicked by the Franka fingers or the belt free-spun for minutes; 0.001 stops it in ~0.2 s (time constant Izz/c = 60 ms) and resists a belt-driven turn with only 1e-3 N m per rad/s. The axle anchor is a hard AL constraint whose structural penalty is pinned at `defaults.VBD_RIGID_JOINT_LINEAR_KE`/`_ANGULAR_KE` = 1e7 (`_pin_pulley_joint_stiffness`; legacy AVBD otherwise ramps it only to ~300 N/m and the large pulley bobbed 1.6 mm z / 0.8 mm xy under belt load, now < 0.01 mm). Data, the v2 model, demos and synthetic targets made before 2026-09-26 used the soft anchor; costs ~0.33 ms/step (two more VBD bodies + the damper row) |
 | the holder URDF has no collision for its outer rim (bottom plate and middle/top tiers only); the Drake belt ellipse is 0.168 x 0.248 | four `quarter_ellipse_rim.obj` quarters (z 0.005-0.010, slots left open) and a belt centreline of `[0.08558, 0.12066]` resting on that rim against the middle-tier wall (§6) | user request: the belt starts on the holder's outermost rim |
 | Drake viewer draws the FEM mesh directly | `DRAKE_VIEWER_DEFORMABLE` here is a tube mesh (8-sided ring per belt body) around the rod centreline, optional via `--publish-belt-mesh` | this sim's belt is a rod, not an FEM volume |
 | 2F-85 fully closed on an empty grasp reads status ≈227 (a real gripper's mechanical stop) | fully closed (command 255) on nothing reads status 255: the driver's upper joint limit is clamped to `gripper_drive.stop` (0.648 rad, where the pad/fingertip proxy colliders meet), which is 0.09 mm of pad gap, i.e. a shut jaw on the width scale the status uses (§2) | a real 2F-85 stalls its fingertips against each other a few counts before its own position command runs out; ours stalls level with it. Irrelevant unless a controller keys exact logic off the empty-close status value |
@@ -492,7 +492,7 @@ the repo root; the "extra args" column is what follows the script path.
 | `scripts/checks/check_robotiq_width.py` | the `ROBOTIQ_COMMAND` byte to jaw width map (§2) against a live `RoundBeltLcmSimulation` on a private LCM group: (T0) the 256-entry byte -> driver target table (byte 0 at the open value, 255 at the full-close target, monotone, calibration spanning open to `gripper_drive.stop`), (T1) a 10-byte free-air sweep whose measured pad gap (minimum distance between the two pad collision meshes) is within 1 mm of `open_gap * (1 - byte/255)`, endpoints included, (T2) the `ROBOTIQ_STATUS` position echoes each reached byte to within 3 counts | none |
 | `scripts/checks/check_recording.py` | 10 checks (`R0`-`R9`) against a live, non-realtime `RoundBeltLcmSimulation` recording (`--record`) on a private LCM group: build, a 600-step scripted sequence (a hand command republished unchanged then changed — one `hand_command` event per goal, two Robotiq commands, a deliberate belt trigger), the on-disk files, `Recording.load`, events/signals, `Recording.list_runs`, the recording's per-step overhead against an unrecorded baseline, loading an unfinished copy (chunk discovery) and a copy with a chunk removed (`ValueError`), and run-dir name collisions (§10) | none |
 | `scripts/checks/check_replay_viewer.py` | 11 checks (`V0`-`V10`) against a headless `ReplayApp` (§10) over two recorded runs (a scripted 600-step run and a second, shorter one): run selection, seeking, playback, metrics, events, plots, triads, refusal of a body-label mismatch, per-seek render timing, and synthetic target messages in both runs (target triads vs. `target_world_pose`, a run switch from past the shorter run's end, a failing hook during a GUI run switch), and a 5 s real-time looped playback's rates (redraws/s near `render_fps`, chart updates <= 6/s per chart, no scale resends) | none |
-| `scripts/checks/check_replay_learned_mpc.py` | 5 checks (`X0`-`X4`) of the learned-MPC replay layers (§10) against a headless `ReplayApp` over one learned and one baseline run of the 2026-09-24 replay set and one staged run of `20260925-002801-stages` (read-only, linked into a temp root): (X0) the CLI registers the panel only for learned roots or path flags and drops the removed `readout`/`action_rotation` names, layers default off, action scale defaults to 9, layers are disabled on the baseline run; (X1) at 5 frames the picked solve is the latest with `step <= frame step`, the Franka plan knots match the harness transform (<= 1e-6 m), `planned_ee` holds only the Franka knots and the augmented dots (no paths, no UR knots), the `x_sol` dots match exactly, decoded belts are bit-exact, the one green target tube matches `pcd_belt[59]` (staged run: tubes at frames 13 and 59 of `demo_flat`, opacity follows `stage`, no ref tubes), each arrow starts at its knot (<= 1e-6 m), points along `u_i` (cos > 0.999999), has length scale x `\|u_i\|` (1e-9 relative), tip at base + scale x `u_i` (<= 1e-6 m) and chains tip to tail at scale 1; (X2) toggling and scale changes keep the handle count; at scales 1 and 20 the tips are exact and the shaft/head sizes are the constants (head-only arrows shrunk to their length); redraw < 50 ms; (X3) missing decoder/demo files disable only their layers; (X4) `check_replay_viewer.py` V0-V10 on `--lcm-url` | none (X4: a private LCM group, default `7705`) |
+| `scripts/checks/check_replay_learned_mpc.py` | 6 checks (`X0`-`X5`) of the learned-MPC replay layers (§10) against a headless `ReplayApp` over one learned and one baseline run of the 2026-09-24 replay set and one staged run of `20260925-002801-stages` (read-only, linked into a temp root): (X0) the CLI registers the panel only for learned roots or path flags and drops the removed `readout`/`action_rotation` names, layers default off, action scale defaults to 9, layers are disabled on the baseline run; (X1) at 5 frames the picked solve is the latest with `step <= frame step`, the Franka plan knots match the harness transform (<= 1e-6 m), `planned_ee` holds only the Franka knots and the augmented dots (no paths, no UR knots), the `x_sol` dots match exactly, decoded belts are bit-exact (150 points) and the tube centres match them at every 3rd point, the one green target tube matches `pcd_belt[59]` (staged run: tubes at frames 13 and 59 of `demo_flat`, only the current stage's tube is visible, no ref tubes), each arrow starts at its knot (<= 1e-6 m), points along `u_i` (cos > 0.999999), has length scale x `\|u_i\|` (1e-9 relative), tip at base + scale x `u_i` (<= 1e-6 m) and chains tip to tail at scale 1; (X2) toggling and scale changes keep the handle count; at scales 1 and 20 the tips are exact and the shaft/head sizes are the constants (head-only arrows shrunk to their length); redraw < 50 ms; (X3) missing decoder/demo files disable only their layers; (X5) `--target-belt` observation / per-stage demo_goals belts, default off; (X4) `check_replay_viewer.py` V0-V10 on `--lcm-url` | none (X4: a private LCM group, default `7705`) |
 | `scripts/checks/check_sim_snapshot.py` | 6 checks (`S0`-`S5`) that `task_common.sim_snapshot` restores a `RoundBeltLcmSimulation` state, on a private LCM group: (S0) build + settle, (S1) baseline restore-vs-continue noise, (S2) restore fidelity mid-motion (hand opening, Robotiq closing) in the same sim, (S3) the same restore in a second sim built fresh from the saved `.npz`, (S4) refusal of an edited/truncated snapshot (no side effects), (S5) the CUDA graph is dropped and re-captured and step/time bookkeeping is exact after restore | none |
 | `scripts/checks/check_inproc_motion.py` | 6 checks (`M0`-`M5`) of the in-process waypoint motion (no magna, no LCM): (M0) `pre_mpc_motion` waypoints from magna's yaml, world frame, gripper commands, (M1) numpy FK vs the built model's bodies, (M2) IK round trips at every waypoint + the nominal joint trajectory's per-step jump, (M3) the nominal pick holds the belt and is snapshotted, (M4) restore + `pre_place_1 -> place_3` tracking, the grasp held at `pre_place_2` and belt bodies reaching the large pulley, (M5) two restored replays of M4 agree (determinism) | none |
 | `scripts/checks/check_commander.py` | 7 checks (`N0`-`N6`) of the emulated magna waypoint/UR-line commander (`round_belt_task.commander`), no sim, no LCM: (N0) Franka position knots, (N1) orientation knots, (N2) the reach/latch/dwell/advance state machine, (N3) the UR 2-knot line + regeneration rule + `tool0` frame, (N4) bounded excitation, (N5) the `TARGET_CARTESIAN_POSE_TRAJECTORY` LCM message round trip (plus, if a recorded magna run has target messages, its layout), (N6) OU excitation statistics (stationary std, lag-1 autocorrelation, step std, fade ramp) vs uncorrelated white draws | none |
@@ -875,6 +875,141 @@ Measured on 2026-09-21 (1x, looped, default charts, local headless Chromium, 3-m
 The initial page load still sends the scene meshes (about 6 MB) once. On a very slow link, the
 page takes that long to appear before playback can keep up.
 
+### Rendering a video
+
+`scripts/record_replay_video.py` renders a run to MP4 on the server. Use it when the viewer is
+watched over a slow link. It takes the viewer's run and layer flags (`--recordings --run
+--decoder --deploy --demo-goals --demo-episode --target-belt --learned-layers --show-collision
+--point-cloud`), plus `--action-scale` (default 9).
+
+```bash
+R=data/lcs/mpc_eval/20260925-203831-eeoff/recordings
+D=/home/hienbui/git/lcs_learning/outputs/sim_belt_v2_20260925/deploy_v2_decoded_only/decoder.npz
+uv run python scripts/record_replay_video.py --recordings $R --run learned_ee_ur_y-8 \
+    --decoder $D --learned-layers planned_belt,planned_ee,actions,target_belt \
+    --out data/lcs/mpc_eval/20260925-203831-eeoff/videos/learned_ee_ur_y-8.mp4
+# side by side, same camera, labelled
+uv run python scripts/record_replay_video.py ... --compare baseline_ee_ur_y-8 --out a_vs_b.mp4
+# a view framed in the live viewer: Display > Camera > "Copy camera JSON", then paste
+uv run python scripts/record_replay_video.py ... --camera '{"position":[...],"look_at":[...],"up":[0.0,0.0,1.0],"fov":0.7854}'
+# small extra views, top-right (repeatable; LABEL=<camera json or .json path>)
+uv run python scripts/record_replay_video.py ... --inset 'side={"position":[...],...}' --inset front=front.json
+```
+
+- **Timing.** Output frame `n` shows recording time `start + n * speed / fps`. The defaults are
+  `--fps 25` and `--speed 1` (real time). Times (`--start-s`, `--end-s` and the overlay) are
+  relative to the run's first recorded frame, not the sim clock the viewer shows. With
+  `--compare`, both runs use the longer run's timeline, and the shorter one holds its last
+  frame.
+- **Output.** The default size is `--width 1280 --height 720` (per run, so `--compare` is
+  2560x720). Encoding is libx264 yuv420p at crf 20. A `t = 3.2 s` overlay sits bottom-left
+  (`--no-overlay` turns it off), and `--compare` adds run-name labels. Both use ffmpeg
+  `drawtext`, and are skipped with a warning if ffmpeg lacks it.
+- **How it renders.** It builds the same `ReplayApp` headless (analysis panels off) on a scratch
+  port, default 19281 (`--port`). It starts a headless Chromium (snap, profile under
+  `~/snap/chromium/common`) as the viser client, and stops it by its own process group. For
+  each frame, it seeks, then waits in `replay_video.sync_scene` until this client's broadcast
+  cursor covers every scene message queued so far, then round-trips the viser event loop.
+  Only then does it call `get_render` (PNG, over white). viser's own `get_render` flush is only
+  best-effort: its request rides a different buffer and can overtake a scene update. A warm-up
+  renders until two captures agree (textures load asynchronously). The output is
+  deterministic: a rerun gives bit-identical frames. It takes about 120 ms per 1280x720 frame
+  (logged as mean/p95/max), so a 10.6 s run takes about 36 s.
+- **Tubes.** Videos draw the belt tubes at full resolution: all 150 points and 8 sides
+  (`--tube-stride 1 --tube-sides 8`). The live viewer keeps its light 3 / 6.
+- **Camera.** `--camera` takes a `.json` file or the json text:
+  `{position, look_at, up, fov}`, with `fov` vertical, in radians (as in viser). Under
+  **Display**, the viewer shows each browser its own camera: position, look_at, up and fov
+  rows, 4 decimals, updated at no more than 5 Hz as you orbit. **Copy camera JSON** puts the
+  one-line json on that browser's clipboard. It uses `navigator.clipboard`, which works on
+  `localhost`, including through an SSH tunnel, and falls back to `execCommand('copy')`
+  elsewhere. viser 1.1 has no clipboard API, so this is an inline handler in an `add_html`
+  block. The default preset (`replay_video.DEFAULT_CAMERA`) is the user's view, low from the
+  front right:
+  `{"position":[0.622,-0.2402,0.1969],"look_at":[0.3984,0.1624,-0.068],"up":[0.0,0.0,1.0],"fov":1.309}`.
+  The earlier default, fitted from above to the board, pulleys and both grippers, is
+  `{"position":[0.454,-0.4156,0.6379],"look_at":[0.454,-0.06,0.13],"up":[0.0,0.0,1.0],"fov":0.7854}`.
+- **Legend.** On runs with learned solves, a colour legend sits bottom-right (`--no-legend`
+  turns it off). It lists the current belt (gold), then only the learned layers that are on:
+  planned belt (blue, a swatch fading like the steps, with the horizon `N` x `dt` read from the
+  solves), target belt (green), planned EE (cyan knot, dark state dots) and planned actions
+  (Franka dark cyan, UR red). The swatches use the panel's RGB constants. The gold is the
+  scene's belt colour `(1.0, 0.5, 0.0)` as displayed, `(255, 187, 0)`: viser takes newton's
+  instance colours as linear, so the screen shows their sRGB encoding. The legend is drawn with
+  Pillow and blended into each frame before encoding, so it needs no `drawtext`. Text is 19 px
+  at 720 p and scales with `--height`.
+- **Insets.** Each `--inset LABEL=<camera json or path>` adds a picture-in-picture window,
+  stacked top-right: 1/4 of the frame width at the frame's aspect (320x180 at 720 p), shrunk
+  if the stack would reach the legend. Each has a 2 px border and a small label top-left. Every
+  frame renders the main camera and then each inset camera after the same `sync_scene`; each
+  `get_render` request carries its own camera, so the client camera is never moved. Insets
+  render at the full frame size and are box-downsampled. Output stays deterministic.
+- **GPU memory and blank frames.** The headless page canvas is sized to exactly
+  `--width` x `--height`, and every capture (main and insets) is that size. In this Chromium
+  (ANGLE/Vulkan), each capture of any other size resizes the WebGL canvas and leaks 25-50 MB of
+  GPU memory. The old 1080p render with 2x insets grew by 112 MB per frame, ran out of GPU
+  memory near frame 200, and wrote blank frames from then on. Each raw render is checked: a
+  uniform one (luma std < 1, i.e. a lost WebGL context) restarts Chromium and re-renders that
+  frame. After 3 restarts the script exits 1, and the old output is left as it was, because
+  the video is written to a temp file and moved into place only when complete.
+
+### One-step prediction videos
+
+`scripts/record_prediction_video.py` (module `src/task_common/prediction_video.py`) shows the
+learned LCS's single-step accuracy on a recorded LCS episode (`data/lcs/v2/...`); these have
+no recording, so the scene is rebuilt from the episode. Per episode frame k:
+encode the real observation (`pcd`, `pcd_belt`, `state`), take ONE LCS step with the recorded
+`u_k`, decode; no rollout.
+
+```bash
+uv run python scripts/record_prediction_video.py \
+    --episode data/lcs/v2/set2_excite/episode_0007.npz \
+    --out data/lcs/prediction_videos/ep0007.mp4 --still-s 4.0 --port 19381
+```
+
+- **Frame (layout D, default 1920x1080).**
+  - Left half: the scene at frame k, default camera, with only a `t = x.xx s` label. It is
+    rebuilt: the arm joints from `state` by FK, applied to the start snapshot's joint state (the
+    Robotiq linkage stays as in the snapshot); the large pulley from `sim_pulley_large_pose`;
+    the belt bodies at `sim_belt_xyz`.
+  - Right half: belts only, plain background. Current belt k is grey, true belt k+1
+    (`pcd_belt[k+1]`) is gold, and the predicted belt k+1 is blue. Tubes are 1.5 mm, thinner
+    than the belt, so mm offsets show. `--belt-colors CURRENT,TRUE,PRED` (`#rrggbb` or `gold`,
+    the belt as rendered in the left half) overrides these colours, the legend and the plot line,
+    e.g. `gold,#222222,#0072b2` (Okabe-Ito; used for `outcome_engaged_set2_excite_ep0023`).
+    `none` as CURRENT hides the current belt (and its legend row). `--plot-title` overrides
+    the plot title; the sidecar keeps the title, colours and the Sinkhorn ε/iterations.
+    `--plot-ymax MM` fixes the y limit; `--plot-clip` plots only the rendered frames (with
+    `--start-s`, e.g. 1.5 s to skip the 1.5 s pre-hold, where u = 0 and nothing moves).
+  - Bottom strip: "one-step prediction RMSE (mm)", i.e. the model's predicted vs true belt
+    k+1 over the episode, as one line with a cursor at k. The sidecar also keeps the
+    reconstruction (`decode(encode(obs_{k+1}))`) and no-motion RMSEs.
+  - `--plot-metric sinkhorn|both` (default `rmse`) plots lcs_learning's own
+    `losses_pointcloud.sinkhorn_emd_loss` of predicted vs true k+1 instead, or next to the RMSE.
+    It runs in the lcs_learning venv, because torch is not installed here, with the trainer's
+    defaults ε = 1e-3 m and 120 iterations. Its cost is the Euclidean distance, so the value is
+    a mean transport distance in mm. Note that the RMSE is per coordinate (evaluate_v2's
+    definition), which is 1/√3 of the RMS point distance. At ε = 1 mm the entropic value
+    overestimates the exact EMD (`emd_exact_mm`, `linear_sum_assignment`) by about 0.2 mm on
+    average, and by up to 0.35 mm.
+  - `--layout A|B|C` are the preview options: A and C colour the prediction by per-point error
+    (0-5 mm), and A and B put the plot under the right half.
+- **Right camera.** It uses the left camera's view direction, up and fov. It is moved along the
+  view direction so that every belt drawn in the rendered range spans 80 % of the view's
+  binding axis. The zoom is fixed for the clip. The script fails if any belt would be clipped.
+- **Model.** Default `--solver lcp` is the exact LCP, solved by enumerating active sets
+  (`lcp_exact`; unique, since F + F' > 0). That is what `evaluate_v2.py` ran through qpOASES:
+  equal to 4e-16 on all 4369 test tuples, and it gives the same pooled one-step RMSE, 0.577 mm.
+  `pgd` is the trained 25-iteration PGD, which has no skew part J.
+- **Timing and output.** Each episode frame is shown for `--repeat` (3) video frames at
+  `--speed` (0.5) episode s per video s, i.e. 20 fps. `--still-s` writes PNGs.
+  `<out>.npz` is the sidecar: the belts, RMSEs, the predicted-tube vertices sent to the scene,
+  cameras, rects and per-view luma std.
+- **Capture.** Both halves capture at the canvas size (no canvas resize; see *GPU memory and
+  blank frames* above). Each is then centre-cropped to its view's aspect at full height and
+  box-downsampled, which keeps the vertical fov. The blank guard applies too: `check_render`
+  on every capture, and up to 3 Chromium restarts per frame.
+
 ### Learned-MPC layers
 
 Recordings from `eval_learned_mpc.py --record` with the controller's `learned_mpc.debug_channel`
@@ -888,13 +1023,19 @@ stays on screen until the next one. Four checkboxes, all off by default:
 | Planned belt | `LatentDecoder.decode(x_sol[:16, i])` for `i = 1..N`, closed loops through the 150 material-ordered points | blue 3 mm tubes, opacity 0.9 (step 1) to 0.2 (step N) |
 | Planned EE | dots only, no connecting paths: the published Franka plan knots (`TARGET_CARTESIAN_POSE_TRAJECTORY` with `t[0]` equal to the solve's first knot time) in world, and the augmented `x_sol[16:22, :]` positions (both arms) as small dots. The UR's published 2-knot line is not drawn | Franka knots cyan `(6,182,212)`, augmented dots dark grey |
 | Planned actions | per step `i < N`, a 3D arrow (cylinder + cone mesh) from knot `i` along `u_i[0:3]` (Franka) or `u_i[3:6]` (UR), length **Action scale** (1-100, default 9) x `\|u_i\|`; Franka arrows start at the published plan knots, UR arrows at `x_sol[19:22, i]`, so at scale 1 they chain tip to tail along the planned path; only the length scales: shaft radius 0.8 mm, head 4 mm long and 2 mm in radius at every scale, and an arrow shorter than 4 mm is head only, shrunk uniformly to its length (the tip stays at base + scale x `u_i`); `u0` is opaque with 1.4x the radii, steps 1..N-1 fade 0.75 to 0.2 | Franka dark cyan `(8,145,178)`, UR red `(220,38,38)` |
-| Target belt | the fixed targets only, as the demo's `pcd_belt` at the goal frames (3 mm tubes). Staged run (`demo_traj_yaml` null): one tube per stage goal; the current stage (the solve's `stage` scalar) at opacity 0.9, the others 0.25. Demo-traj run: one opaque tube at the final goal frame. The per-step references are not drawn | green `(22,163,74)` |
+| Target belt | the fixed targets only, as the demo's `pcd_belt` at the goal frames (3 mm tubes). Staged run (`demo_traj_yaml` null): one tube per stage goal; only the current stage's goal (the solve's `stage` scalar) is drawn, opaque; the others are hidden. Demo-traj run: one opaque tube at the final goal frame. The per-step references are not drawn | green `(22,163,74)` |
 
 The action arrows use one hue per arm (Franka cyan, UR red). The recorded belt is gold, so no layer uses yellow or orange. viser 1.1 line segments have no
 opacity, so the faded loops and the arrows are meshes with per-mesh opacity. viser 1.1 has
 `add_arrows`, but its head cannot shrink for an arrow shorter than the head, so each arrow is
 its own mesh. The arrow meshes are rebuilt only when the shown solve or the scale changes (about
 1 ms).
+
+**Tube sampling.** The belt tubes (planned and target) are drawn through every 3rd of the 150
+points (50 rings, still a closed loop) with 6 sides; decoding stays on all 150 points. A reused
+handle is sent its vertices only, and only when they changed; faces go out once per handle. A new
+plan re-sends the 7 planned tubes, about 26 KB (was 102 KB at 150 points x 8 sides), so about
+0.35 MB/s at 13.3 Hz (was 1.35 MB/s); an unchanged target tube costs nothing.
 
 **Files.** The panel reads `deploy`, `demo_goals` and `demo_episode` from `meta.json`'s
 `learned_mpc` block, and the decoder from `<deploy dir>/decoder.npz`. The flags `--deploy`,
@@ -906,6 +1047,9 @@ the demo, if the goals were taken from another demo episode (sha256), or if `met
 lacks `demo_traj_yaml`. The folder's
 first line gives the reason, and the other layers still work. A file whose sha256 differs from
 the one the recording lists is noted there too (not checked for CLI overrides).
+`--target-belt <npz>` (opt-in; viewer and video) replaces the demo lookup: a `demo_goals.npz`'s
+`pcd_belt_stage` gives one tube per stage (staged as above), an `observation.npz`'s `pcd_belt`
+one fixed tube. Use it for goals that are not demo frames (synthetic targets).
 
 **When it appears.** `scripts/replay_viewer.py` adds the folder only if a run under
 `--recordings` has `learned_mpc.debug_channel` set in its `meta.json`, or a path flag is given.
@@ -918,7 +1062,8 @@ ignored with a warning.
 **Exactness.** Nothing is recomputed. The geometry is the recorded message, the recorded plan
 and the demo file; only the belts are decoded, once per run at load (about 50 ms for 107
 solves), one latent per `decode` call. `check_replay_learned_mpc.py` X1 measures: planned belts
-bit-exact, target tube centres within float32 (demo-traj: frame 59; staged
+bit-exact on all 150 points, planned and target tube centres equal to them at every 3rd point
+within float32 (demo-traj: frame 59; staged
 `20260925-002801-stages`: frames 13 and 59 of `demo_flat`, opacity per `stage`); Franka plan knots vs the harness's transform 3e-8 m, no `planned_ee` handles besides the Franka knots and the
 augmented dots; the augmented dots equal `x_sol` (float64 0; float32 buffer 3e-8 m).
 
@@ -961,5 +1106,34 @@ a browser or touch `recordings/` in the repo. See §8 for what each checks in de
 `LearnedMpcPanel`. X0 checks that the panel registers and is disabled on the baseline run. X1
 checks that the geometry at 5 frames equals the recorded solve, plan, decoder and demo. X2
 checks that toggling keeps the handle count, and times the redraw. X3 checks that missing files
-degrade cleanly. X4 runs `check_replay_viewer.py` V0-V10 on `--lcm-url` (default
+degrade cleanly. X5 checks `--target-belt` (default off; observation = one tube, demo_goals =
+per-stage tubes on the staged run; a missing file disables only Target belt). X4 runs
+`check_replay_viewer.py` V0-V10 on `--lcm-url` (default
 `udpm://239.255.76.105:7705?ttl=0`); `--skip-x4` skips it.
+`scripts/checks/check_replay_video.py` (no LCM; viser ports `--port` and `--port`+1, default
+19295) uses the eeoff learned and baseline `ee_ur_y-8` runs. V0 checks that a capture right
+after `sync_scene` equals a settled one at 5 seeks, and that the Display camera json follows
+the client camera. A real DevTools mouse click on **Copy camera JSON** must put exactly that
+json on the clipboard (DevTools on `--port`+2). The video panel must draw 150 x 8 tube
+vertices. V1 renders 10 frames through the CLI, passing the copied json as `--camera`, and
+checks count, size,
+non-blank frames and that consecutive frames differ. V2 checks that a rerun is bit-identical.
+V3 checks that `--compare` gives 2W x H. V4 renders the V1 frames again with `--no-legend`: the
+pixels that differ in every frame must lie in the bottom-right corner. V5: `--target-belt` with
+the run's own goal belts renders V1 bit-exactly, and a 30 mm shifted belt changes the frames.
+V6: two `--inset` views keep the frame size, change the inset windows (stacked top-right) but
+not the rest of the frame vs V1, and a rerun is bit-identical. V7 tests the blank-render
+guard. A real WebGL context loss mid-render (DevTools `WEBGL_lose_context`) must give exactly
+1 restart and frames equal to a clean pass. An always-blank capture must raise `RenderFailed`,
+and then the CLI must exit 1 without writing the video.
+`scripts/checks/check_prediction_video.py` (no LCM; viser `--port`, default 19391) renders a
+10-frame 960x540 clip of `set2_excite/episode_0007`. P1 checks the frame count
+(frames x `--repeat`) and size. P2 recomputes, independently of the recorder, at 4 frames:
+`decode(step(encode(obs_k), u_k))` (exact LCP) and `decode(encode(obs_{k+1}))`. They must equal
+the sidecar's `pred` / `recon_next` bit for bit, and the sent tube vertices must equal
+`tube_vertices(pred)` in float32. P5 applies only to sidecars that carry `sinkhorn_emd_mm`
+(the clip uses `--plot-metric both`): it re-runs `sinkhorn_emd_loss` at 4 frames and requires
+identical values, and requires |Sinkhorn − exact EMD| < 0.5 mm on every frame. P3 checks that the luma std of the left view, the right view
+and the whole frame is >= 5 in every decoded frame. P4 checks that the right view clips no
+belt (|ndc| < 0.98), that it keeps the left view's direction, up and fov, and that FK matches
+the recorded EE (< 0.05 mm). `--scan VIDEO.mp4 ...` runs P1-P4 on already-rendered videos.

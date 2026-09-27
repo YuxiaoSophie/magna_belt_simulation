@@ -4,10 +4,12 @@ Draws the ``LEARNED_MPC_DEBUG`` message answering the current frame (the latest 
 ``msg.step <= step``): decoded planned belts, planned EE knots, planned actions and the demo's
 fixed target belts (stage goals, or the final frame of a demo-traj run). Files come from ``meta["learned_mpc"]`` unless overridden; a layer
 whose files are missing is disabled with a reason. Every layer defaults off.
+``target_belt`` (opt-in) takes the target belts from a demo_goals/observation npz instead.
 """
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import time
@@ -40,9 +42,10 @@ MARKER_M = 0.0015
 # viser 1.1 line segments have no opacity, so faded loops are tube meshes (per-mesh opacity).
 PLAN_TUBE_M = 0.003  # radius; the real belt is 3.3 mm
 TARGET_TUBE_M = 0.003
-TUBE_SIDES = 8
+TUBE_SIDES = 6
+TUBE_STRIDE = 3  # draw every 3rd belt point (150 -> 50): plan updates are bandwidth-bound
 PLAN_ALPHA = (0.9, 0.2)  # step 1 -> step N
-TARGET_ALPHA = (0.9, 0.25)  # current stage, other stages
+TARGET_ALPHA = (1.0, 0.0)  # current stage (opaque); other stages hidden
 # Arrows are meshes: viser 1.1 add_arrows has a fixed absolute head size.
 ARROW_SIDES = 12
 SHAFT_R_M, HEAD_LEN_M, HEAD_R_M = 0.0008, 0.004, 0.002  # constant; only the length scales
@@ -81,6 +84,13 @@ def _goal_fields(path: Path) -> dict[str, Any]:
         if "demo_sha256" in d.files:
             out["demo_sha256"] = str(d["demo_sha256"])
     return out
+
+
+def _target_belts(path: Path) -> np.ndarray:
+    with np.load(path, allow_pickle=False) as d:
+        if "pcd_belt_stage" in d.files:
+            return np.asarray(d["pcd_belt_stage"], dtype=np.float32)
+        return np.asarray(d["pcd_belt"], dtype=np.float32)[None]
 
 
 def learned_meta(meta: dict) -> dict:
@@ -153,6 +163,7 @@ def _alphas(n: int, ramp: tuple[float, float]) -> np.ndarray:
     return np.linspace(ramp[0], ramp[1], n) if n > 1 else np.array([ramp[0]])
 
 
+@functools.lru_cache(maxsize=8)
 def _tube_faces(n_pts: int, sides: int = TUBE_SIDES) -> np.ndarray:
     j, k = np.meshgrid(np.arange(n_pts), np.arange(sides), indexing="ij")
     a = j * sides + k
@@ -160,7 +171,14 @@ def _tube_faces(n_pts: int, sides: int = TUBE_SIDES) -> np.ndarray:
     c = ((j + 1) % n_pts) * sides + k
     d = ((j + 1) % n_pts) * sides + (k + 1) % sides
     faces = np.concatenate([np.stack([a, b, c], -1), np.stack([b, d, c], -1)], axis=0)
-    return faces.reshape(-1, 3).astype(np.uint32)
+    faces = faces.reshape(-1, 3).astype(np.uint32)
+    faces.flags.writeable = False  # cached
+    return faces
+
+
+def tube_points(pts: np.ndarray) -> np.ndarray:
+    """The drawn subset of a belt loop: every ``TUBE_STRIDE``-th point, still closed."""
+    return np.asarray(pts)[::TUBE_STRIDE]
 
 
 def tube_vertices(pts: np.ndarray, radius: float, sides: int = TUBE_SIDES) -> np.ndarray:
@@ -250,8 +268,10 @@ class LearnedMpcPanel:
 
     def __init__(self, *, deploy: Path | None = None, decoder: Path | None = None,
                  demo_goals: Path | None = None, demo_episode: Path | None = None,
-                 layers: tuple[str, ...] = (), root: str = ROOT) -> None:
+                 layers: tuple[str, ...] = (), root: str = ROOT,
+                 target_belt: Path | None = None) -> None:
         self.root = root
+        self.target_belt = Path(target_belt) if target_belt else None
         self.overrides = {"deploy": deploy, "decoder": decoder, "demo_goals": demo_goals,
                           "demo_episode": demo_episode}
         self.requested = set(parse_layers(",".join(layers)))
@@ -373,6 +393,9 @@ class LearnedMpcPanel:
             except (OSError, KeyError, ValueError) as exc:
                 why = f"decoder unusable: {exc!r}"
         self.available["planned_belt"] = why
+        if self.target_belt is not None:
+            self.available["target_belt"] = self._use_target_belt()
+            return
         why = self._missing("demo_episode")
         if why is None:
             try:
@@ -386,6 +409,24 @@ class LearnedMpcPanel:
         if why is None:
             why = self._resolve_goals(block)
         self.available["target_belt"] = why
+
+    def _use_target_belt(self) -> str | None:
+        """Goal belts from ``target_belt``: a demo_goals.npz ``pcd_belt_stage`` (n, P, 3), one
+        per stage, or an observation.npz ``pcd_belt`` (P, 3), one fixed goal."""
+        if not self.target_belt.is_file():
+            return f"target_belt missing: {self.target_belt}"
+        try:
+            belts = self._load("target_belt", _target_belts, self.target_belt)
+        except (OSError, KeyError, ValueError) as exc:
+            return f"target_belt unusable: {exc!r}"
+        if belts.ndim != 3 or belts.shape[2] != 3 or not belts.shape[0] * belts.shape[1]:
+            return f"target_belt belts shape {belts.shape}"
+        staged = len(belts) > 1
+        if staged and any("stage" not in s.scalars for s in self.solves):
+            return "staged target_belt but the run has no stage scalar"
+        self.demo_belts, self.staged = belts, staged
+        self.goal_frames = np.arange(len(belts), dtype=np.int64)
+        return None
 
     def _resolve_goals(self, block: dict) -> str | None:
         """Sets ``goal_frames``/``staged`` from deploy + demo_goals; returns a reason if the
@@ -534,6 +575,7 @@ class LearnedMpcPanel:
 
     def _tube(self, app: ReplayApp, name: str, pts: np.ndarray, radius: float, color,
               opacity: float) -> Any:
+        pts = tube_points(pts)
         return self._mesh(app, name, tube_vertices(pts, radius), _tube_faces(len(pts)), color,
                           opacity)
 
@@ -587,9 +629,11 @@ class LearnedMpcPanel:
     def _mesh(self, app: ReplayApp, name: str, verts: np.ndarray, faces: np.ndarray, color,
               opacity: float) -> Any:
         verts = np.ascontiguousarray(verts, dtype=np.float32)
+        opacity = None if opacity >= 1.0 else float(opacity)  # viser blends any numeric opacity
         handle = self.handles.get(name)
-        if handle is not None and handle.vertices.shape == verts.shape:
-            handle.vertices = verts
+        if handle is not None and handle.vertices.shape == verts.shape:  # faces never re-sent
+            if not np.array_equal(handle.vertices, verts):
+                handle.vertices = verts
             if handle.opacity != opacity:
                 handle.opacity = opacity
             handle.visible = True
@@ -621,6 +665,10 @@ class LearnedMpcPanel:
     def _draw_target_belt(self, app: ReplayApp, s: Solve) -> None:
         loops = self.demo_belts[self.goal_frames]
         for i, (pts, a) in enumerate(zip(loops, self.target_opacities(s), strict=True)):
+            if a <= 0.0:
+                if f"target_belt/goal_{i}" in self.handles:
+                    self._set_hidden(f"target_belt/goal_{i}")
+                continue
             self._tube(app, f"target_belt/goal_{i}", pts, TARGET_TUBE_M, TARGET_GREEN, float(a))
         i = len(loops)
         while f"target_belt/goal_{i}" in self.handles:  # fewer goals than a previous run

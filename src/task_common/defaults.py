@@ -27,6 +27,12 @@ VBD_ITERATIONS = 20
 VBD_RIGID_AVBD_BETA = 1.0e2
 VBD_RIGID_CONTACT_K_START = 3.0e3
 VBD_RIGID_CONTACT_BUFFER_SIZE = 256
+# Non-rod VBD joints are only the pulleys (rods use joint_target_ke/kd); pinned at this stiffness
+# by simulation._pin_pulley_joint_stiffness (unpinned 1e5 let the large pulley move ~1.6 mm).
+VBD_RIGID_JOINT_LINEAR_KE = 1.0e7
+VBD_RIGID_JOINT_ANGULAR_KE = 1.0e7
+VBD_RIGID_JOINT_LINEAR_KD = 0.0
+VBD_RIGID_JOINT_ANGULAR_KD = 0.0
 MUJOCO_ITERATIONS = 30
 MUJOCO_LS_ITERATIONS = 10
 

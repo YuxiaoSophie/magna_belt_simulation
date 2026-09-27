@@ -3,4 +3,5 @@
 	url = https://github.com/DAIRLab/task_board_urdf.git
 [submodule "external/newton"]
 	path = external/newton
-	url = https://github.com/newton-physics/newton.git
+	url = https://github.com/xuanhien070594/newton.git
+	branch = hien/viser-opaque-batched

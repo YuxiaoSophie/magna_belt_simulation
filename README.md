@@ -39,6 +39,7 @@ my_projects/
 │   │   ├── replay_app.py           #   ReplayApp: viser run selection, timeline, 3D playback
 │   │   ├── replay_metrics.py       #   metrics, derived events, target-pose evaluation
 │   │   ├── replay_panels.py        #   Plots/Triads panels for the replay app
+│   │   ├── replay_video.py         #   headless-Chromium MP4 export of replays (frame-exact)
 │   │   ├── sim_snapshot.py         #   full sim state/control capture + restore (LCS)
 │   │   ├── osc_process.py          #   magna's Franka OSC as a private-URL child process (LCS)
 │   │   ├── magna_process.py        #   generic magna-binary child process launcher (learned MPC)
@@ -82,6 +83,7 @@ my_projects/
 ├── scripts/
 │   ├── round_belt_lcm_simulation.py     # LCM sim entry point: speaks magna's contract (docs/lcm-simulation.md)
 │   ├── replay_viewer.py                 # viser replay of a --record run: scrub, play, plots, triads
+│   ├── record_replay_video.py           # render a replay (or two side by side) to MP4 on the server
 │   ├── collect_lcs_dataset.py           # collect LCS episodes (docs/lcs-data-collection.md)
 │   ├── lcs/
 │   │   ├── make_start_state.py          # nominal in-process pick -> LCS start-state snapshot
@@ -102,6 +104,7 @@ my_projects/
 │   │   ├── check_recording.py               # --record output is complete and bounded overhead
 │   │   ├── check_replay_viewer.py           # headless check of the replay app (ReplayApp)
 │   │   ├── check_replay_learned_mpc.py      # headless check of the learned-MPC replay layers
+│   │   ├── check_replay_video.py            # MP4 export: frame count/size, fence, determinism, legend
 │   │   ├── check_sim_snapshot.py            # sim state/control snapshot restore fidelity (LCS)
 │   │   ├── check_inproc_motion.py           # in-process waypoint motion: FK/IK, pick, place (LCS)
 │   │   ├── check_commander.py               # emulated magna waypoint/UR-line commander (LCS)
@@ -163,6 +166,12 @@ uv run python scripts/replay_viewer.py \
     --recordings data/lcs/mpc_eval/20260924-223112-replayset-learned/set1/recordings \
     --run episode_gv_01_0 --port 8082 \
     --learned-layers planned_belt,planned_ee,actions,target_belt
+# render it to MP4 on the server (smooth over a slow link); --compare RUN2 for side by side,
+# --camera '<json>' from the viewer's Display > Camera > Copy camera JSON (lcm-simulation.md §10)
+uv run python scripts/record_replay_video.py \
+    --recordings data/lcs/mpc_eval/20260924-223112-replayset-learned/set1/recordings \
+    --run episode_gv_01_0 --learned-layers planned_belt,planned_ee,actions,target_belt \
+    --out episode_gv_01_0.mp4
 ```
 
 ### Collect LCS data

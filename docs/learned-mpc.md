@@ -30,6 +30,17 @@ timeouts, `w_p 0`): 3/10 engaged (2 strict) on the matched starts. Every other y
 held-out starts; the goal tolerance does not separate `engaged` from `slanted`; no progress fix
 has been found yet that does not lean on the rejected EE-path cost.
 
+## 2026-09-26 — stiffer pulley anchors (sim default change)
+
+The pulleys' VBD axle anchors are now pinned at 1e7 N/m / N m/rad
+(`defaults.VBD_RIGID_JOINT_*_KE`, `simulation._pin_pulley_joint_stiffness`); before, legacy AVBD
+held them at ~300 N/m and the large pulley bobbed 1.6 mm z / 0.8 mm xy under belt load (now
+< 0.01 mm after a 65 ms restore transient). The belt's rod joints are unaffected. **All existing
+data (v1/v2 collections, `v2_decoded_only`), the demos (`demo_flat`, `demo_flat_pp2`) and the
+synthetic target states were produced with the soft anchors** and were not regenerated. A fresh
+UR-held nominal collection (as `demo_flat`) gave 3/3 engaged, wrap 126°, h 0.02-0.04 mm, slant
+3.70° (the soft run: 1/3 at wrap 126° / slant 3.65°, 2/3 at wrap 85° / h 2.4 mm / slant 5.8°).
+
 ## 2026-09-25 — action redefinition, coverage re-collection, v2 training, deploy, eval, and the controller-failure diagnosis
 
 **Summary:** Fixed the three causes the 2026-09-24 diagnosis named (non-causal UR action,

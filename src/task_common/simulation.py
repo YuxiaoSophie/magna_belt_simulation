@@ -80,6 +80,7 @@ class BeltTaskSimulation:
         self.control = self.model.control()
         self._seed_control_targets(info.joint_config)
         self.solver = self._build_solver(info)
+        self._pin_pulley_joint_stiffness(info)
         proxy_labels = [str(self.model.body_label[b]) for b in info.proxy_bodies]
         logger.info(f"[PROXY] mjc->vbd bodies: {proxy_labels}")
 
@@ -192,7 +193,11 @@ class BeltTaskSimulation:
                         rigid_avbd_beta=defaults.VBD_RIGID_AVBD_BETA,
                         rigid_contact_k_start=defaults.VBD_RIGID_CONTACT_K_START,
                         rigid_contact_history=True,
-                        rigid_body_contact_buffer_size=defaults.VBD_RIGID_CONTACT_BUFFER_SIZE),
+                        rigid_body_contact_buffer_size=defaults.VBD_RIGID_CONTACT_BUFFER_SIZE,
+                        rigid_joint_linear_ke=defaults.VBD_RIGID_JOINT_LINEAR_KE,
+                        rigid_joint_angular_ke=defaults.VBD_RIGID_JOINT_ANGULAR_KE,
+                        rigid_joint_linear_kd=defaults.VBD_RIGID_JOINT_LINEAR_KD,
+                        rigid_joint_angular_kd=defaults.VBD_RIGID_JOINT_ANGULAR_KD),
                     bodies=self.vbd_bodies, joints=self.vbd_joints, shapes=self.vbd_shapes),
             ],
             coupling=SolverCoupledProxy.Config(
@@ -205,6 +210,29 @@ class BeltTaskSimulation:
                     collide_interval=1)],
                 iterations=defaults.PROXY_ITERATIONS),
         )
+
+    def _pin_pulley_joint_stiffness(self, info: SceneInfo) -> None:
+        """Hold the pulley joints' structural VBD penalty at the rigid_joint_*_ke cap."""
+        if not info.pulley_joints:
+            return
+        # Legacy AVBD ramps from k_start (shared with the rods) and never reaches the ke cap
+        # (~300 N/m); a per-slot floor, which decay and reset() respect, stiffens only these.
+        vbd = self.solver.solver("vbd")
+        local = {str(label): j for j, label in enumerate(vbd.model.joint_label)}
+        jt = vbd.model.joint_type.numpy()
+        start = vbd.joint_constraint_start.numpy()
+        k_min = vbd.joint_penalty_k_min.numpy()
+        for g in info.pulley_joints:
+            j = local[str(self.model.joint_label[g])]
+            if int(jt[j]) not in (int(newton.JointType.REVOLUTE), int(newton.JointType.FIXED)):
+                raise RuntimeError(f"pulley joint {self.model.joint_label[g]} has type {jt[j]}")
+            k_min[start[j]] = defaults.VBD_RIGID_JOINT_LINEAR_KE
+            k_min[start[j] + 1] = defaults.VBD_RIGID_JOINT_ANGULAR_KE
+        vbd.joint_penalty_k_min.assign(k_min)
+        vbd.joint_penalty_k.assign(np.maximum(vbd.joint_penalty_k.numpy(), k_min))
+        logger.info(f"Pulley joint VBD stiffness pinned: linear "
+                    f"{defaults.VBD_RIGID_JOINT_LINEAR_KE:g} N/m, angular "
+                    f"{defaults.VBD_RIGID_JOINT_ANGULAR_KE:g} N m/rad")
 
     def _seed_control_targets(self, cfg: JointConfig) -> None:
         ctrl_len = len(as_numpy(self.control.joint_target_q))

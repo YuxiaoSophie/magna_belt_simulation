@@ -205,6 +205,8 @@ def create_parser() -> argparse.ArgumentParser:
                    help="osc: keep the start-state UR byte (waypoint bytes logged, not applied)")
     p.add_argument("--nominal-ur-dz-mm", default=None, metavar="A[:B]",
                    help="nominal scenario: UR z offset (mm) of pre_place_2 (A) and place_3 (B = A)")
+    p.add_argument("--nominal-franka-offset-mm", default=None, metavar="X,Y,Z[:X,Y,Z]",
+                   help="nominal scenario: Franka world offset (mm) of pre_place_2 and place_3")
     p.add_argument("--arm-ke", type=float, default=ARM_TARGET_KE)
     p.add_argument("--arm-kd", type=float, default=ARM_TARGET_KD)
     p.add_argument("--params", type=Path, default=MAGNA_PARAMS_SIM_YAML)
@@ -238,6 +240,16 @@ def parse_ur_dz(text: str | None) -> dict[str, float] | None:
     return dict(zip(pert.PERTURBED_LABELS, (parts[0], parts[-1])))
 
 
+def parse_franka_offset(text: str | None) -> dict[str, list[float]] | None:
+    """``"x,y,z[:x,y,z]"`` -> ``{pre_place_2: [x,y,z], place_3: [...]}`` in mm (B defaults to A)."""
+    if text is None:
+        return None
+    parts = [[float(v) for v in part.split(",")] for part in str(text).split(":")]
+    if len(parts) not in (1, 2) or any(len(v) != 3 for v in parts):
+        raise ValueError(f"--nominal-franka-offset-mm {text!r}: want x,y,z or x,y,z:x,y,z")
+    return dict(zip(pert.PERTURBED_LABELS, (parts[0], parts[-1])))
+
+
 def hold_options(args, scenario: str | None) -> dict:
     """The opt-in UR options; ``{}`` when both are off (outputs unchanged)."""
     out = {}
@@ -248,18 +260,27 @@ def hold_options(args, scenario: str | None) -> dict:
         if scenario != "nominal":
             raise ValueError("--nominal-ur-dz-mm needs --scenario nominal")
         out["nominal_ur_dz_mm"] = dz
+    off = parse_franka_offset(getattr(args, "nominal_franka_offset_mm", None))
+    if off is not None:
+        if scenario != "nominal":
+            raise ValueError("--nominal-franka-offset-mm needs --scenario nominal")
+        out["nominal_franka_offset_mm"] = off
     return out
 
 
 def override_waypoints(waypoints: list, opts: dict) -> tuple[list, dict | None]:
-    """UR z offsets and/or stripped UR gripper bytes; ``(waypoints, stripped bytes or None)``."""
+    """UR z / Franka offsets and/or stripped UR bytes; ``(waypoints, stripped bytes or None)``."""
     dz = opts.get("nominal_ur_dz_mm") or {}
+    off_f = opts.get("nominal_franka_offset_mm") or {}
     hold = opts.get("hold_ur_gripper", False)
     out, stripped = [], {}
     for w in waypoints:
         if w.label in dz and w.ur_pos is not None:
             w = dataclasses.replace(w, ur_pos=np.asarray(w.ur_pos, float)
                                     + np.array([0.0, 0.0, dz[w.label] * 1e-3]))
+        if w.label in off_f:
+            w = dataclasses.replace(w, franka_pos=np.asarray(w.franka_pos, float)
+                                    + np.asarray(off_f[w.label], float) * 1e-3)
         if hold and w.ur_gripper_byte is not None:
             stripped[w.label] = int(w.ur_gripper_byte)
             w = dataclasses.replace(w, ur_gripper_byte=None)

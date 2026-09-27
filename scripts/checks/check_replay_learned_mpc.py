@@ -45,6 +45,7 @@ from task_common.replay_learned_mpc import (
     SHAFT_R_M,
     TARGET_ALPHA,
     TUBE_SIDES,
+    TUBE_STRIDE,
     U0_THICK,
     LearnedMpcPanel,
     any_learned_runs,
@@ -73,6 +74,10 @@ COS_MIN = 0.999999
 REDRAW_LIMIT_MS = 50.0
 N_TIMED_FRAMES = 200
 
+
+
+def _mesh_opacity(a: float):
+    return None if a >= 1.0 else a  # opaque meshes carry no opacity
 
 def _require(ok: bool, message: str) -> None:
     if not ok:
@@ -154,7 +159,11 @@ def _scene_nodes(app: ReplayApp) -> int:
 
 
 def _centres(handle) -> np.ndarray:
-    return handle.vertices.reshape(150, TUBE_SIDES, 3).mean(1)
+    return handle.vertices.reshape(-1, TUBE_SIDES, 3).mean(1)
+
+
+def _drawn(belt: np.ndarray) -> np.ndarray:
+    return belt[..., ::TUBE_STRIDE, :]  # tubes are drawn through every TUBE_STRIDE-th point
 
 
 def _visible(panel: LearnedMpcPanel, layer: str) -> list[str]:
@@ -247,14 +256,16 @@ def check_x1(ctx: SimpleNamespace) -> str:
         planned = np.stack([decoder.decode(z) for z in x[:16, 1:].T])
         _require(np.array_equal(s.belts[1:], planned),
                  f"solve {want}: planned belts != decode(x_sol[:16, 1:])")
-        rings = np.stack([h[f"planned_belt/step_{i}"].vertices.reshape(150, TUBE_SIDES, 3)
-                          .mean(1) for i in range(1, len(planned) + 1)])
-        _require(np.abs(rings - planned).max() <= F32_TOL,
-                 f"solve {want}: planned tube centres off by {np.abs(rings - planned).max():.1e}")
+        _require(planned.shape[1] == 150, f"decoded belt has {planned.shape[1]} points")
+        rings = np.stack([_centres(h[f"planned_belt/step_{i}"])
+                          for i in range(1, len(planned) + 1)])
+        _require(rings.shape == _drawn(planned).shape
+                 and np.abs(rings - _drawn(planned)).max() <= F32_TOL,
+                 f"solve {want}: planned tube centres != decoded belt[::{TUBE_STRIDE}]")
         _require(_visible(panel, "target_belt") == ["target_belt/goal_0"],
                  f"solve {want}: target tubes {_visible(panel, 'target_belt')}")
-        _require(np.abs(_centres(h["target_belt/goal_0"]) - demo[-1]).max() <= F32_TOL
-                 and h["target_belt/goal_0"].opacity == TARGET_ALPHA[0],
+        _require(np.abs(_centres(h["target_belt/goal_0"]) - _drawn(demo[-1])).max() <= F32_TOL
+                 and h["target_belt/goal_0"].opacity == _mesh_opacity(TARGET_ALPHA[0]),
                  f"solve {want}: target tube != opaque pcd_belt[-1]")
         _require(np.array_equal(s.u_sol, u), f"solve {want}: u_sol != message")
         a = _arrow_errors(panel, s, {"franka": _ref_franka(rec, franka), "ur": x[19:22].T})
@@ -276,7 +287,7 @@ def check_x1(ctx: SimpleNamespace) -> str:
     staged = _check_staged(ctx)
     return (f"{len(picks)} frames: picked solve == latest step <= frame step; Franka knots "
             f"{err['knot_f']:.1e} m, no connecting paths; augmented f32 "
-            f"{err['aug32']:.1e} / f64 {err['aug64']:.1e} m; decoded belts bit-exact, one target tube == pcd_belt[{len(demo) - 1}];"
+            f"{err['aug32']:.1e} / f64 {err['aug64']:.1e} m; decoded belts bit-exact (150 pts), tubes through every {TUBE_STRIDE}rd point, one target tube == pcd_belt[{len(demo) - 1}];"
             f" arrows start at their knots ({err['act']:.1e} m), chain tip-to-tail, "
             f"min cos {err['cos']:.9f}, length rel <= {EXACT_TOL:g}; frame 0 hidden; {staged}")
 
@@ -297,12 +308,15 @@ def _check_staged(ctx: SimpleNamespace) -> str:
             continue
         stage = int(panel.solves[panel.current].scalars["stage"])
         seen.add(stage)
-        _require(_visible(panel, "target_belt") == names, f"frame {f}: {_visible(panel, 'target_belt')}")
+        _require(_visible(panel, "target_belt") == [names[stage]],
+                 f"frame {f}: {_visible(panel, 'target_belt')}")  # only the current stage's goal
         for i, name in enumerate(names):
+            if i != stage:
+                continue
             h = panel.handles[name]
-            _require(np.abs(_centres(h) - demo[STAGED_FRAMES[i]]).max() <= F32_TOL,
+            _require(np.abs(_centres(h) - _drawn(demo[STAGED_FRAMES[i]])).max() <= F32_TOL,
                      f"{name} centres != pcd_belt[{STAGED_FRAMES[i]}]")
-            _require(h.opacity == TARGET_ALPHA[0 if i == stage else 1],
+            _require(h.opacity == _mesh_opacity(TARGET_ALPHA[0 if i == stage else 1]),
                      f"frame {f} stage {stage}: {name} opacity {h.opacity}")
     _require(seen == {0, 1}, f"stages seen {seen}")
     _require(not any("/ref_" in n for n in panel.handles), "reference tubes exist")
@@ -407,6 +421,77 @@ def check_x3(ctx: SimpleNamespace) -> str:
     ctx.app.hooks.remove(panel)
     return (f"decoder/demo missing: {sorted(off)} disabled ({panel.available['planned_belt']!r});"
             " EE and actions still drawn, no exception")
+
+
+@check("X5 --target-belt: observation (one goal) and demo_goals (per stage) belts")
+def check_x5(ctx: SimpleNamespace) -> str:
+    app = ctx.app
+    tmp = Path(ctx.tmp_root)
+    cli = _viewer_cli()
+    plain = cli.learned_hooks(cli.create_parser().parse_args(["--recordings",
+                                                              str(ctx.learned_parent)]))
+    _require(plain[0].target_belt is None, "default panel has a target_belt")
+    rng = np.random.default_rng(0)
+    one = (0.3, 0.0, 0.05) + 0.05 * rng.standard_normal((150, 3))
+    two = (0.4, 0.1, 0.05) + 0.05 * rng.standard_normal((2, 150, 3))
+    np.savez(tmp / "obs.npz", pcd_belt=one.astype(np.float32), z_target=np.zeros(16))
+    np.savez(tmp / "goals.npz", pcd_belt_stage=two, n_stages=np.asarray(2))
+    args = cli.create_parser().parse_args(["--recordings", str(ctx.baseline_parent),
+                                           "--target-belt", str(tmp / "obs.npz")])
+    hooks = cli.learned_hooks(args)
+    _require(len(hooks) == 1 and hooks[0].target_belt == tmp / "obs.npz",
+             "--target-belt not passed to the panel")
+    out = []
+    for i, (path, run) in enumerate(((tmp / "obs.npz", ctx.learned_name),
+                                     (tmp / "obs.npz", ctx.staged_name),
+                                     (tmp / "goals.npz", ctx.staged_name))):
+        panel = LearnedMpcPanel(target_belt=path, layers=("target_belt",),
+                                root=f"/replay/learned_mpc_x5_{i}")
+        app.add_hook(panel)
+        app.select_run(run)
+        belts = one[None] if path.name == "obs.npz" else two
+        _require(panel.available["target_belt"] is None, f"{path.name}: {panel.available}")
+        _require(panel.staged == (len(belts) > 1), f"{path.name}: staged {panel.staged}")
+        seen = set()
+        for f in range(0, app.frame_count, 7):
+            app.seek(f)
+            if panel.current < 0:
+                _require(not _visible(panel, "target_belt"), "drawn before the first solve")
+                continue
+            k = int(panel.solves[panel.current].scalars["stage"]) if panel.staged else 0
+            seen.add(k)
+            name = f"target_belt/goal_{k}"
+            _require(_visible(panel, "target_belt") == [name],
+                     f"{path.name} frame {f}: {_visible(panel, 'target_belt')}")
+            h = panel.handles[name]
+            _require(np.abs(_centres(h) - _drawn(belts[k].astype(np.float32))).max() <= F32_TOL
+                     and h.opacity == _mesh_opacity(TARGET_ALPHA[0]),
+                     f"{path.name} frame {f}: tube != its belt[{k}]")
+        _require(seen == set(range(len(belts))), f"{path.name} on {run}: goals seen {seen}")
+        out.append(f"{path.name} on {run.split('_')[0]}: goals {sorted(seen)}")
+        panel.set_layer(app, "target_belt", False)
+        app.hooks.remove(panel)
+    panel = LearnedMpcPanel(target_belt=tmp / "none.npz", layers=LAYERS,
+                            root="/replay/learned_mpc_x5_missing")
+    app.add_hook(panel)
+    app.select_run(ctx.learned_name)
+    app.seek(app.frame_count // 2)
+    _require("missing" in (panel.available["target_belt"] or "")
+             and not _visible(panel, "target_belt") and _visible(panel, "planned_ee"),
+             f"missing target_belt: {panel.available}")
+    for name in LAYERS:
+        panel.set_layer(app, name, False)
+    app.hooks.remove(panel)
+    return (f"default off; CLI passes the path; {'; '.join(out)} (tube == belt, current stage "
+            "only, opaque); missing file disables only the target layer")
+
+
+def _viewer_cli():
+    spec = importlib.util.spec_from_file_location("replay_viewer_cli_x5",
+                                                  REPO_ROOT / "scripts/replay_viewer.py")
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    return cli
 
 
 @check("X4 check_replay_viewer.py V0-V10")

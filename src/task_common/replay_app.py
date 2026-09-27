@@ -8,6 +8,8 @@ on the main thread, which does every Newton/warp call.
 
 from __future__ import annotations
 
+import html
+import json
 import threading
 import time
 from collections.abc import Callable, Sequence
@@ -34,6 +36,7 @@ DEFAULT_RENDER_FPS = 25.0
 DEFAULT_DEVICE = "cpu"
 STATS_PERIOD_S = 10.0
 DEFAULT_POINT_SIZE_MM = 1.0
+CAMERA_TEXT_PERIOD_S = 0.2
 
 # A private model (on CUDA when available: ~5 ms a frame vs ~0.5 s on CPU) plus its clouds.
 PointCloudFactory = Callable[[], tuple[newton.Model, list[CroppedPointCloud]]]
@@ -62,6 +65,43 @@ def merged_events(rec: Recording, derived: list[Event]) -> list[Event]:
             last_goal = goal
         recorded.append(event)
     return sorted(recorded + derived, key=lambda e: e.step)
+
+
+def camera_json(camera: Any) -> str:
+    """One-line json of a viser camera (``fov`` vertical, radians): ``--camera`` input."""
+    vec = lambda v: [round(float(x), 4) + 0.0 for x in v]
+    return json.dumps({"position": vec(camera.position), "look_at": vec(camera.look_at),
+                       "up": vec(camera.up_direction), "fov": round(float(camera.fov), 4)},
+                      separators=(",", ":"))
+
+
+# Runs in the browser: viser renders add_html via innerHTML, so inline handlers work.
+# navigator.clipboard needs a secure context (localhost, incl. an SSH tunnel); else execCommand.
+_COPY_JS = ("const b=this,t=b.dataset.json,ok=()=>{b.textContent='Copied';"
+            "setTimeout(()=>{b.textContent='Copy camera JSON'},1200)},old=()=>{"
+            "const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);"
+            "a.select();document.execCommand('copy');a.remove();ok()};"
+            "if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t)"
+            ".then(ok,old)}else{old()}")
+
+
+def camera_html(camera: Any | None) -> str:
+    """The Display > Camera block: position/look_at/up/fov rows and a copy button."""
+    if camera is None:
+        return "<div style='font-size:0.85em;opacity:0.7'>Camera: move the view</div>"
+    fmt = lambda v: ", ".join(f"{float(x):.4f}" for x in v)
+    fov = float(camera.fov)
+    rows = [("position", fmt(camera.position)), ("look_at", fmt(camera.look_at)),
+            ("up", fmt(camera.up_direction)),
+            ("fov", f"{fov:.4f} rad ({np.rad2deg(fov):.1f}&deg;)")]
+    cells = "".join(f"<tr><td style='padding-right:8px;opacity:0.7'>{k}</td>"
+                    f"<td style='font-family:monospace'>{v}</td></tr>" for k, v in rows)
+    return (f"<div style='font-size:0.85em'><div style='font-weight:500'>Camera</div>"
+            f"<table style='border-collapse:collapse'>{cells}</table>"
+            f"<button data-json=\"{html.escape(camera_json(camera), quote=True)}\" "
+            f"onclick=\"{html.escape(_COPY_JS, quote=True)}\" style='margin-top:4px;"
+            "padding:2px 8px;font-size:0.95em;cursor:pointer;border:1px solid #adb5bd;"
+            "border-radius:4px;background:#f8f9fa'>Copy camera JSON</button></div>")
 
 
 class ReplayApp:
@@ -633,7 +673,7 @@ class ReplayApp:
             self._transport = gui.add_button_group("Transport", TRANSPORT_OPTIONS)
             self._speed_dropdown = gui.add_dropdown("Speed", SPEED_OPTIONS, initial_value="1x")
             self._loop_box = gui.add_checkbox("Loop", False)
-        with gui.add_folder("Display"):
+        with gui.add_folder("Display") as self._display_folder:
             self._visual_box = gui.add_checkbox("Visual meshes", self.viewer.show_visual)
             self._collision_box = gui.add_checkbox("Collision geometry",
                                                    self.viewer.show_collision)
@@ -656,4 +696,53 @@ class ReplayApp:
             box.on_update(lambda e, key=key: self._request(key, bool(e.target.value)))
         self._point_size_slider.on_update(
             lambda e: self._request("point_size_mm", float(e.target.value)))
+        self._camera_views: dict[int, tuple[Any, str | None]] = {}  # client -> (html, json)
+        self._camera_lock = threading.Lock()
+        self.server.on_client_connect(self._watch_camera)
+        self.server.on_client_disconnect(
+            lambda client: self._camera_views.pop(client.client_id, None))
+        for client in list(self.server.get_clients().values()):  # connected before the hook
+            self._watch_camera(client)
         self._show_info()
+
+    def camera_text(self, client_id: int) -> str | None:
+        """The ``--camera`` json the Copy button of client ``client_id`` copies (``None`` before
+        its first camera)."""
+        view = self._camera_views.get(client_id)
+        return None if view is None else view[1]
+
+    def _watch_camera(self, client: Any) -> None:
+        """Per-client live "Camera" table under Display, with a copy-to-clipboard button."""
+        with self._camera_lock:
+            if client.client_id in self._camera_views:
+                return
+            with self._display_folder:
+                view = client.gui.add_html(camera_html(None))
+            self._camera_views[client.client_id] = (view, None)
+        state: dict[str, Any] = {"last": 0.0, "timer": None}
+
+        def push() -> None:
+            with self._camera_lock:
+                state["timer"], state["last"] = None, time.monotonic()
+                if self._camera_views.get(client.client_id, (None,))[0] is not view:
+                    return  # disconnected
+            try:
+                text = camera_json(client.camera)
+                view.content = camera_html(client.camera)
+            except (AssertionError, RuntimeError):  # no camera yet / removed on disconnect
+                return
+            with self._camera_lock:
+                if client.client_id in self._camera_views:
+                    self._camera_views[client.client_id] = (view, text)
+
+        def on_update(_camera: Any) -> None:
+            # Throttled, with a trailing update so the resting pose is always shown.
+            with self._camera_lock:
+                if state["timer"] is not None:
+                    return
+                delay = max(CAMERA_TEXT_PERIOD_S - (time.monotonic() - state["last"]), 0.0)
+                state["timer"] = threading.Timer(delay, push)
+                state["timer"].daemon = True
+                state["timer"].start()
+
+        client.camera.on_update(on_update)

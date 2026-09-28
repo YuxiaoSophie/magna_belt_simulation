@@ -316,6 +316,18 @@ def add_belt_transport_drag(
 
 
 @wp.kernel
+def cancel_released_belt_upward_velocity(
+    particle_indices: wp.array(dtype=wp.int32),
+    particle_qd: wp.array(dtype=wp.vec3),
+):
+    """Remove upward grasp momentum once, leaving downward fall intact."""
+    particle = particle_indices[wp.tid()]
+    velocity = particle_qd[particle]
+    if velocity[2] > 0.0:
+        particle_qd[particle] = wp.vec3(velocity[0], velocity[1], 0.0)
+
+
+@wp.kernel
 def hold_grasped_belt_column(
     active: wp.array(dtype=wp.int32),
     particle_indices: wp.array(dtype=wp.int32),
@@ -1435,6 +1447,11 @@ class Example:
         self.gripper_pad_shapes = _replace_proxy_pad_colliders_with_two_planes(
             builder, self.gripper_proxy_bodies
         )
+        # Include every imported Robotiq shape as well as the two replacement
+        # pads. The open gripper must not contact the belt OR either pulley.
+        self.gripper_collision_shapes = sorted(set(
+            range(asset_info["gripper_shape_start"], asset_info["gripper_shape_end"])
+        ).union(self.gripper_pad_shapes))
         # From now on, proxy shapes == the two synthetic flat pads only.
         self.gripper_proxy_shapes = list(self.gripper_pad_shapes)
 
@@ -1557,6 +1574,13 @@ class Example:
         builder.color(include_bending=True)
         self.model = builder.finalize()
         self.device = self.model.device
+        self._gripper_collision_shape_indices = np.asarray(
+            self.gripper_collision_shapes, dtype=np.int32
+        )
+        self._gripper_original_shape_flags = self.model.shape_flags.numpy().copy()
+        self._gripper_collision_ghosted = False
+        self._gripper_release_no_contact = False
+        self._last_gripper_contact_request = 0.0
         self.belt_particle_indices = wp.array(
             self.belt_particles, dtype=wp.int32, device=self.device
         )
@@ -1942,6 +1966,15 @@ class Example:
             device=self.device,
         )
 
+    def _cancel_release_upward_velocity(self) -> None:
+        """Start a free fall without the upward velocity left by the hard hold."""
+        wp.launch(
+            cancel_released_belt_upward_velocity,
+            dim=len(self.belt_particles),
+            inputs=[self.belt_particle_indices, self.state_0.particle_qd],
+            device=self.device,
+        )
+
     def _apply_held_column_constraint(self) -> None:
         """Keep the caught cross section at its latched gripper-local pose."""
         wp.launch(
@@ -2221,6 +2254,8 @@ class Example:
             elif not latched and self._grip_hold_fraction is not None:
                 self._grip_hold_fraction = None
                 self._held_column_active.assign(np.asarray([0], dtype=np.int32))
+                self._gripper_release_no_contact = True
+                self._cancel_release_upward_velocity()
             self._update_gripper_release_material()
 
         self._grip_actual_fraction, self._grip_actual_speed = self._measure_actual_gripper()
@@ -2510,6 +2545,8 @@ class Example:
                 # print(f"[GRASP] release latch: requested={requested:.3f}, actual={actual:.3f}")
                 self._grip_hold_fraction = None
                 self._held_column_active.assign(np.asarray([0], dtype=np.int32))
+                self._gripper_release_no_contact = True
+                self._cancel_release_upward_velocity()
                 self._grasp_reference_xyzw = None
                 self._held_rotation_xyzw = None
                 self._grip_stall_frames = 0
@@ -2578,11 +2615,42 @@ class Example:
         """Select release/normal/latched-hold material for the two simple pads.
         Thus the belt does not alter normal finger closing/opening more than before.
         """
+        # Material coefficients do not remove ADMM contacts. Switch the actual
+        # collision flags, including imported Robotiq finger/palm geometry.
+        requested = self._grip_requested_fraction
+        if self._release_arm_hold:
+            self._gripper_release_no_contact = True
+        elif (self._gripper_release_no_contact
+              and requested >= CONTACT_ADMM_PRECONTACT_MIN_FRACTION
+              and requested > self._last_gripper_contact_request + GRIPPER_RELEASE_HYSTERESIS):
+            # Re-enable contact on a new closing command, not while opening.
+            self._gripper_release_no_contact = False
+        self._last_gripper_contact_request = requested
+        ghost = (self._gripper_release_no_contact
+                 or requested <= GRIPPER_RELEASE_FRACTION)
+        if ghost != self._gripper_collision_ghosted:
+            flags = self.model.shape_flags.numpy().copy()
+            idx_all = self._gripper_collision_shape_indices
+            contact_bits = int(
+                newton.ShapeFlags.COLLIDE_SHAPES | newton.ShapeFlags.COLLIDE_PARTICLES
+            )
+            if ghost:
+                flags[idx_all] &= ~contact_bits
+            else:
+                flags[idx_all] = (
+                    (flags[idx_all] & ~contact_bits)
+                    | (self._gripper_original_shape_flags[idx_all] & contact_bits)
+                )
+            self.model.shape_flags.assign(flags)
+            self._gripper_collision_ghosted = ghost
+            print("[GRIPPER CONTACT] disabled while open" if ghost
+                  else "[GRIPPER CONTACT] restored for closing")
+
         idx = self._gripper_release_shape_indices
         if idx.size == 0:
             return
 
-        explicit_release = self._grip_requested_fraction <= GRIPPER_RELEASE_FRACTION
+        explicit_release = ghost
         if explicit_release:
             desired_mode = "release"
         elif self._grip_hold_fraction is not None:

@@ -83,16 +83,22 @@ CLOTH_BODY_CONTACT_MARGIN = PARTICLE_RADIUS
 GROUND_EPSILON = 0.0001
 TARGET_BELT_MASS = 0.033  # kg (33 g)
 
+# Linear, mass-proportional resistance while the ADMM grasp path is active.
+GRASP_BELT_DRAG_RATE = 7.0
+GRASP_BELT_ROTATION_TRANSFER = 0.75
+
 # Keep the belt nearly inextensible with the triangle membrane itself.
 TRI_KE = 8.0e4
 TRI_KA = 8.0e4
-TRI_KD = 1.0
+TRI_KD = 3.0
+# Surface drag damps broad pendulum-like swaying
+TRI_DRAG = 0.5
 
 # Native cloth hinge bending.
-BASE_EDGE_KE = 5.0e2
-BASE_EDGE_KD = 0.5
-LONGITUDINAL_EDGE_KE = 4.0e3
-LONGITUDINAL_EDGE_KD = 1.0
+BASE_EDGE_KE = 2.5e2
+BASE_EDGE_KD = 2.0
+LONGITUDINAL_EDGE_KE = 1.2e3
+LONGITUDINAL_EDGE_KD = 5.0
 
 # Keep the original scene names so every non-belt subsystem stays untouched.
 BELT_OUTER_MAJOR_DIAMETER = BELT_MAJOR_DIAMETER
@@ -159,10 +165,11 @@ TABLE_CONTACT_MU = 0.20
 TABLE_CONTACT_MARGIN = 0.0010
 TABLE_CONTACT_GAP = 0.0020
 
-# Stiffer + damped pulley contact so the belt cannot penetrate the
-# sheave and squeeze out the bottom of the groove.
+# Stiffer + damped pulley contact to keep the belt outside the wrap surface.
 PULLEY_CONTACT_KE = 3.0e5
 PULLEY_CONTACT_KD = 1.0e-5 * PULLEY_CONTACT_KE
+PULLEY_CONTACT_MARGIN = 0.0015
+PULLEY_CONTACT_GAP = 0.0030
 
 # Gripper-pad contact used by the mjc -> vbd proxy coupling.
 GRIPPER_CONTACT_KE = 1.0e5
@@ -171,16 +178,18 @@ GRIPPER_CONTACT_MU = 3.0
 GRIPPER_CONTACT_MARGIN = 0.0015
 GRIPPER_CONTACT_GAP = 0.0020
 
+GRIPPER_HOLD_CONTACT_KE = 3.0e5
+GRIPPER_HOLD_CONTACT_KD = 150.0
+GRIPPER_HOLD_CONTACT_MU = 8.0
+
 # Belt<->gripper collision simplification.
-GRIPPER_SIMPLE_PAD_HALF_X = 0.0150  # 30 mm tangential contact width
-# Thicker proxy prevents a particle crossing the entire collider within one
-# contact step. Move the center outward so the INNER face stays at -4.6 mm.
-GRIPPER_SIMPLE_PAD_HALF_Y = 0.0030  # 6 mm total proxy thickness
-# Cover the full 50 mm cloth-made belt width so the complete cross section is
-# pinched instead of only the lower/middle rows.
-GRIPPER_SIMPLE_PAD_HALF_Z = 0.5 * BELT_STRIP_WIDTH
-GRIPPER_SIMPLE_PAD_CENTER_Y = -0.0076
-GRIPPER_SIMPLE_PAD_CENTER_Z = 0.5 * BELT_STRIP_WIDTH
+GRIPPER_SIMPLE_PAD_HALF_X = 0.0150 # 30 mm tangential contact width
+# Back the contact face with a deeper box, entirely on its outward side.
+GRIPPER_SIMPLE_PAD_HALF_Y = 0.0060
+GRIPPER_SIMPLE_PAD_TOP_OVERHANG = 0.0150
+GRIPPER_SIMPLE_PAD_HALF_Z = 0.5 * (BELT_STRIP_WIDTH + GRIPPER_SIMPLE_PAD_TOP_OVERHANG)
+GRIPPER_SIMPLE_PAD_CENTER_Y = -0.0106
+GRIPPER_SIMPLE_PAD_CENTER_Z = GRIPPER_SIMPLE_PAD_HALF_Z
 GRIPPER_SIMPLE_PAD_GAP = GRIPPER_CONTACT_GAP
 
 # During an explicit open command, temporarily disable the two simple pad contacts.
@@ -191,7 +200,7 @@ GRIPPER_RELEASE_FRACTION = 0.25
 
 # Pulley parameters.
 PULLEY_DENSITY = 1000.0
-PULLEY_SHEAVE_MU = 2.5
+PULLEY_SHEAVE_MU = 8.0 # high friction on the cylindrical wrap surface
 PULLEY_FLANGE_MU = 0.0
 # Pulley rotational dynamics.
 PULLEY_ARMATURE = 5.0e-4
@@ -202,15 +211,14 @@ PULLEY_AXIS = (0.0, 0.0, 1.0)
 SMALL_PULLEY_SHEAVE_RADIUS = 0.015
 LARGE_PULLEY_SHEAVE_RADIUS = 0.035
 
-# Narrower groove + taller flanges
 PULLEY_GROOVE_HALF_WIDTH = 1.35 * BELT_RADIUS
 PULLEY_FLANGE_HALF_THICKNESS = 0.6 * BELT_RADIUS
 PULLEY_FLANGE_EXTRA_RADIUS = 4.0 * BELT_RADIUS
 
 # Close the collision gap between each pulley and the board.
-PULLEY_BOARD_GAP = 0.0005  # 0.5 mm numerical clearance above the board
+PULLEY_BOARD_GAP = 0.0005 # 0.5 mm numerical clearance above the board
 
-PULLEY_SHOW_COLLISION_SHAPES = False
+PULLEY_SHOW_COLLISION_SHAPES = True
 
 GRIPPER_PROXY_PAD_BODIES = ("left_pad", "right_pad")
 GRIPPER_PROXY_FALLBACK_BODIES = ("left_follower", "right_follower")
@@ -222,6 +230,13 @@ ROBOTIQ_GRIPPER_SAFE_CLOSE_FRACTION = 0.93
 GRIPPER_DRIVE_KE = 400.0
 GRIPPER_DRIVE_KD = 80.0
 GRIPPER_EFFORT_LIMIT = 35.0
+# Arm position servo during belt transport; gripper squeeze remains separate.
+ARM_DRIVE_KE = 2400.0
+ARM_DRIVE_KD = 200.0
+ARM_MIN_EFFORT_LIMIT = 200.0  # Nm; only raises unexpectedly low imported limits
+GRASP_ARM_BIAS_MAX = 0.04  # rad; limit stored servo correction under belt tension
+GRASP_ARM_BIAS_LAG_CAP = 0.10  # rad; do not integrate large transient tracking errors
+
 
 # Anti-crush grasp latch.
 GRIPPER_STALL_MIN_FRACTION = 0.60
@@ -230,7 +245,9 @@ GRIPPER_STALL_SPEED_FRACTION_PER_SEC = 0.15
 # Require a real persistent stall instead of latching on one noisy frame.
 GRIPPER_STALL_FRAMES = 3
 # Frames to keep the post-latch settle assist active right after a fresh latch.
+# This counter is now actually used to limit arm speed for the first few frames.
 GRASP_STABILIZE_FRAMES = 6
+GRASP_SETTLE_MAX_ARM_SPEED = 0.20  # rad/s/joint, only during the short post-latch settle window
 
 # Contact-critical grasp transport settings.
 GRASP_CONTACT_SAFE_FRACTION = 0.45
@@ -241,21 +258,21 @@ CONTACT_ADMM_PRECONTACT_MIN_FRACTION = 0.35
 CONTACT_ADMM_PRECONTACT_ERROR_FRACTION = 0.0
 CONTACT_ADMM_PRECONTACT_SPEED_FRACTION_PER_SEC = 1.0e9
 
-GRASPED_MAX_ARM_SPEED = 0.35
-GRIPPER_HOLD_PRELOAD_FRACTION = 0.006
+GRASPED_MAX_ARM_SPEED = 0.75
+GRIPPER_HOLD_PRELOAD_FRACTION = 0.004
 GRIPPER_RELEASE_HYSTERESIS = 0.020
 
 # Keep the robust ADMM/contact path active briefly after opening so the belt's
 # first free-fall/table impact does not happen on the same frame as a solver-mode
 # transition.
 RELEASE_ADMM_GRACE_FRAMES = 24
+RELEASE_ADMM_ACTUAL_OPEN_FRACTION = 0.25
 
 # SpaceMouse target-following safety.
-# Consume producer TRANSLATION DELTAS locally and keep the IK target close to the
-# real TCP so reversing the SpaceMouse reverses the robot immediately instead of
-# waiting for a far-ahead absolute target to come back.
-TELEOP_MAX_TARGET_DISTANCE = 0.030 # m, max IK target lead from actual TCP
-TELEOP_MAX_RAW_TARGET_JUMP = 0.050 # m, producer restart/resync guard
+TELEOP_MAX_TARGET_DISTANCE_FREE = 0.030
+TELEOP_MAX_TARGET_DISTANCE_GRASPED = 0.060 
+TELEOP_MAX_RAW_TARGET_JUMP = 0.050 
+TELEOP_TRANSLATION_GAIN = 0.80 # 20% slower response to SpaceMouse translation
 
 # Hybrid coupling settings.
 # Free motion uses the original lightweight proxy-coupled solver inside a CUDA graph.
@@ -282,6 +299,46 @@ SHARED_PATH_DEFAULT = "/tmp/sm_teleop_target.bin"
 
 
 # Shared-memory target buffer
+@wp.kernel
+def add_belt_transport_drag(
+    particle_indices: wp.array(dtype=wp.int32),
+    particle_mass: wp.array(dtype=float),
+    particle_qd: wp.array(dtype=wp.vec3),
+    particle_f: wp.array(dtype=wp.vec3),
+    rate: float,
+):
+    particle = particle_indices[wp.tid()]
+    particle_f[particle] += -rate * particle_mass[particle] * particle_qd[particle]
+
+
+@wp.kernel
+def hold_grasped_belt_column(
+    active: wp.array(dtype=wp.int32),
+    particle_indices: wp.array(dtype=wp.int32),
+    local_positions: wp.array(dtype=wp.vec3),
+    initial_rotation: wp.array(dtype=wp.quat),
+    body_q: wp.array(dtype=wp.transform),
+    body_index: int,
+    tcp_offset: wp.vec3,
+    rotation_transfer: float,
+    particle_q_in: wp.array(dtype=wp.vec3),
+    particle_q_out: wp.array(dtype=wp.vec3),
+    particle_qd_out: wp.array(dtype=wp.vec3),
+    inv_dt: float,
+):
+    if active[0] == 0:
+        return
+    row = wp.tid()
+    particle = particle_indices[row]
+    tool_pose = body_q[body_index]
+    tool_rotation = wp.transform_get_rotation(tool_pose)
+    tcp_position = wp.transform_point(tool_pose, tcp_offset)
+    held_rotation = wp.quat_slerp(initial_rotation[0], tool_rotation, rotation_transfer)
+    target = tcp_position + wp.quat_rotate(held_rotation, local_positions[row])
+    particle_q_out[particle] = target
+    particle_qd_out[particle] = (target - particle_q_in[particle]) * inv_dt
+
+
 class SharedTarget:
     N = 10
     SIZE = N * 8
@@ -381,6 +438,21 @@ def _rotate_vec(q, v):
     ], dtype=np.float64)
 
 
+def _limit_target_lead(previous_target, candidate, current_tcp, max_distance):
+    """Constrain new input without moving the target to follow a displaced TCP."""
+    lead = candidate - current_tcp
+    lead_norm = float(np.linalg.norm(lead))
+    if lead_norm <= max_distance or lead_norm <= 1.0e-12:
+        return candidate
+
+    old_lead_norm = float(np.linalg.norm(previous_target - current_tcp))
+    if old_lead_norm <= max_distance:
+        return current_tcp + lead * (max_distance / lead_norm)
+    if lead_norm >= old_lead_norm:
+        return previous_target
+    return candidate  # user input reduces an existing contact-induced lead
+
+
 def _v3(a):
     return wp.vec3(float(a[0]), float(a[1]), float(a[2]))
 
@@ -463,7 +535,7 @@ def board_rpy(rpy=(0.0, 0.0, 0.0)):
 LARGE_PULLEY_CENTER_LOCAL = (0.140, 0.196, 0.0248)
 LARGE_PULLEY_WORLD_CENTER = board_world(LARGE_PULLEY_CENTER_LOCAL)
 
-LARGE_PULLEY_PLACE_EDGE_OFFSET = (LARGE_PULLEY_SHEAVE_RADIUS + BELT_RADIUS, 0.0, 0.0)
+LARGE_PULLEY_PLACE_EDGE_OFFSET = (LARGE_PULLEY_SHEAVE_RADIUS + PULLEY_FLANGE_EXTRA_RADIUS + BELT_RADIUS, 0.0, 0.0)
 _place_x = LARGE_PULLEY_WORLD_CENTER[0] + LARGE_PULLEY_PLACE_EDGE_OFFSET[0]
 _place_y = LARGE_PULLEY_WORLD_CENTER[1] + LARGE_PULLEY_PLACE_EDGE_OFFSET[1]
 
@@ -471,10 +543,10 @@ BELT_PLACE_ABOVE = (_place_x, _place_y, LARGE_PULLEY_WORLD_CENTER[2] + BELT_APPR
 BELT_PLACE_DOWN = (_place_x, _place_y, LARGE_PULLEY_WORLD_CENTER[2] + BELT_RADIUS)
 
 # Small-pulley placement geometry (the pulley the belt seats on FIRST).
-SMALL_PULLEY_CENTER_LOCAL = (0.3504 + 0.01200845, 0.1964 + 0.0004, 0.0248)
+SMALL_PULLEY_CENTER_LOCAL = (0.3504 - 0.01200845, 0.1964 - 0.0004, 0.0248)
 SMALL_PULLEY_WORLD_CENTER = board_world(SMALL_PULLEY_CENTER_LOCAL)
 
-SMALL_PULLEY_PLACE_EDGE_OFFSET = (SMALL_PULLEY_SHEAVE_RADIUS + BELT_RADIUS, 0.0, 0.0)
+SMALL_PULLEY_PLACE_EDGE_OFFSET = (SMALL_PULLEY_SHEAVE_RADIUS + PULLEY_FLANGE_EXTRA_RADIUS + BELT_RADIUS, 0.0, 0.0)
 _small_place_x = SMALL_PULLEY_WORLD_CENTER[0] + SMALL_PULLEY_PLACE_EDGE_OFFSET[0]
 _small_place_y = SMALL_PULLEY_WORLD_CENTER[1] + SMALL_PULLEY_PLACE_EDGE_OFFSET[1]
 
@@ -504,6 +576,7 @@ def make_robust_table_collision_cfg(visible=True) -> newton.ModelBuilder.ShapeCo
 def make_pulley_shape_cfg(mu: float, visible: bool) -> newton.ModelBuilder.ShapeConfig:
     return newton.ModelBuilder.ShapeConfig(
         density=PULLEY_DENSITY, ke=PULLEY_CONTACT_KE, kd=PULLEY_CONTACT_KD, mu=mu,
+        margin=PULLEY_CONTACT_MARGIN, gap=PULLEY_CONTACT_GAP,
         has_shape_collision=True, has_particle_collision=True,
         collision_group=1, is_visible=visible,
     )
@@ -625,8 +698,7 @@ def add_board(builder: newton.ModelBuilder) -> None:
 
 def add_dynamic_pulley(builder, center, sheave_radius, color, label,
                        collision_visible=PULLEY_SHOW_COLLISION_SHAPES) -> dict[str, Any]:
-    """Free-spinning pulley: link + revolute axle about +Z + grooved sheave
-    sandwiched between two frictionless flanges (as in Newton's XY-table example)."""
+    """Free-spinning constant-radius cylinder with a low-friction top face."""
     body = builder.add_link(xform=tf(center), label=f"{label}_body")
     joint = builder.add_joint_revolute(
         parent=-1, child=body, axis=wp.vec3(*PULLEY_AXIS),
@@ -638,37 +710,37 @@ def add_dynamic_pulley(builder, center, sheave_radius, color, label,
     )
     builder.add_articulation([joint], label=f"{label}_articulation")
 
-    flange_radius = sheave_radius + PULLEY_FLANGE_EXTRA_RADIUS
-    flange_z = PULLEY_GROOVE_HALF_WIDTH + PULLEY_FLANGE_HALF_THICKNESS
-    flange_color = _dim_color(color, 0.68)
+    wrap_radius = sheave_radius + PULLEY_FLANGE_EXTRA_RADIUS
+    total_half_height = PULLEY_GROOVE_HALF_WIDTH + 2.0 * PULLEY_FLANGE_HALF_THICKNESS
+    top_cap_half_height = min(0.0005, PULLEY_FLANGE_HALF_THICKNESS)
+    side_half_height = total_half_height - top_cap_half_height
 
     sheave = builder.add_shape_cylinder(
-        body=body, xform=tf((0.0, 0.0, 0.0)), radius=sheave_radius,
-        half_height=PULLEY_GROOVE_HALF_WIDTH,
+        body=body, xform=tf((0.0, 0.0, -top_cap_half_height)), radius=wrap_radius,
+        half_height=side_half_height,
         cfg=make_pulley_shape_cfg(PULLEY_SHEAVE_MU, collision_visible),
         color=wp.vec3(*[float(c) for c in color]), label=f"{label}_sheave",
     )
-    flanges = []
-    for suffix, z in (("flange_neg", -flange_z), ("flange_pos", flange_z)):
-        flanges.append(builder.add_shape_cylinder(
-            body=body, xform=tf((0.0, 0.0, z)), radius=flange_radius,
-            half_height=PULLEY_FLANGE_HALF_THICKNESS,
-            cfg=make_pulley_shape_cfg(PULLEY_FLANGE_MU, collision_visible),
-            color=wp.vec3(*[float(c) for c in flange_color]), label=f"{label}_{suffix}",
-        ))
+    top_cap = builder.add_shape_cylinder(
+        body=body, xform=tf((0.0, 0.0, total_half_height - top_cap_half_height)),
+        radius=wrap_radius, half_height=top_cap_half_height,
+        cfg=make_pulley_shape_cfg(PULLEY_FLANGE_MU, collision_visible),
+        color=wp.vec3(*[float(c) for c in color]), label=f"{label}_low_friction_top",
+    )
 
-    lower_flange_bottom_local = -flange_z - PULLEY_FLANGE_HALF_THICKNESS
+    lower_flange_bottom_local = -total_half_height
     board_top_local = BOARD_ROOT_Z - float(center[2]) + PULLEY_BOARD_GAP
     pedestal_half_height = 0.5 * max(lower_flange_bottom_local - board_top_local, 1.0e-4)
     pedestal_center_z = board_top_local + pedestal_half_height
+    pedestal_color = _dim_color(color, 0.68)
 
     pedestal = builder.add_shape_cylinder(
         body=body,
         xform=tf((0.0, 0.0, pedestal_center_z)),
-        radius=flange_radius,
+        radius=wrap_radius,
         half_height=pedestal_half_height,
         cfg=make_pulley_shape_cfg(PULLEY_FLANGE_MU, collision_visible),
-        color=wp.vec3(*[float(c) for c in flange_color]),
+        color=wp.vec3(*[float(c) for c in pedestal_color]),
         label=f"{label}_board_gap_guard",
     )
 
@@ -676,7 +748,7 @@ def add_dynamic_pulley(builder, center, sheave_radius, color, label,
         "body": body,
         "joint": joint,
         "sheave": sheave,
-        "flanges": flanges,
+        "flanges": [top_cap],
         "guard": pedestal,
     }
 
@@ -714,35 +786,17 @@ def add_pulleys_from_xacro_poses(builder: newton.ModelBuilder) -> dict[str, Any]
     small = add_dynamic_pulley(builder, center=small_center_xyz,
                                sheave_radius=SMALL_PULLEY_SHEAVE_RADIUS,
                                color=(0.80, 0.80, 0.80), label="small_round_pulley")
-    small_half_1_ok = add_visual_mesh(builder, SMALL_HALF_MESH, xyz=(0.0, 0.0, 0.0), rpy=(0.0, 0.0, 0.0),
-        scale=(0.001, 0.001, 0.001), color=(0.80, 0.80, 0.80),
-        label="small_pulley_first_half_exact_xacro", body=small["body"])
-    small_half_2_ok = add_visual_mesh(builder, SMALL_HALF_MESH, xyz=(0.0, 0.0, 0.0), rpy=(math.pi, 0.0, 0.0),
-        scale=(0.001, 0.001, 0.001), color=(0.80, 0.80, 0.80),
-        label="small_pulley_second_half_exact_xacro", body=small["body"])
-    if not (small_half_1_ok and small_half_2_ok):
-        print("[WARNING] Small pulley half mesh missing; the collision sheave is the only visual.")
 
     large_center_xyz = board_world(LARGE_PULLEY_CENTER_LOCAL)
     large = add_dynamic_pulley(builder, center=large_center_xyz,
                                sheave_radius=LARGE_PULLEY_SHEAVE_RADIUS,
                                color=(0.10, 0.10, 0.10), label="large_round_pulley")
-    large_half_1_ok = add_visual_mesh(builder, LARGE_HALF_MESH, xyz=(0.0, 0.0, 0.0), rpy=(0.0, 0.0, 0.0),
-        scale=(0.001, 0.001, 0.001), color=(0.10, 0.10, 0.10),
-        label="large_pulley_first_half_exact_xacro", body=large["body"])
-    large_half_2_ok = add_visual_mesh(builder, LARGE_HALF_MESH, xyz=(0.0, 0.0, 0.0), rpy=(math.pi, 0.0, 0.0),
-        scale=(0.001, 0.001, 0.001), color=(0.10, 0.10, 0.10),
-        label="large_pulley_second_half_exact_xacro", body=large["body"])
-    if not (large_half_1_ok and large_half_2_ok):
-        print("[WARNING] Large pulley half mesh missing; the collision sheave is the only visual.")
 
     bodies = [small["body"], large["body"]]
     joints = [small["joint"], large["joint"]]
     sheave_shapes = [small["sheave"], large["sheave"]]
     flange_shapes = [*small["flanges"], *large["flanges"]]
     guard_shapes = [small["guard"], large["guard"]]
-    print(f"[INFO] Added {len(bodies)} free-spinning pulleys (sheave radii "
-          f"{SMALL_PULLEY_SHEAVE_RADIUS:.4f} / {LARGE_PULLEY_SHEAVE_RADIUS:.4f} m).")
     return {
         "bodies": bodies,
         "joints": joints,
@@ -1088,10 +1142,10 @@ def _replace_proxy_pad_colliders_with_two_planes(builder, proxy_bodies: list[int
             f"Expected exactly two simple gripper pad colliders, created {len(simple_shapes)}"
         )
 
-    print(
-        f"[INFO] Belt/gripper collision simplified: disabled {disabled} imported "
-        f"pad-body collision shapes; added exactly two flat pad colliders {simple_shapes}."
-    )
+    # print(
+    #     f"[INFO] Belt/gripper collision simplified: disabled {disabled} imported "
+    #     f"pad-body collision shapes; added exactly two flat pad colliders {simple_shapes}."
+    # )
     return simple_shapes
 
 
@@ -1251,7 +1305,8 @@ class TeleopEpisodeRecorder:
         print(f"[RECORD] Newton state file: {self.state_file}")
 
     def record_frame(self, frame_id, sim_time, target_pos, target_xyzw,
-                     grip_fraction, grip_requested_fraction, joint_target_q, state):
+                     grip_fraction, grip_requested_fraction, joint_target_q, state,
+                     grasp_latched=False):
         row = {
             "frame": int(frame_id),
             "sim_time": float(sim_time),
@@ -1259,6 +1314,7 @@ class TeleopEpisodeRecorder:
             "target_xyzw": np.asarray(target_xyzw, dtype=np.float64).tolist(),
             "grip_fraction": float(grip_fraction),
             "grip_requested_fraction": float(grip_requested_fraction),
+            "grasp_latched": bool(grasp_latched),
             "joint_target_q": np.asarray(joint_target_q, dtype=np.float64).reshape(-1).tolist(),
         }
         self.actions_file.write(json.dumps(row, separators=(",", ":")) + "\n")
@@ -1368,10 +1424,10 @@ class Example:
             builder, asset_info["gripper_body_start"], asset_info["gripper_body_end"]
         )
         self.robot_proxy_bodies = list(self.gripper_proxy_bodies)
-        print(
-            f"[INFO] Proxy coupling exposes only the 2 Robotiq pad bodies; "
-            f"belt contact shapes are {self.gripper_pad_shapes}."
-        )
+        # print(
+        #     f"[INFO] Proxy coupling exposes only the 2 Robotiq pad bodies; "
+        #     f"belt contact shapes are {self.gripper_pad_shapes}."
+        # )
 
         try:
             gravcomp = builder.custom_attributes["mujoco:gravcomp"]
@@ -1421,6 +1477,7 @@ class Example:
             tri_ke=TRI_KE,
             tri_ka=TRI_KA,
             tri_kd=TRI_KD,
+            tri_drag=TRI_DRAG,
             edge_ke=BASE_EDGE_KE,
             edge_kd=BASE_EDGE_KD,
             add_springs=False,
@@ -1452,15 +1509,18 @@ class Example:
         self.belt_joints = []
         self.belt_shapes = []
 
-        print(
-            f"[TIMING BELT] {len(vertices)} particles, area={belt_area * 1e4:.1f} cm^2, "
-            f"density={cloth_density:.4f} kg/m^2, mass={TARGET_BELT_MASS * 1e3:.1f} g"
-        )
-        print(
-            f"[TIMING BELT] {stiff_hinge_count} stiff longitudinal-curvature hinges, "
-            f"{rib_spring_count} rib springs, {loop_spring_count} loop springs, "
-            f"{shape_spring_count} curvature springs"
-        )
+        # print(
+        #     f"[TIMING BELT] {len(vertices)} particles, area={belt_area * 1e4:.1f} cm^2, "
+        #     f"density={cloth_density:.4f} kg/m^2, mass={TARGET_BELT_MASS * 1e3:.1f} g"
+        # )
+        # print(f"[TIMING BELT] damping: tri_kd={TRI_KD}, tri_drag={TRI_DRAG}, "
+        #       f"edge_kd={BASE_EDGE_KD}, longitudinal_edge_kd={LONGITUDINAL_EDGE_KD}; "
+        #       f"longitudinal_edge_ke={LONGITUDINAL_EDGE_KE}")
+        # print(
+        #     f"[TIMING BELT] {stiff_hinge_count} stiff longitudinal-curvature hinges, "
+        #     f"{rib_spring_count} rib springs, {loop_spring_count} loop springs, "
+        #     f"{shape_spring_count} curvature springs"
+        # )
 
         builder.add_ground_plane()
 
@@ -1471,6 +1531,24 @@ class Example:
         builder.color(include_bending=True)
         self.model = builder.finalize()
         self.device = self.model.device
+        self.belt_particle_indices = wp.array(
+            self.belt_particles, dtype=wp.int32, device=self.device
+        )
+        # Fixed-size buffers remain valid across both CUDA graph captures. The
+        # attachment is inactive until a real pinch is latched.
+        self._held_column_active = wp.array([0], dtype=wp.int32, device=self.device)
+        self._held_column_ids = wp.array(
+            [self.belt_particles[j] for j in range(WIDTH_CELLS + 1)],
+            dtype=wp.int32, device=self.device,
+        )
+        self._held_column_local = wp.array(
+            [wp.vec3(0.0, 0.0, 0.0) for _ in range(WIDTH_CELLS + 1)],
+            dtype=wp.vec3, device=self.device,
+        )
+        self._held_column_initial_rotation = wp.array(
+            [wp.quat_identity()], dtype=wp.quat, device=self.device,
+        )
+        self._held_tcp_offset = wp.vec3(*GRIPPER_TCP_LOCAL_OFFSET)
 
         # Particle <-> rigid contact: follow Newton's successful cloth_franka contact
         # pattern (soft-contact material + an explicit body-contact envelope).
@@ -1674,9 +1752,9 @@ class Example:
                 f"joint_coord_count ({n_coords}) nor joint_dof_count ({n_dofs}).")
 
         self.targetq_layout = targetq_layout
-        print(f"[INFO] control.joint_target_q layout: {targetq_layout}-space "
-              f"(len={ctrl_len}, n_coords={n_coords}, n_dofs={n_dofs}; "
-              f"gain arrays are {rinfo['gains_layout']}-space)")
+        # print(f"[INFO] control.joint_target_q layout: {targetq_layout}-space "
+        #       f"(len={ctrl_len}, n_coords={n_coords}, n_dofs={n_dofs}; "
+        #       f"gain arrays are {rinfo['gains_layout']}-space)")
 
         self.n_robot_targets = ctrl_len
         self.joint_target_q_view = self.control.joint_target_q.reshape((1, self.n_robot_targets))
@@ -1708,6 +1786,7 @@ class Example:
         self._grip_fraction = 0.0 # applied 0=open, 1=closed
         self._grip_requested_fraction = 0.0
         self._grip_hold_fraction = None
+        self._held_column_active.assign(np.asarray([0], dtype=np.int32))
         self._grip_stall_frames = 0
         self._grasp_stabilize_frames_remaining = 0
         self._contact_admm_frames_remaining = 0
@@ -1717,7 +1796,7 @@ class Example:
         self._grip_near_contact = False
         self._grip_actual_fraction = 0.0
         self._grip_actual_speed = 0.0
-        # Tracks whether release-only proxy contact ghosting is active.
+        self._gripper_contact_mode = None
         self._release_friction_active = False
 
         # arm command we follow (used for slew limiting + posture bias).
@@ -1725,6 +1804,8 @@ class Example:
         self._arm_cmd = np.array(
             [float(main_q[ci]) for ci in self.arm_coord_indices], dtype=np.float64
         )
+        self._last_ik_arm = self._arm_cmd.copy()
+        self._arm_servo_bias = np.zeros_like(self._arm_cmd)
 
         self.shared = SharedTarget(self.args.buffer)
         self.shared.write(self._target_pos, self._target_xyzw, 0.0, ready=1.0)
@@ -1805,14 +1886,47 @@ class Example:
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
             newton.examples.apply_coupled_viewer_forces(self, self.state_0)
+            self._apply_belt_transport_drag()
             self.admm_collision_pipeline.collide(self.state_0, self.admm_contacts)
             self.admm_solver.step(
                 self.state_0, self.state_1, self.control, self.admm_contacts, self.sim_dt
             )
+            self._apply_held_column_constraint()
             newton.eval_ik(
                 self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd
             )
             self.state_0, self.state_1 = self.state_1, self.state_0
+
+    def _apply_belt_transport_drag(self) -> None:
+        """Add viscous particle forces before the VBD solve; CUDA graph safe."""
+        wp.launch(
+            add_belt_transport_drag,
+            dim=len(self.belt_particles),
+            inputs=[
+                self.belt_particle_indices,
+                self.model.particle_mass,
+                self.state_0.particle_qd,
+                self.state_0.particle_f,
+                GRASP_BELT_DRAG_RATE,
+            ],
+            device=self.device,
+        )
+
+    def _apply_held_column_constraint(self) -> None:
+        """Keep the caught cross section at its latched gripper-local pose."""
+        wp.launch(
+            hold_grasped_belt_column,
+            dim=WIDTH_CELLS + 1,
+            inputs=[
+                self._held_column_active, self._held_column_ids,
+                self._held_column_local, self._held_column_initial_rotation,
+                self.state_1.body_q, self.link_index, self._held_tcp_offset,
+                GRASP_BELT_ROTATION_TRANSFER,
+                self.state_0.particle_q, self.state_1.particle_q,
+                self.state_1.particle_qd, 1.0 / self.sim_dt,
+            ],
+            device=self.device,
+        )
 
     def _simulate_physics(self) -> None:
         """Compatibility wrapper: select the same hybrid path as normal stepping."""
@@ -1836,6 +1950,8 @@ class Example:
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
             newton.examples.apply_coupled_viewer_forces(self, self.state_0)
+            if use_admm:
+                self._apply_belt_transport_drag()
 
             wp.synchronize_device(self.device)
             t0 = time.perf_counter()
@@ -1845,6 +1961,8 @@ class Example:
 
             t0 = time.perf_counter()
             solver.step(self.state_0, self.state_1, self.control, contacts, self.sim_dt)
+            if use_admm:
+                self._apply_held_column_constraint()
             newton.eval_ik(
                 self.model, self.state_1, self.state_1.joint_q, self.state_1.joint_qd
             )
@@ -1920,8 +2038,19 @@ class Example:
         return (
             closing_or_closed
             or self._grip_hold_fraction is not None
+            or (self._grip_requested_fraction <= GRIPPER_RELEASE_FRACTION
+                and self._grip_actual_fraction > RELEASE_ADMM_ACTUAL_OPEN_FRACTION)
             or self._contact_admm_frames_remaining > 0
         )
+
+    def _extend_release_grace_until_physically_open(self) -> None:
+        # The release command can precede actual finger opening by many frames.
+        # Start the full settling grace only after the fingers have opened.
+        if (self._grip_requested_fraction <= GRIPPER_RELEASE_FRACTION
+                and self._grip_actual_fraction > RELEASE_ADMM_ACTUAL_OPEN_FRACTION):
+            self._contact_admm_frames_remaining = max(
+                self._contact_admm_frames_remaining, RELEASE_ADMM_GRACE_FRAMES + 1
+            )
 
     def _launch_physics(self) -> None:
         use_admm = self._use_admm_physics()
@@ -1986,11 +2115,13 @@ class Example:
             self._grip_requested_fraction = float(np.asarray(data["grip_requested_fraction"]).reshape(-1)[0])
         else:
             self._grip_requested_fraction = self._grip_fraction
+
         if "arm_cmd" in data.files:
             self._arm_cmd = np.asarray(data["arm_cmd"], dtype=np.float64).copy()
 
         # Reset anti-crush latch internals to their normal t=0 values.
         self._grip_hold_fraction = None
+        self._held_column_active.assign(np.asarray([0], dtype=np.int32))
         self._grip_stall_frames = 0
         self._grasp_stabilize_frames_remaining = 0
         self._contact_admm_frames_remaining = 0
@@ -2053,6 +2184,19 @@ class Example:
         else:
             self._grip_requested_fraction = self._grip_fraction
 
+        if "grasp_latched" in row:
+            latched = bool(row["grasp_latched"])
+            if latched and self._grip_hold_fraction is None:
+                self._grip_hold_fraction = self._grip_fraction
+                self._capture_held_column()
+            elif not latched and self._grip_hold_fraction is not None:
+                self._grip_hold_fraction = None
+                self._held_column_active.assign(np.asarray([0], dtype=np.int32))
+            self._update_gripper_release_material()
+
+        self._grip_actual_fraction, self._grip_actual_speed = self._measure_actual_gripper()
+        self._extend_release_grace_until_physically_open()
+
         # Replay the exact robot action generated during recording.
         self.control.joint_target_q.assign(
             np.asarray(row["joint_target_q"], dtype=np.float32)
@@ -2060,6 +2204,8 @@ class Example:
         
         # Replay uses the same hybrid physics selection as live teleoperation.
         self._launch_physics()
+        if self._contact_admm_frames_remaining > 0:
+            self._contact_admm_frames_remaining -= 1
 
         self._replay_index += 1
         self.sim_time += self.frame_dt
@@ -2150,8 +2296,8 @@ class Example:
         for ik_idx, main_idx in zip(self.ik_arm_coord_indices, self.arm_coord_indices):
             ik_q[ik_idx] = main_q[main_idx]
         self.ik_joint_q.assign(ik_q.reshape(1, -1))
-        print("[INFO] t=0 TCP target above belt vertex: "
-              f"approach={BELT_APPROACH_POS}, grasp={BELT_GRASP_POS}, open gripper={self.gripper_open_values}")
+        # print("[INFO] t=0 TCP target above belt vertex: "
+        #       f"approach={BELT_APPROACH_POS}, grasp={BELT_GRASP_POS}, open gripper={self.gripper_open_values}")
 
     # Null-space posture bias + slew-limited target write 
     @staticmethod
@@ -2281,6 +2427,40 @@ class Example:
         speed = float(np.median(speeds)) if speeds else 0.0
         return frac, speed
 
+    def _capture_held_column(self) -> None:
+        """Latch one nearby belt cross section in the tool body's local frame."""
+        belt_q = self.state_0.particle_q.numpy()
+        body_pose = self.state_0.body_q.numpy()[self.link_index]
+        body_pos = np.asarray(body_pose[:3], dtype=np.float64)
+        body_quat = _norm4(body_pose[3:7])
+        tcp = body_pos + _rotate_vec(body_quat, self.tip_offset)
+
+        middle = WIDTH_CELLS // 2
+        candidates = np.asarray(
+            [belt_q[self.belt_particles[i * (WIDTH_CELLS + 1) + middle], :3]
+             for i in range(CIRCUMFERENCE_CELLS)], dtype=np.float64,
+        )
+        distances = np.linalg.norm(candidates - tcp, axis=1)
+        station = int(np.argmin(distances))
+        if distances[station] > 0.045:
+            # print(f"[GRASP] no belt column within 45 mm of TCP ({distances[station]*1000:.1f} mm); contact hold only")
+            return
+
+        ids = np.asarray(
+            [self.belt_particles[station * (WIDTH_CELLS + 1) + j]
+             for j in range(WIDTH_CELLS + 1)], dtype=np.int32,
+        )
+        inverse_quat = _quat_conj(body_quat)
+        local = np.asarray(
+            [_rotate_vec(inverse_quat, belt_q[int(pid), :3] - tcp)
+             for pid in ids], dtype=np.float32,
+        )
+        self._held_column_ids.assign(ids)
+        self._held_column_local.assign(local)
+        self._held_column_initial_rotation.assign(body_quat.astype(np.float32).reshape(1, 4))
+        self._held_column_active.assign(np.asarray([1], dtype=np.int32))
+        # print(f"[GRASP] attached belt station {station}; wrist rotation transfer={GRASP_BELT_ROTATION_TRANSFER:.2f}")
+
     def _update_gripper_antcrush(self):
         """Convert the raw SpaceMouse close request into a load-limited grasp command.
         """
@@ -2288,14 +2468,16 @@ class Example:
         actual, actual_speed = self._measure_actual_gripper()
         self._grip_actual_fraction = actual
         self._grip_actual_speed = actual_speed
+        self._extend_release_grace_until_physically_open()
 
         # If a grasp has already been latched, keep only the small preload.
         # The user must command OPEN below the latch point to release it.
         if self._grip_hold_fraction is not None:
             self._grip_near_contact = False
             if requested < self._grip_hold_fraction - GRIPPER_RELEASE_HYSTERESIS:
-                print(f"[GRASP] release latch: requested={requested:.3f}, actual={actual:.3f}")
+                # print(f"[GRASP] release latch: requested={requested:.3f}, actual={actual:.3f}")
                 self._grip_hold_fraction = None
+                self._held_column_active.assign(np.asarray([0], dtype=np.int32))
                 self._grip_stall_frames = 0
                 self._grasp_stabilize_frames_remaining = 0
                 self._contact_admm_frames_remaining = max(
@@ -2306,18 +2488,19 @@ class Example:
                 self._grip_fraction = min(requested, self._grip_hold_fraction)
             return
 
-        # Detect the approach to a loaded pinch and then the strict stall.
+        # Detect a loaded pinch from physical tracking error.
         error = requested - actual
-        closing_request = requested > self._grip_fraction + 1.0e-5
-        self._grip_near_contact = (
+        closing_intent = (
             requested >= CONTACT_ADMM_PRECONTACT_MIN_FRACTION
-            and closing_request
+            and error > 1.0e-5
         )
+        self._grip_near_contact = closing_intent
+
         stalled = (
-            closing_request
+            closing_intent
             and actual >= GRIPPER_STALL_MIN_FRACTION
             and error >= GRIPPER_STALL_ERROR_FRACTION
-            and actual_speed <= GRIPPER_STALL_SPEED_FRACTION_PER_SEC
+            and abs(actual_speed) <= GRIPPER_STALL_SPEED_FRACTION_PER_SEC
         )
 
         if stalled:
@@ -2330,29 +2513,38 @@ class Example:
             self._grip_hold_fraction = float(np.clip(hold, 0.0, 1.0))
             self._grip_fraction = self._grip_hold_fraction
             self._grasp_stabilize_frames_remaining = GRASP_STABILIZE_FRAMES
-            print(
-                f"[GRASP] anti-crush latch: requested={requested:.3f}, actual={actual:.3f}, "
-                f"hold={self._grip_hold_fraction:.3f}, speed={actual_speed:.3f}/s"
-            )
+            self._capture_held_column()
+            # print(
+            #     f"[GRASP] anti-crush latch: requested={requested:.3f}, actual={actual:.3f}, "
+            #     f"hold={self._grip_hold_fraction:.3f}, speed={actual_speed:.3f}/s"
+            # )
         else:
             self._grip_fraction = requested
 
     def _update_gripper_release_material(self):
-        """Ghost the two simple belt-contact plates while explicitly open.
+        """Select release/normal/latched-hold material for the two simple pads.
+        Thus the belt does not alter normal finger closing/opening more than before.
         """
         idx = self._gripper_release_shape_indices
         if idx.size == 0:
             return
 
-        releasing = self._grip_requested_fraction <= GRIPPER_RELEASE_FRACTION
-        if releasing == self._release_friction_active:
+        explicit_release = self._grip_requested_fraction <= GRIPPER_RELEASE_FRACTION
+        if explicit_release:
+            desired_mode = "release"
+        elif self._grip_hold_fraction is not None:
+            desired_mode = "hold"
+        else:
+            desired_mode = "normal"
+
+        if desired_mode == self._gripper_contact_mode:
             return
 
         mu_np = self.model.shape_material_mu.numpy().copy()
         ke_np = self.model.shape_material_ke.numpy().copy()
         kd_np = self.model.shape_material_kd.numpy().copy()
 
-        if releasing:
+        if desired_mode == "release":
             # Do not trigger the grace period on the initial all-open frame.
             if self._grip_actual_fraction >= CONTACT_ADMM_PRECONTACT_MIN_FRACTION:
                 self._contact_admm_frames_remaining = max(
@@ -2362,21 +2554,34 @@ class Example:
             ke_np[idx] = GRIPPER_RELEASE_KE
             kd_np[idx] = GRIPPER_RELEASE_KD
             self._release_friction_active = True
-            print(
-                f"[GRASP] OPEN: ghosting {idx.size} simple pad shapes "
-                f"(ke={GRIPPER_RELEASE_KE:.1f}, kd={GRIPPER_RELEASE_KD:.1f}, "
-                f"mu={GRIPPER_RELEASE_MU:.1f})"
-            )
-        else:
+            # print(
+            #     f"[GRASP] OPEN: ghosting {idx.size} simple pad shapes "
+            #     f"(ke={GRIPPER_RELEASE_KE:.1f}, kd={GRIPPER_RELEASE_KD:.1f}, "
+            #     f"mu={GRIPPER_RELEASE_MU:.1f})"
+            # )
+
+        elif desired_mode == "hold":
+            mu_np[idx] = GRIPPER_HOLD_CONTACT_MU
+            ke_np[idx] = GRIPPER_HOLD_CONTACT_KE
+            kd_np[idx] = GRIPPER_HOLD_CONTACT_KD
+            self._release_friction_active = False
+            # print(
+            #     f"[GRASP] HOLD: latched pad material on {idx.size} shapes "
+            #     f"(ke={GRIPPER_HOLD_CONTACT_KE:.1f}, kd={GRIPPER_HOLD_CONTACT_KD:.1f}, "
+            #     f"mu={GRIPPER_HOLD_CONTACT_MU:.1f})"
+            # )
+
+        else:  # normal close/opening above the explicit-release threshold
             mu_np[idx] = self._gripper_release_restore_mu
             ke_np[idx] = self._gripper_release_restore_ke
             kd_np[idx] = self._gripper_release_restore_kd
             self._release_friction_active = False
-            print(f"[GRASP] CLOSE: restored {idx.size} proxy-pad shape contact materials")
+            # print(f"[GRASP] NORMAL: restored {idx.size} proxy-pad shape contact materials")
 
         self.model.shape_material_mu.assign(mu_np)
         self.model.shape_material_ke.assign(ke_np)
         self.model.shape_material_kd.assign(kd_np)
+        self._gripper_contact_mode = desired_mode
 
     def _write_control_targets(self, solved_q):
         """Write the final primary-task IK solution to the robot (slew-limited)."""
@@ -2395,13 +2600,31 @@ class Example:
         arm_speed_limit = float(self.args.max_arm_speed)
         if self._grip_hold_fraction is not None:
             arm_speed_limit = min(arm_speed_limit, GRASPED_MAX_ARM_SPEED)
+            if self._grasp_stabilize_frames_remaining > 0:
+                arm_speed_limit = min(arm_speed_limit, GRASP_SETTLE_MAX_ARM_SPEED)
         max_step = arm_speed_limit * self.frame_dt
 
         delta = np.clip(desired - self._arm_cmd, -max_step, max_step)
 
         self._arm_cmd = self._arm_cmd + delta
 
-        for ti, cmd in zip(self.arm_target_indices, self._arm_cmd):
+        # Integrate only persistent physical joint lag during a latched grasp.
+        if self._grip_hold_fraction is not None:
+            actual_arm = self.state_0.joint_q.numpy()[self.arm_coord_indices]
+            lag = self._arm_cmd - actual_arm
+            self._arm_servo_bias += 3.0 * self.frame_dt * np.clip(
+                lag, -GRASP_ARM_BIAS_LAG_CAP, GRASP_ARM_BIAS_LAG_CAP
+            )
+            self._arm_servo_bias = np.clip(
+                self._arm_servo_bias, -GRASP_ARM_BIAS_MAX, GRASP_ARM_BIAS_MAX
+            )
+        else:
+            self._arm_servo_bias *= max(0.0, 1.0 - 6.0 * self.frame_dt)
+        drive_q = self._arm_cmd + self._arm_servo_bias
+        lower = as_numpy(self.model.joint_limit_lower)[self.arm_dof_indices]
+        upper = as_numpy(self.model.joint_limit_upper)[self.arm_dof_indices]
+        drive_q = np.minimum(np.maximum(drive_q, lower + 0.005), upper - 0.005)
+        for ti, cmd in zip(self.arm_target_indices, drive_q):
             targets[ti] = float(cmd)
 
         frac = float(np.clip(self._grip_fraction, 0.0, 1.0))
@@ -2473,7 +2696,7 @@ class Example:
         else:
             raise RuntimeError(f"joint_target_mode length {target_len} matches neither "
                                f"n_coords ({n_coords}) nor n_dofs ({n_dofs}).")
-        print(f"[INFO] Gain-array layout: {layout}-space (len={target_len})")
+        # print(f"[INFO] Gain-array layout: {layout}-space (len={target_len})")
 
         ke_np = as_numpy(model.joint_target_ke).copy()
         kd_np = as_numpy(model.joint_target_kd).copy()
@@ -2481,9 +2704,12 @@ class Example:
         kd_np[:robot_end] = 0.0
         mode_np[:robot_end] = int(JointTargetMode.NONE)
 
+        # A latched belt can produce substantial lateral reaction forces in ADMM.
+        # Use a firmer arm servo so the physical TCP can actually follow the IK
+        # command, while leaving the gripper drive completely unchanged.
         for idx in arm_t:
-            ke_np[idx] = 700.0
-            kd_np[idx] = 110.0
+            ke_np[idx] = ARM_DRIVE_KE
+            kd_np[idx] = ARM_DRIVE_KD
             mode_np[idx] = int(JointTargetMode.POSITION)
         for idx in grip_t:
             ke_np[idx] = GRIPPER_DRIVE_KE
@@ -2498,11 +2724,17 @@ class Example:
         # The SpaceMouse may continue commanding frac=1.0, but the actuator is
         # not allowed to build unbounded squeeze effort against the trapped belt.
         effort_np = as_numpy(model.joint_effort_limit).copy()
+        imported_arm_limits = effort_np[arm_dof_indices].copy()
+        for dof_idx in arm_dof_indices:
+            effort_np[dof_idx] = max(float(effort_np[dof_idx]), ARM_MIN_EFFORT_LIMIT)
         for dof_idx in gripper_dof_indices:
             effort_np[dof_idx] = GRIPPER_EFFORT_LIMIT
         model.joint_effort_limit.assign(effort_np)
-        print(f"[INFO] Gripper compliant drive: ke={GRIPPER_DRIVE_KE}, kd={GRIPPER_DRIVE_KD}, "
-              f"effort_limit={GRIPPER_EFFORT_LIMIT}")
+        # print(f"[INFO] Arm drive: ke={ARM_DRIVE_KE}, kd={ARM_DRIVE_KD}, "
+        #       f"imported_effort={imported_arm_limits.tolist()}, "
+        #       f"applied_effort={effort_np[arm_dof_indices].tolist()}")
+        # print(f"[INFO] Gripper compliant drive: ke={GRIPPER_DRIVE_KE}, kd={GRIPPER_DRIVE_KD}, "
+        #       f"effort_limit={GRIPPER_EFFORT_LIMIT}")
 
         return {"gains_layout": layout,
                 "arm_coord_indices": arm_coord_indices, "arm_dof_indices": arm_dof_indices,
@@ -2561,11 +2793,11 @@ class Example:
         if armature_np is not None:
             model.joint_armature.assign(armature_np)
 
-        print(
-            f"[INFO] Pulley bearings on {n_dofs_set} axle DOF(s): "
-            f"viscous kd={PULLEY_JOINT_DAMPING}, Coulomb friction={PULLEY_JOINT_FRICTION}, "
-            f"armature={PULLEY_ARMATURE}"
-        )
+        # print(
+        #     f"[INFO] Pulley bearings on {n_dofs_set} axle DOF(s): "
+        #     f"viscous kd={PULLEY_JOINT_DAMPING}, Coulomb friction={PULLEY_JOINT_FRICTION}, "
+        #     f"armature={PULLEY_ARMATURE}"
+        # )
 
     # Collision pair filter
     def _belt_world_shape_pairs(self, include_gripper: bool = False) -> wp.array:
@@ -2586,10 +2818,10 @@ class Example:
                 pairs.append((a, b))
 
         mode = "ADMM" if include_gripper else "FAST"
-        print(
-            f"[INFO] {mode} timing-belt collision pipeline: {len(pairs)} rigid pulley/world pairs; "
-            "timing-belt contacts are particle<->rigid contacts."
-        )
+        # print(
+        #     f"[INFO] {mode} timing-belt collision pipeline: {len(pairs)} rigid pulley/world pairs; "
+        #     "timing-belt contacts are particle<->rigid contacts."
+        # )
         return wp.array(
             np.asarray(pairs, dtype=np.int32).reshape((-1, 2)),
             dtype=wp.vec2i,
@@ -2620,28 +2852,28 @@ class Example:
                 raw_delta = raw_pos - self._spacemouse_raw_pos_prev
                 self._spacemouse_raw_pos_prev = raw_pos.copy()
 
-                # A producer restart/re-seed can create one artificial large jump.
-                # Treat that sample as a resynchronization instead of robot motion.
                 raw_delta_norm = float(np.linalg.norm(raw_delta))
-                if raw_delta_norm <= TELEOP_MAX_RAW_TARGET_JUMP:
-                    candidate = self._target_pos + raw_delta
+                if raw_delta_norm > TELEOP_MAX_RAW_TARGET_JUMP and raw_delta_norm > 1.0e-12:
+                    raw_delta = raw_delta * (TELEOP_MAX_RAW_TARGET_JUMP / raw_delta_norm)
 
-                    # Current *physical* TCP from the solved Newton state.
-                    bq = self.state_0.body_q.numpy()[self.link_index]
-                    base_pos = np.asarray(bq[0:3], dtype=np.float64)
-                    base_quat = _norm4(np.asarray(bq[3:7], dtype=np.float64))
-                    current_tcp = base_pos + _rotate_vec(base_quat, self.tip_offset)
+                previous_target = self._target_pos.copy()
+                candidate = previous_target + TELEOP_TRANSLATION_GAIN * raw_delta
 
-                    # Keep the Cartesian target close enough that changing the
-                    # SpaceMouse direction takes effect immediately.
-                    lead = candidate - current_tcp
-                    lead_norm = float(np.linalg.norm(lead))
-                    if lead_norm > TELEOP_MAX_TARGET_DISTANCE and lead_norm > 1.0e-12:
-                        candidate = (
-                            current_tcp
-                            + lead * (TELEOP_MAX_TARGET_DISTANCE / lead_norm)
-                        )
-                    self._target_pos = candidate
+                # Current physical TCP from the solved Newton state.
+                bq = self.state_0.body_q.numpy()[self.link_index]
+                base_pos = np.asarray(bq[0:3], dtype=np.float64)
+                base_quat = _norm4(np.asarray(bq[3:7], dtype=np.float64))
+                current_tcp = base_pos + _rotate_vec(base_quat, self.tip_offset)
+
+                # Keep the Cartesian target close to the physical TCP
+                max_target_distance = (
+                    TELEOP_MAX_TARGET_DISTANCE_GRASPED
+                    if self._grip_hold_fraction is not None
+                    else TELEOP_MAX_TARGET_DISTANCE_FREE
+                )
+                self._target_pos = _limit_target_lead(
+                    previous_target, candidate, current_tcp, max_target_distance
+                )
 
                 self._target_xyzw = quat.copy()
 
@@ -2672,18 +2904,21 @@ class Example:
         solved_1 = self.ik_joint_q.numpy().reshape(-1)
 
         if np.isfinite(solved_1).all():
-            q_posture_seed = self._nullspace_posture_seed(solved_1)
-
-            ik_seed_2 = self.ik_joint_q.numpy()
-            for j, ik_qi in enumerate(self.ik_arm_coord_indices):
-                ik_seed_2[0, ik_qi] = float(q_posture_seed[j])
-            self.ik_joint_q.assign(ik_seed_2)
-
-            self.ik_solver.step(self.ik_joint_q, self.ik_joint_q, iterations=IK_TRACK_ITERS)
-
-            solved_2 = self.ik_joint_q.numpy().reshape(-1)
-            if np.isfinite(solved_2).all():
-                self._write_control_targets(solved_2)
+            self._last_ik_arm = np.asarray(
+                [float(solved_1[i]) for i in self.ik_arm_coord_indices], dtype=np.float64
+            )
+            if self.args.nullspace_posture:
+                q_posture_seed = self._nullspace_posture_seed(solved_1)
+                ik_seed_2 = self.ik_joint_q.numpy()
+                for j, ik_qi in enumerate(self.ik_arm_coord_indices):
+                    ik_seed_2[0, ik_qi] = float(q_posture_seed[j])
+                self.ik_joint_q.assign(ik_seed_2)
+                self.ik_solver.step(self.ik_joint_q, self.ik_joint_q, iterations=IK_TRACK_ITERS)
+                solved_2 = self.ik_joint_q.numpy().reshape(-1)
+                if np.isfinite(solved_2).all():
+                    self._write_control_targets(solved_2)
+            else:
+                self._write_control_targets(solved_1)
 
         if self.profile_step:
             wp.synchronize_device(self.device)
@@ -2715,6 +2950,7 @@ class Example:
                 self._grip_requested_fraction,
                 self.control.joint_target_q.numpy().copy(),
                 self.state_0,
+                grasp_latched=self._grip_hold_fraction is not None,
             )
 
         self.sim_time += self.frame_dt
@@ -2804,12 +3040,23 @@ class Example:
         now = time.perf_counter()
         if now - self._last_dbg >= 0.5:
             self._last_dbg = now
-            err = float(np.linalg.norm(self._target_pos - tip))
+            err_xyz = self._target_pos - tip
+            err = float(np.linalg.norm(err_xyz))
             latch = "ON" if self._grip_hold_fraction is not None else "off"
-            # print(f"[track] target-tip error = {err*1000:6.1f} mm  "
-            #       f"grip_req={self._grip_requested_fraction:0.2f} "
-            #       f"grip_cmd={self._grip_fraction:0.2f} "
-            #       f"grip_actual={self._grip_actual_fraction:0.2f} latch={latch}")
+            lead_limit = (TELEOP_MAX_TARGET_DISTANCE_GRASPED
+                          if self._grip_hold_fraction is not None
+                          else TELEOP_MAX_TARGET_DISTANCE_FREE)
+            actual_arm = self.state_0.joint_q.numpy()[self.arm_coord_indices]
+            command_tcp, _ = self._ik_tcp_pose_for_arm(self._arm_cmd)
+            ik_tcp, _ = self._ik_tcp_pose_for_arm(self._last_ik_arm)
+            servo_joint_error = float(np.max(np.abs(self._arm_cmd - actual_arm)))
+            effort_limits = as_numpy(self.model.joint_effort_limit)[self.arm_dof_indices]
+            lower = as_numpy(self.model.joint_limit_lower)[self.arm_dof_indices]
+            upper = as_numpy(self.model.joint_limit_upper)[self.arm_dof_indices]
+            finite_margin = np.minimum(actual_arm - lower, upper - actual_arm)
+            finite_margin = finite_margin[np.isfinite(finite_margin)]
+            min_limit_margin = float(np.min(finite_margin)) if finite_margin.size else float('inf')
+            ik_joint_error = float(np.max(np.abs(self._last_ik_arm - self._arm_cmd)))
 
         if (self.debug_belt_positions and self.state_0.particle_q is not None
                 and len(self.belt_particles) > 0 and self.frame_id % self.debug_every_n_frames == 0):
@@ -2865,6 +3112,8 @@ class Example:
         # IK slew limit + null-space posture bias
         parser.add_argument("--max-arm-speed", type=float, default=1.5,
                             help="maximum commanded UR10 joint speed in rad/s")
+        parser.add_argument("--nullspace-posture", action="store_true",
+                            help="enable the extra numerical-Jacobian posture seed and second IK solve")
         parser.add_argument("--nullspace-gain", type=float, default=0.35,
                             help="strength of previous-posture preference in the task null space")
         parser.add_argument("--nullspace-svd-rel-tol", type=float, default=1.0e-3,

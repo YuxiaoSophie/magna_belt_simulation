@@ -86,6 +86,9 @@ TARGET_BELT_MASS = 0.033  # kg (33 g)
 # Linear, mass-proportional resistance while the ADMM grasp path is active.
 GRASP_BELT_DRAG_RATE = 7.0
 GRASP_BELT_ROTATION_TRANSFER = 0.75
+# Allow small wrist corrections during a grasp without turning the whole loop.
+GRASP_MAX_ROTATION_DEG = 10.0
+GRASP_ROTATION_SPEED_DEG_PER_SEC = 25.0
 
 # Keep the belt nearly inextensible with the triangle membrane itself.
 TRI_KE = 8.0e4
@@ -316,11 +319,10 @@ def hold_grasped_belt_column(
     active: wp.array(dtype=wp.int32),
     particle_indices: wp.array(dtype=wp.int32),
     local_positions: wp.array(dtype=wp.vec3),
-    initial_rotation: wp.array(dtype=wp.quat),
+    held_rotation: wp.array(dtype=wp.quat),
     body_q: wp.array(dtype=wp.transform),
     body_index: int,
     tcp_offset: wp.vec3,
-    rotation_transfer: float,
     particle_q_in: wp.array(dtype=wp.vec3),
     particle_q_out: wp.array(dtype=wp.vec3),
     particle_qd_out: wp.array(dtype=wp.vec3),
@@ -331,10 +333,8 @@ def hold_grasped_belt_column(
     row = wp.tid()
     particle = particle_indices[row]
     tool_pose = body_q[body_index]
-    tool_rotation = wp.transform_get_rotation(tool_pose)
     tcp_position = wp.transform_point(tool_pose, tcp_offset)
-    held_rotation = wp.quat_slerp(initial_rotation[0], tool_rotation, rotation_transfer)
-    target = tcp_position + wp.quat_rotate(held_rotation, local_positions[row])
+    target = tcp_position + wp.quat_rotate(held_rotation[0], local_positions[row])
     particle_q_out[particle] = target
     particle_qd_out[particle] = (target - particle_q_in[particle]) * inv_dt
 
@@ -423,6 +423,31 @@ def _quat_to_rotvec(q):
         return np.zeros(3, dtype=np.float64)
     angle = 2.0 * math.atan2(s, float(q[3]))
     return v * (angle / s)
+
+
+def _quat_slerp_short(a, b, fraction):
+    """Shortest-arc unit quaternion interpolation, including opposite signs."""
+    a, b = _norm4(a), _norm4(b)
+    dot = float(np.dot(a, b))
+    if dot < 0.0:
+        b, dot = -b, -dot
+    dot = float(np.clip(dot, -1.0, 1.0))
+    fraction = float(np.clip(fraction, 0.0, 1.0))
+    if dot > 0.9995:
+        return _norm4(a + fraction * (b - a))
+    angle = math.acos(dot)
+    scale = math.sin(angle)
+    return _norm4((math.sin((1.0 - fraction) * angle) * a
+                   + math.sin(fraction * angle) * b) / scale)
+
+
+def _cap_quat_change(start, requested, max_angle_rad):
+    """Return requested rotation limited to max_angle_rad from start."""
+    dot = abs(float(np.dot(_norm4(start), _norm4(requested))))
+    angle = 2.0 * math.acos(float(np.clip(dot, 0.0, 1.0)))
+    if angle <= max_angle_rad or angle < 1.0e-12:
+        return _norm4(requested)
+    return _quat_slerp_short(start, requested, max_angle_rad / angle)
 
 
 def _rotate_vec(q, v):
@@ -1545,7 +1570,7 @@ class Example:
             [wp.vec3(0.0, 0.0, 0.0) for _ in range(WIDTH_CELLS + 1)],
             dtype=wp.vec3, device=self.device,
         )
-        self._held_column_initial_rotation = wp.array(
+        self._held_column_rotation = wp.array(
             [wp.quat_identity()], dtype=wp.quat, device=self.device,
         )
         self._held_tcp_offset = wp.vec3(*GRIPPER_TCP_LOCAL_OFFSET)
@@ -1778,6 +1803,8 @@ class Example:
 
         self._target_pos = tip0.copy()
         self._target_xyzw = base_quat.copy()
+        self._grasp_reference_xyzw = None
+        self._held_rotation_xyzw = None
 
         # Track the producer's absolute position only to recover its per-frame
         # translation delta.
@@ -1919,9 +1946,8 @@ class Example:
             dim=WIDTH_CELLS + 1,
             inputs=[
                 self._held_column_active, self._held_column_ids,
-                self._held_column_local, self._held_column_initial_rotation,
+                self._held_column_local, self._held_column_rotation,
                 self.state_1.body_q, self.link_index, self._held_tcp_offset,
-                GRASP_BELT_ROTATION_TRANSFER,
                 self.state_0.particle_q, self.state_1.particle_q,
                 self.state_1.particle_qd, 1.0 / self.sim_dt,
             ],
@@ -2434,6 +2460,8 @@ class Example:
         body_pos = np.asarray(body_pose[:3], dtype=np.float64)
         body_quat = _norm4(body_pose[3:7])
         tcp = body_pos + _rotate_vec(body_quat, self.tip_offset)
+        self._grasp_reference_xyzw = body_quat.copy()
+        self._target_xyzw = body_quat.copy()
 
         middle = WIDTH_CELLS // 2
         candidates = np.asarray(
@@ -2457,7 +2485,8 @@ class Example:
         )
         self._held_column_ids.assign(ids)
         self._held_column_local.assign(local)
-        self._held_column_initial_rotation.assign(body_quat.astype(np.float32).reshape(1, 4))
+        self._held_rotation_xyzw = body_quat.copy()
+        self._held_column_rotation.assign(body_quat.astype(np.float32).reshape(1, 4))
         self._held_column_active.assign(np.asarray([1], dtype=np.int32))
         # print(f"[GRASP] attached belt station {station}; wrist rotation transfer={GRASP_BELT_ROTATION_TRANSFER:.2f}")
 
@@ -2478,6 +2507,8 @@ class Example:
                 # print(f"[GRASP] release latch: requested={requested:.3f}, actual={actual:.3f}")
                 self._grip_hold_fraction = None
                 self._held_column_active.assign(np.asarray([0], dtype=np.int32))
+                self._grasp_reference_xyzw = None
+                self._held_rotation_xyzw = None
                 self._grip_stall_frames = 0
                 self._grasp_stabilize_frames_remaining = 0
                 self._contact_admm_frames_remaining = max(
@@ -2520,6 +2551,25 @@ class Example:
             # )
         else:
             self._grip_fraction = requested
+
+    def _refresh_held_rotation(self) -> None:
+        """Update the fixed graph input using actual wrist pose, with a small cap."""
+        if self._grasp_reference_xyzw is None or self._held_rotation_xyzw is None:
+            return
+        body_pose = self.state_0.body_q.numpy()[self.link_index]
+        actual = _norm4(body_pose[3:7])
+        max_angle = math.radians(GRASP_MAX_ROTATION_DEG)
+        bounded = _cap_quat_change(self._grasp_reference_xyzw, actual, max_angle)
+        desired = _quat_slerp_short(
+            self._grasp_reference_xyzw, bounded, GRASP_BELT_ROTATION_TRANSFER
+        )
+        self._held_rotation_xyzw = _cap_quat_change(
+            self._held_rotation_xyzw, desired,
+            math.radians(GRASP_ROTATION_SPEED_DEG_PER_SEC) * self.frame_dt,
+        )
+        self._held_column_rotation.assign(
+            self._held_rotation_xyzw.astype(np.float32).reshape(1, 4)
+        )
 
     def _update_gripper_release_material(self):
         """Select release/normal/latched-hold material for the two simple pads.
@@ -2875,12 +2925,27 @@ class Example:
                     previous_target, candidate, current_tcp, max_target_distance
                 )
 
-                self._target_xyzw = quat.copy()
+                if self._grasp_reference_xyzw is not None:
+                    max_angle = math.radians(GRASP_MAX_ROTATION_DEG)
+                    bounded = _cap_quat_change(self._grasp_reference_xyzw, quat, max_angle)
+                    self._target_xyzw = _cap_quat_change(
+                        self._target_xyzw, bounded,
+                        math.radians(GRASP_ROTATION_SPEED_DEG_PER_SEC) * self.frame_dt,
+                    )
+                else:
+                    self._target_xyzw = quat.copy()
 
             self._grip_requested_fraction = float(np.clip(grip, 0.0, 1.0))
 
         # Convert the raw SpaceMouse command into an anti-crush applied command.
         self._update_gripper_antcrush()
+        if self._grasp_reference_xyzw is not None:
+            # The latch may have formed this frame after reading the raw target.
+            self._target_xyzw = _cap_quat_change(
+                self._grasp_reference_xyzw, self._target_xyzw,
+                math.radians(GRASP_MAX_ROTATION_DEG),
+            )
+        self._refresh_held_rotation()
 
         # While explicitly OPEN, ghost only the two proxy-pad bodies' collision
         # shapes so a belt wedged on the upper finger geometry can fall away.

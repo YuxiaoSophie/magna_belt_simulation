@@ -276,6 +276,7 @@ TELEOP_MAX_TARGET_DISTANCE_FREE = 0.030
 TELEOP_MAX_TARGET_DISTANCE_GRASPED = 0.060 
 TELEOP_MAX_RAW_TARGET_JUMP = 0.050 
 TELEOP_TRANSLATION_GAIN = 0.80 # 20% slower response to SpaceMouse translation
+# Release freezes only the arm joints. The SpaceMouse target remains live.
 
 # Hybrid coupling settings.
 # Free motion uses the original lightweight proxy-coupled solver inside a CUDA graph.
@@ -1833,6 +1834,8 @@ class Example:
         )
         self._last_ik_arm = self._arm_cmd.copy()
         self._arm_servo_bias = np.zeros_like(self._arm_cmd)
+        self._release_arm_hold = False
+        self._teleop_rotation_offset = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64)
 
         self.shared = SharedTarget(self.args.buffer)
         self.shared.write(self._target_pos, self._target_xyzw, 0.0, ready=1.0)
@@ -2691,6 +2694,18 @@ class Example:
 
         self.control.joint_target_q.assign(targets)
 
+    def _write_release_gripper_only(self):
+        """Keep the release-time arm joint targets fixed; actuate only the fingers."""
+        targets = self.control.joint_target_q.numpy().copy()
+        for ti, q in zip(self.arm_target_indices, self._arm_cmd):
+            targets[ti] = float(q)
+        frac = float(np.clip(self._grip_fraction, 0.0, 1.0))
+        for ti, q_open, q_closed in zip(
+            self.gripper_target_indices, self.g_open, self.g_closed
+        ):
+            targets[ti] = float(q_open + frac * (q_closed - q_open))
+        self.control.joint_target_q.assign(targets)
+
     # Joint config
     def _configure_robot_joints(self) -> dict[str, Any]:
         model = self.model
@@ -2894,6 +2909,9 @@ class Example:
 
         # 1) Read the SpaceMouse target.
         raw_pos, quat, grip, ready = self.shared.read()
+        raw_delta = np.zeros(3, dtype=np.float64)
+        previous_grip_request = self._grip_requested_fraction
+        releasing_latch = False
         if ready >= 0.5:
             raw_pos = np.asarray(raw_pos, dtype=np.float64)
             quat = _norm4(quat)
@@ -2909,16 +2927,15 @@ class Example:
                 previous_target = self._target_pos.copy()
                 candidate = previous_target + TELEOP_TRANSLATION_GAIN * raw_delta
 
-                # Current physical TCP from the solved Newton state.
+                # Update the visible target even when the arm is held during
+                # release. Keep queued motion near the physical TCP.
                 bq = self.state_0.body_q.numpy()[self.link_index]
                 base_pos = np.asarray(bq[0:3], dtype=np.float64)
                 base_quat = _norm4(np.asarray(bq[3:7], dtype=np.float64))
                 current_tcp = base_pos + _rotate_vec(base_quat, self.tip_offset)
-
-                # Keep the Cartesian target close to the physical TCP
                 max_target_distance = (
                     TELEOP_MAX_TARGET_DISTANCE_GRASPED
-                    if self._grip_hold_fraction is not None
+                    if self._grip_hold_fraction is not None and not self._release_arm_hold
                     else TELEOP_MAX_TARGET_DISTANCE_FREE
                 )
                 self._target_pos = _limit_target_lead(
@@ -2933,9 +2950,40 @@ class Example:
                         math.radians(GRASP_ROTATION_SPEED_DEG_PER_SEC) * self.frame_dt,
                     )
                 else:
-                    self._target_xyzw = quat.copy()
+                    self._target_xyzw = _norm4(_quat_mul(self._teleop_rotation_offset, quat))
 
             self._grip_requested_fraction = float(np.clip(grip, 0.0, 1.0))
+            releasing_latch = (
+                self._grip_hold_fraction is not None
+                and self._grip_requested_fraction
+                < self._grip_hold_fraction - GRIPPER_RELEASE_HYSTERESIS
+            )
+
+        starting_release = ready >= 0.5 and (
+            releasing_latch
+            or (previous_grip_request > GRIPPER_RELEASE_FRACTION
+                and self._grip_requested_fraction <= GRIPPER_RELEASE_FRACTION
+                and self._grip_actual_fraction > RELEASE_ADMM_ACTUAL_OPEN_FRACTION)
+        )
+        if starting_release and not self._release_arm_hold:
+            # Capture the physical configuration once, before clearing the grasp
+            # latch or decaying its servo bias.
+            self._release_arm_hold = True
+            self._arm_cmd = np.asarray(
+                self.state_0.joint_q.numpy()[self.arm_coord_indices], dtype=np.float64
+            ).copy()
+            self._arm_servo_bias.fill(0.0)
+            self._last_ik_arm = self._arm_cmd.copy()
+            bq = self.state_0.body_q.numpy()[self.link_index]
+            release_quat = _norm4(bq[3:7])
+            self._target_pos = np.asarray(bq[:3], dtype=np.float64) + _rotate_vec(
+                release_quat, self.tip_offset
+            )
+            self._target_xyzw = release_quat.copy()
+            self._teleop_rotation_offset = _norm4(
+                _quat_mul(release_quat, _quat_conj(quat))
+            )
+            print("[RELEASE] holding actual arm joints while fingers open")
 
         # Convert the raw SpaceMouse command into an anti-crush applied command.
         self._update_gripper_antcrush()
@@ -2951,39 +2999,69 @@ class Example:
         # shapes so a belt wedged on the upper finger geometry can fall away.
         self._update_gripper_release_material()
 
+        if self._release_arm_hold:
+            # Contact grace keeps ADMM active but must not block arm control.
+            # Resume promptly once the fingers are clear of the belt.
+            fingers_open = self._grip_actual_fraction <= max(
+                self._grip_requested_fraction + 0.03, 0.05
+            )
+            if fingers_open:
+                bq = self.state_0.body_q.numpy()[self.link_index]
+                current_quat = _norm4(bq[3:7])
+                current_tcp = np.asarray(bq[:3], dtype=np.float64) + _rotate_vec(
+                    current_quat, self.tip_offset
+                )
+                # No new operator motion: eliminate the small release-time
+                # drift. Otherwise retain the live, bounded SpaceMouse target.
+                if np.linalg.norm(self._target_pos - current_tcp) < 0.001:
+                    self._target_pos = current_tcp.copy()
+                if np.linalg.norm(_quat_to_rotvec(
+                    _quat_mul(self._target_xyzw, _quat_conj(current_quat))
+                )) < math.radians(1.0):
+                    self._target_xyzw = current_quat.copy()
+                self._arm_cmd = np.asarray(
+                    self.state_0.joint_q.numpy()[self.arm_coord_indices], dtype=np.float64
+                ).copy()
+                self._arm_servo_bias.fill(0.0)
+                self._release_arm_hold = False
+                print("[RELEASE] arm teleop resumed from current TCP")
+
         # 2) Solve the PRIMARY TCP objective.
         if self.profile_step:
             wp.synchronize_device(self.device)
             _ik_t0 = time.perf_counter()
 
-        self.pos_obj.set_target_position(0, _v3(self._target_pos))
-        self.rot_obj.set_target_rotation(0, _v4(self._target_xyzw))
+        if self._release_arm_hold:
+            self._write_release_gripper_only()
+        else:
+            self.pos_obj.set_target_position(0, _v3(self._target_pos))
+            self.rot_obj.set_target_rotation(0, _v4(self._target_xyzw))
 
-        ik_seed = self.ik_joint_q.numpy()
-        for j, ik_qi in enumerate(self.ik_arm_coord_indices):
-            ik_seed[0, ik_qi] = float(self._arm_cmd[j])
-        self.ik_joint_q.assign(ik_seed)
+            ik_seed = self.ik_joint_q.numpy()
+            for j, ik_qi in enumerate(self.ik_arm_coord_indices):
+                ik_seed[0, ik_qi] = float(self._arm_cmd[j])
+            self.ik_joint_q.assign(ik_seed)
 
-        self.ik_solver.step(self.ik_joint_q, self.ik_joint_q, iterations=IK_TRACK_ITERS)
+            self.ik_solver.step(self.ik_joint_q, self.ik_joint_q, iterations=IK_TRACK_ITERS)
 
-        solved_1 = self.ik_joint_q.numpy().reshape(-1)
+            solved_1 = self.ik_joint_q.numpy().reshape(-1)
 
-        if np.isfinite(solved_1).all():
-            self._last_ik_arm = np.asarray(
-                [float(solved_1[i]) for i in self.ik_arm_coord_indices], dtype=np.float64
-            )
-            if self.args.nullspace_posture:
-                q_posture_seed = self._nullspace_posture_seed(solved_1)
-                ik_seed_2 = self.ik_joint_q.numpy()
-                for j, ik_qi in enumerate(self.ik_arm_coord_indices):
-                    ik_seed_2[0, ik_qi] = float(q_posture_seed[j])
-                self.ik_joint_q.assign(ik_seed_2)
-                self.ik_solver.step(self.ik_joint_q, self.ik_joint_q, iterations=IK_TRACK_ITERS)
-                solved_2 = self.ik_joint_q.numpy().reshape(-1)
-                if np.isfinite(solved_2).all():
-                    self._write_control_targets(solved_2)
-            else:
-                self._write_control_targets(solved_1)
+            if np.isfinite(solved_1).all():
+                self._last_ik_arm = np.asarray(
+                    [float(solved_1[i]) for i in self.ik_arm_coord_indices], dtype=np.float64
+                )
+                if self.args.nullspace_posture:
+                    q_posture_seed = self._nullspace_posture_seed(solved_1)
+                    ik_seed_2 = self.ik_joint_q.numpy()
+                    for j, ik_qi in enumerate(self.ik_arm_coord_indices):
+                        ik_seed_2[0, ik_qi] = float(q_posture_seed[j])
+                    self.ik_joint_q.assign(ik_seed_2)
+                    self.ik_solver.step(self.ik_joint_q, self.ik_joint_q, iterations=IK_TRACK_ITERS)
+                    solved_2 = self.ik_joint_q.numpy().reshape(-1)
+                    if np.isfinite(solved_2).all():
+                        self._write_control_targets(solved_2)
+                else:
+                    self._write_control_targets(solved_1)
 
         if self.profile_step:
             wp.synchronize_device(self.device)
@@ -3122,6 +3200,23 @@ class Example:
             finite_margin = finite_margin[np.isfinite(finite_margin)]
             min_limit_margin = float(np.min(finite_margin)) if finite_margin.size else float('inf')
             ik_joint_error = float(np.max(np.abs(self._last_ik_arm - self._arm_cmd)))
+            print(f"[follow] target_to_ik={np.linalg.norm(self._target_pos - ik_tcp)*1000:.1f}mm "
+                  f"target_to_cmd={np.linalg.norm(self._target_pos - command_tcp)*1000:.1f}mm "
+                  f"cmd_to_tip={np.linalg.norm(command_tcp - tip)*1000:.1f}mm "
+                  f"ik_to_cmd_joint={ik_joint_error:.3f}rad "
+                  f"cmd_to_actual_joint={servo_joint_error:.3f}rad "
+                  f"servo_bias={float(np.max(np.abs(self._arm_servo_bias))):.3f}rad "
+                  f"joint_limit_margin={min_limit_margin:.3f}rad "
+                  f"ik_x={ik_tcp[0]:+.3f} cmd_x={command_tcp[0]:+.3f} tip_x={tip[0]:+.3f}")
+            print(f"[track] err={err*1000:6.1f} mm "
+                  f"xyz=({err_xyz[0]*1000:+6.1f},{err_xyz[1]*1000:+6.1f},{err_xyz[2]*1000:+6.1f}) mm "
+                  f"target=({self._target_pos[0]:+.3f},{self._target_pos[1]:+.3f},{self._target_pos[2]:+.3f}) "
+                  f"tip=({tip[0]:+.3f},{tip[1]:+.3f},{tip[2]:+.3f}) "
+                  f"lead_max={lead_limit*1000:.0f}mm "
+                  f"grip_req={self._grip_requested_fraction:0.2f} "
+                  f"grip_cmd={self._grip_fraction:0.2f} "
+                  f"grip_actual={self._grip_actual_fraction:0.2f} latch={latch} "
+                  f"coupling={'ADMM' if self._use_admm_physics() else 'FAST'}")
 
         if (self.debug_belt_positions and self.state_0.particle_q is not None
                 and len(self.belt_particles) > 0 and self.frame_id % self.debug_every_n_frames == 0):

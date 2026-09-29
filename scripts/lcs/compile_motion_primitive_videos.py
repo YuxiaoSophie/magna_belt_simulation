@@ -5,6 +5,10 @@ Reads ``<run>/index.json`` (order, effective amplitudes), ``<run>/eval.json`` (o
 and ``<run>/videos/<episode>_<primitive>.mp4``; writes ``<run>/videos/all_primitives.mp4``
 (re-encoded as the renderer does: libx264, crf 20, yuv420p) and ``..._cards/<name>.png``.
 
+``--videos-dir DIR`` (opt-in) compiles a flat directory of ``<set>_<name>.mp4`` (+ sidecar
+``.npz`` from ``record_prediction_video.py``) instead: no index.json/eval.json needed. Cards
+show set, family/primitive and motion duration (from the sidecar's ``time_s``) only.
+
 Run:
     uv run python scripts/lcs/compile_motion_primitive_videos.py \\
         --run data/lcs/motion_primitives/<run>
@@ -63,14 +67,79 @@ def card(name: str, lines: list[str], W: int, H: int, warn: str | None = None) -
     return np.asarray(img)
 
 
+def card_simple(set_label: str, name_label: str, duration_s: float, W: int, H: int) -> np.ndarray:
+    img = Image.new("RGB", (W, H), (255, 255, 255))
+    d = ImageDraw.Draw(img)
+    big, small = _font(round(H * 0.07)), _font(round(H * 0.03))
+    y = round(H * 0.38)
+    for text, font in ((name_label, big), (set_label, small),
+                       (f"motion {duration_s:.1f} s", small)):
+        x0, y0, x1, y1 = d.textbbox((0, 0), text, font=font)
+        d.text(((W - (x1 - x0)) // 2 - x0, y - y0), text, fill=LEGEND_TEXT, font=font)
+        y += (y1 - y0) + round(H * (0.05 if font is big else 0.025))
+    return np.asarray(img)
+
+
+def compile_videos_dir(args) -> int:
+    """``--videos-dir`` mode: no index.json/eval.json, filenames are ``<set>_<name>.mp4``."""
+    vids = args.videos_dir
+    out = args.out or vids / "all_pick.mp4"
+    cards_dir = out.with_name(out.stem + "_cards")
+    cards_dir.mkdir(parents=True, exist_ok=True)
+    skip = {x for x in args.exclude.split(",") if x}
+    files = sorted(vids.glob("*.mp4"))
+    rows = []
+    for v in files:
+        set_label, _, name_label = v.stem.partition("_")
+        if not name_label:  # no underscore: treat the whole stem as the name
+            set_label, name_label = "", v.stem
+        if name_label in skip or v.stem in skip:
+            continue
+        rows.append((v, set_label, name_label))
+    rows.sort(key=lambda r: r[2] != args.first and r[0].stem != args.first)
+    segs = []
+    with tempfile.TemporaryDirectory(prefix=".compile-", dir=vids) as tmp:
+        for v, set_label, name_label in rows:
+            info = probe(v)
+            fps = info["frames"] / info["duration_s"]
+            with np.load(v.with_suffix(".npz"), allow_pickle=True) as side:
+                duration_s = float(side["time_s"][-1])
+            img = card_simple(set_label, name_label, duration_s, info["width"], info["height"])
+            Image.fromarray(img).save(cards_dir / f"{v.stem}.png")
+            seg = Path(tmp) / f"card_{v.stem}.mp4"
+            enc = Encoder(seg, info["width"], info["height"], fps)
+            for _ in range(round(args.card_s * fps)):
+                enc.write(img)
+            enc.close()
+            segs += [seg, v]
+        lst = Path(tmp) / "list.txt"
+        lst.write_text("".join(f"file '{s.resolve()}'\n" for s in segs))
+        tmp_out = Path(tmp) / out.name
+        subprocess.run([FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-f", "concat",
+                        "-safe", "0", "-i", str(lst), "-c:v", "libx264", "-crf", str(CRF),
+                        "-preset", "medium", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+                        str(tmp_out)], check=True)
+        tmp_out.replace(out)
+    info = probe(out)
+    print(f"wrote {out}: {info['frames']} frames {info['width']}x{info['height']}, "
+          f"{info['duration_s']:.2f} s, {info['bytes'] / 1e6:.2f} MB; cards in {cards_dir}")
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    p.add_argument("--run", type=Path, required=True)
+    p.add_argument("--run", type=Path, required=False)
     p.add_argument("--card-s", type=float, default=1.5)
     p.add_argument("--out", type=Path, default=None)
     p.add_argument("--first", default=None, help="primitive shown first")
     p.add_argument("--exclude", default="", help="comma list of primitives left out")
+    p.add_argument("--videos-dir", type=Path, default=None,
+                   help="opt-in: flat dir of <set>_<name>.mp4 (+ sidecar), no index/eval.json")
     args = p.parse_args()
+    if args.videos_dir:
+        return compile_videos_dir(args)
+    if not args.run:
+        p.error("--run is required unless --videos-dir is given")
     index = json.loads((args.run / "index.json").read_text())
     ev = json.loads((args.run / "eval.json").read_text())["primitives"]
     vids = args.run / "videos"

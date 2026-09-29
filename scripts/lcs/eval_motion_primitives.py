@@ -6,7 +6,8 @@ one-step belt RMSE ``decode(LCS(encode(obs_k), u_k))`` vs ``belt_{k+1}`` (exact 
 ``prediction_video``), the no-motion baseline ``belt_k``, the reconstruction
 ``decode(encode(obs_{k+1}))``, and the dynamics-only error ``pred`` vs that reconstruction. OOD:
 whitened latent distance (deploy ``z_std``) of each frame to its nearest training frame.
-Writes ``<run>/eval.json``.
+Writes ``<run>/eval.json`` (or ``--out``). Runs from other writers (no ``plan`` / ``primitive``
+in the index rows) are keyed by file stem and skip the amplitude table.
 
 Run:
     uv run python scripts/lcs/eval_motion_primitives.py --run data/lcs/motion_primitives/<run>
@@ -110,6 +111,7 @@ def main() -> int:
     p.add_argument("--decoder", type=Path, default=pv.DECODER)
     p.add_argument("--split", type=Path, default=pv.SPLIT)
     p.add_argument("--skip-test", action="store_true", help="no test-split recompute")
+    p.add_argument("--out", type=Path, default=None, help="result json (default <run>/eval.json)")
     args = p.parse_args()
     t0 = time.perf_counter()
     model = pv.OneStepModel(args.deploy, args.decoder, "lcp")
@@ -165,6 +167,9 @@ def main() -> int:
                                 "nearest train-split frame"},
            "primitives": {}}
     for row in eps:
+        name = row.get("primitive") or Path(row["file"]).stem
+        if name in out["primitives"]:
+            name = f"{name}#{Path(row['file']).stem}"
         r = evaluate(model, args.run / row["file"])
         mv = r["moving"]
         nn, nn_i = nearest(Z, r["z"], z_std)
@@ -187,10 +192,11 @@ def main() -> int:
                  "collection": {k: row["stats"][k] for k in (
                      "u_bound_ratio_max", "u_bound_ratio_max_per_dim", "u_near_bound_frac",
                      "crop_margin_min_mm", "belt_z_max_m", "rod_stretch_gain_pct_max",
-                     "min_board_clearance_mm", "grasp_ok_all", "wrap_deg_max")},
+                     "min_board_clearance_mm", "grasp_ok_all", "wrap_deg_max")
+                     if k in row.get("stats", {})},
                  "effective_amplitude": {c["name"]: [round(c["amp_effective"], 3), c["unit"]]
-                                         for c in row["plan"]["components"]}}
-        plan = row["plan"]
+                                         for c in row.get("plan", {}).get("components", [])}}
+        plan = row.get("plan", {})
         entry.update(motion_s=plan.get("motion_s"), action_ood=bool(plan.get("action_ood")),
                      bound_frac=plan.get("bound_frac"), amp_mul=row.get("amp_mul"),
                      stretch_lobe=row.get("stretch_lobe", 1.0),
@@ -204,9 +210,9 @@ def main() -> int:
                                                     .mean())
             entry["nn_frac_above_test_p99"] = float((nn[:-1][mv] > ref["nn_train_dist"]["p99"])
                                                     .mean())
-        out["primitives"][row["primitive"]] = entry
+        out["primitives"][name] = entry
         m = entry["all"]
-        print(f"{row['primitive']:<18} model {m['model']['mean']:.3f}/{m['model']['max']:.3f} "
+        print(f"{name:<18} model {m['model']['mean']:.3f}/{m['model']['max']:.3f} "
               f"recon {m['recon']['mean']:.3f} no-motion {m['nomotion']['mean']:.3f} dyn "
               f"{m['pred_vs_recon']['mean']:.3f} | motion model "
               f"{entry['motion']['model']['mean']:.3f} | NN dist mean "
@@ -216,11 +222,15 @@ def main() -> int:
               f" mm, corr(recon, dev) {entry['recon_vs_dev_corr']:.2f}, displacement gain "
               f"recon {r['gain']['recon']:.2f} pred {r['gain']['pred']:.2f}", flush=True)
     out["table_md"] = table(out)
-    out["amplitude_table_md"] = amp_table(out, index)
-    (args.run / "eval.json").write_text(json.dumps(out, indent=1) + "\n")
+    has_plan = all("plan" in row for row in eps)
+    out["amplitude_table_md"] = amp_table(out, index) if has_plan else None
+    dst = args.out or args.run / "eval.json"
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    dst.write_text(json.dumps(out, indent=1) + "\n")
     print(out["table_md"])
-    print(out["amplitude_table_md"])
-    print(f"wrote {args.run / 'eval.json'} ({time.perf_counter() - t0:.0f} s)")
+    if has_plan:
+        print(out["amplitude_table_md"])
+    print(f"wrote {dst} ({time.perf_counter() - t0:.0f} s)")
     return 0
 
 

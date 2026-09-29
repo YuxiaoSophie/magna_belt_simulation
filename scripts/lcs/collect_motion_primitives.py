@@ -13,6 +13,10 @@ Amplitudes are capped per primitive so the planned ``cmd_delta`` stays within
 keeps the board guard's clearance. Live: grasp, crop box, board clearance and rod stretch are
 checked; a failing episode is retried at half amplitude.
 
+Opt-in (flags off = the v1 / v2-big plans): ``--step-cap`` replaces the export bounds with
+symmetric caps, ``--repeats`` / ``--amp-range`` / ``--motion-s-range`` vary episodes,
+``--start-states`` / ``--variants`` round-robin start states; retries then shrink the capped plan.
+
 Axes: ``long`` = the start belt's long axis (horizontal PCA, ~world y), ``grasp`` = horizontal
 Franka -> UR grasp direction (~world x). Vertical motions only go down: the start belt is already
 ~3 mm above the crop box top (z 0.11 m).
@@ -79,10 +83,15 @@ CROP_HI = np.array([0.7, 0.25, 0.11])
 FRANKA_MIN_TIP_MM = 15.0
 PRIMITIVES = ("both_up_down", "both_fwd_back", "both_sideways", "opposite_fwd_back",
               "opposite_sideways", "opposite_up_down", "franka_only", "ur_only", "wrist_roll",
-              "random_mix", "good_mix", "good_mix_tilt")
+              "random_mix", "good_mix", "good_mix_tilt", "twist", "bend", "bend_lift",
+              "stretch_cycle", "franka_sweep", "ur_sweep", "random_mix_holds", "wrist_tilt",
+              "hold_only")
 V1_PRIMITIVES = PRIMITIVES[:10]
-EZ = np.array([0.0, 0.0, 1.0])
+STRETCHY = ("opposite_sideways", "franka_only", "ur_only", "random_mix", "stretch_cycle",
+            "franka_sweep", "ur_sweep", "random_mix_holds")
+EX, EY, EZ = np.eye(3)
 RANDOM_T_REF = 8.0  # random_mix shapes are drawn on this time base, then stretched to --motion-s
+DROP = 0.5  # carrier drop of the rotation families, x amp
 PULLEY_KEEPOUT = ((0.020, 0.015), (0.035, 0.015))  # small, large: (radius, height above) [m]
 
 
@@ -98,9 +107,9 @@ def _norm(f):
     return lambda tau: f(np.asarray(tau, np.float64)) / peak
 
 
-def osc(cycles: int = 1):
+def osc(cycles: int = 1, shift: float = 0.0):
     """Two-sided: +, -, ... under a Hann envelope; 0 value and slope at both ends."""
-    return _norm(lambda t: np.sin(2.0 * np.pi * cycles * t) * hann(t))
+    return _norm(lambda t: np.sin(2.0 * np.pi * cycles * (t - shift)) * hann(t))
 
 
 def bump(n: int = 1):
@@ -130,6 +139,54 @@ def smooth_random(rng: np.random.Generator, tau_c: float, sigma: float, T: float
     grid = np.linspace(0.0, 1.0, n)
     x = x / np.abs(x).max()
     return lambda tau: np.interp(np.asarray(tau, np.float64), grid, x)
+
+
+def window(shape, a: float, b: float):
+    """``shape`` squeezed into ``[a, b]``; 0 elsewhere."""
+    return lambda t: shape(np.clip((np.asarray(t, np.float64) - a) / (b - a), 0.0, 1.0))
+
+
+def plateau(a: float = 0.2):
+    """Smooth ramp to 1 over ``[0, a]``, 1, ramp back over ``[1 - a, 1]``."""
+    return lambda t: smoothstep(np.minimum(t, 1.0 - np.asarray(t, np.float64)) / a)
+
+
+def smoothstep(x):
+    x = np.clip(x, 0.0, 1.0)
+    return x * x * (3.0 - 2.0 * x)
+
+
+def hold_warp(rng: np.random.Generator, T: float, lo: float = 0.8, hi: float = 2.0):
+    """``(warp, holds)``: a monotone tau(s) with 2-3 flat plateaus of ``lo..hi`` s at random
+    times; eased (smoothstep) between plateaus so the arms stop and restart smoothly."""
+    n = int(rng.integers(2, 4))
+    d = rng.uniform(lo, hi, n)
+    if d.sum() > 0.5 * T:
+        n, d = 2, np.clip(d[:2], lo, max(lo, 0.25 * T))
+    taus = 0.1 + 0.8 * (np.arange(n) + rng.uniform(0.2, 0.8, n)) / n
+    p = d / T
+    m = 1.0 - p.sum()
+    s_k, t_k, flat = [0.0], [0.0], []
+    for tau, pi in zip(taus, p, strict=True):
+        s_k.append(s_k[-1] + (tau - t_k[-1]) * m)
+        t_k.append(tau)
+        flat.append(len(s_k) - 1)
+        s_k.append(s_k[-1] + pi)
+        t_k.append(tau)
+    s_k.append(1.0)
+    t_k.append(1.0)
+    s_k, t_k = np.array(s_k), np.array(t_k)
+
+    def warp(s: float) -> float:
+        j = min(int(np.searchsorted(s_k, s, side="right")) - 1, len(s_k) - 2)
+        if j in flat:
+            return float(t_k[j])
+        x = (s - s_k[j]) / (s_k[j + 1] - s_k[j])
+        return float(t_k[j] + (t_k[j + 1] - t_k[j]) * smoothstep(x))
+
+    holds = [{"tau": float(taus[i]), "s0": float(s_k[k]), "s1": float(s_k[k + 1])}
+             for i, k in enumerate(flat)]
+    return warp, holds
 
 
 @dataclasses.dataclass
@@ -200,36 +257,76 @@ def primitive_components(name: str, axes: dict, amp_m: float, amp_rad: float,
             out += [C("f_dz", "franka", "trans", -EZ, df, 0.25 * amp_m, "tilt"),
                     C("u_dz", "ur", "trans", -EZ, du, 0.25 * amp_m, "tilt")]
         return out
-    if name == "random_mix":
-        out = []
-        for arm in ("franka", "ur"):
-            for j, ax in enumerate(("x", "y", "z")):
-                n = smooth_random(rng, 0.8, 0.25, T)
-                d = np.eye(3)[j]
-                sw = (-1 if arm == "franka" else 1) if ax == "x" else 0  # world x ~ grasp axis
-                if ax == "z":  # down only
-                    f = _norm(lambda t, n=n: hann(t) * (1.0 + np.tanh(1.5 * n(t))))
-                    out.append(C(f"{arm[0]}_{ax}", arm, "trans", -d, f, amp_m, f"{arm}_{ax}"))
-                else:
-                    f = _norm(lambda t, n=n: hann(t) * n(t))
-                    out.append(C(f"{arm[0]}_{ax}", arm, "trans", d, f, amp_m, f"{arm}_{ax}",
-                                 sw))
-            for j, ax in enumerate(("rx", "ry", "rz")):
-                n = smooth_random(rng, 0.8, 0.25, T)
-                f = _norm(lambda t, n=n: hann(t) * n(t))
-                out.append(C(f"{arm[0]}_{ax}_tool", arm, "rot", np.eye(3)[j], f, amp_rad,
-                             f"{arm}_rot"))
+    if name in ("random_mix", "random_mix_holds"):
+        return [c for arm in ("franka", "ur") for c in _random_arm(arm, rng, T, amp_m, amp_rad)]
+    if name in ("franka_sweep", "ur_sweep"):
+        return _random_arm(name.split("_")[0], rng, T, amp_m, amp_rad, rot_per_axis=True)
+    # Gripper rotations lift the belt next to the grasp by more than the crop-top tolerance, so
+    # the rotation families first lower both arms (DROP x amp) and deform inside [0.2, 0.8].
+    drop = [C("f_drop", "franka", "trans", -EZ, plateau(0.2), DROP * amp_m, "drop"),
+            C("u_drop", "ur", "trans", -EZ, plateau(0.2), DROP * amp_m, "drop")]
+    if name == "twist":  # opposite yaw + opposite roll: twist about the belt's long axis
+        o2 = window(osc(2), 0.2, 0.8)
+        return drop + [C("f_rz_tool", "franka", "rot", EZ, o2, amp_rad, "rot"),
+                       C("u_rz_tool", "ur", "rot", -EZ, o2, amp_rad, "rot"),
+                       C("f_rx_tool", "franka", "rot", EX, o2, 0.5 * amp_rad, "rot"),
+                       C("u_rx_tool", "ur", "rot", -EX, o2, 0.5 * amp_rad, "rot")]
+    if name in ("bend", "bend_lift"):  # grasps together (slack) + same-sense pitch: fold
+        w1 = window(b1, 0.2, 0.8)
+        out = drop + [C("f_grasp", "franka", "trans", G, w1, 0.6 * amp_m, "grasp", -1),
+                      C("u_grasp", "ur", "trans", -G, w1, 0.6 * amp_m, "grasp", -1),
+                      C("f_ry_tool", "franka", "rot", EY, w1, amp_rad, "rot"),
+                      C("u_ry_tool", "ur", "rot", EY, w1, amp_rad, "rot")]
+        if name == "bend_lift":
+            out.append(C("f_lift", "franka", "trans", EZ, w1, 0.4 * amp_m, "lift"))
         return out
+    if name == "stretch_cycle":
+        o3 = osc(3)
+        return [C("f_grasp", "franka", "trans", -G, o3, amp_m, "grasp", 1),
+                C("u_grasp", "ur", "trans", G, o3, amp_m, "grasp", 1),
+                C("f_long", "franka", "trans", L, o1, 0.3 * amp_m, "shear"),
+                C("u_long", "ur", "trans", -L, o1, 0.3 * amp_m, "shear")]
+    if name == "wrist_tilt":
+        o2 = window(osc(2), 0.2, 0.8)
+        o2q = window(osc(2, 0.125), 0.2, 0.8)  # quarter period of osc(2)
+        return drop + [C(f"{arm[0]}_{ax}_tool", arm, "rot", d, f, amp_rad, arm)
+                       for arm in ("franka", "ur") for ax, d, f in (("rx", EX, o2),
+                                                                     ("ry", EY, o2q))]
+    if name == "hold_only":
+        return []
     raise KeyError(name)
+
+
+def _random_arm(arm: str, rng: np.random.Generator, T: float, amp_m: float, amp_rad: float,
+                rot_per_axis: bool = False) -> list[Component]:
+    """One arm's 6 smooth random shapes (world xyz, z down only; tool rx/ry/rz)."""
+    C = Component
+    out = []
+    for j, ax in enumerate(("x", "y", "z")):
+        n = smooth_random(rng, 0.8, 0.25, T)
+        d = np.eye(3)[j]
+        sw = (-1 if arm == "franka" else 1) if ax == "x" else 0  # world x ~ grasp axis
+        if ax == "z":  # down only
+            f = _norm(lambda t, n=n: hann(t) * (1.0 + np.tanh(1.5 * n(t))))
+            out.append(C(f"{arm[0]}_{ax}", arm, "trans", -d, f, amp_m, f"{arm}_{ax}"))
+        else:
+            f = _norm(lambda t, n=n: hann(t) * n(t))
+            out.append(C(f"{arm[0]}_{ax}", arm, "trans", d, f, amp_m, f"{arm}_{ax}", sw))
+    for j, ax in enumerate(("rx", "ry", "rz")):
+        n = smooth_random(rng, 0.8, 0.25, T)
+        f = _norm(lambda t, n=n: hann(t) * n(t))
+        out.append(C(f"{arm[0]}_{ax}_tool", arm, "rot", np.eye(3)[j], f, amp_rad,
+                     f"{arm}_{ax}" if rot_per_axis else f"{arm}_rot"))
+    return out
 
 
 class Motion:
     """Scripted poses of both arms: base poses + the components' offsets at time ``t``."""
 
     def __init__(self, comps: list[Component], X_f0: np.ndarray, X_u0: np.ndarray,
-                 t_start: float, T: float, lobe: float = 1.0) -> None:
+                 t_start: float, T: float, lobe: float = 1.0, warp=None) -> None:
         self.comps, self.X0 = comps, {"franka": X_f0, "ur": X_u0}
-        self.t_start, self.T, self.lobe = t_start, T, lobe
+        self.t_start, self.T, self.lobe, self.warp = t_start, T, lobe, warp
 
     def value(self, c: Component, tau: float) -> float:
         """``c``'s shape at ``tau``, its stretching lobe scaled by ``lobe``."""
@@ -242,6 +339,8 @@ class Motion:
         out = np.zeros(6)
         if tau <= 0.0 or tau >= 1.0:
             return out
+        if self.warp is not None:
+            tau = self.warp(tau)
         for c in self.comps:
             if c.arm != arm:
                 continue
@@ -375,13 +474,19 @@ def crop_margins(pcd_belt: np.ndarray) -> dict:
 # ---- one episode --------------------------------------------------------------------------
 
 def run_primitive(sim, ctx, i: int, name: str, amp_mul: float, gauge: RodGauge, lb, ub,
-                  rng_seed: int, lobe: float = 1.0) -> dict:
+                  rng_seed: int, lobe: float = 1.0, rep: int | None = None,
+                  motion_s: float | None = None, extra: dict | None = None,
+                  post_mul: float = 1.0) -> dict:
+    """``rep``: adds the repeat to the RNG key; ``motion_s``: overrides ``--motion-s``;
+    ``extra``: episode fields recorded in the row and the plan; ``post_mul``: scales the capped
+    plan (a retry shrinks the motion even where the cap, not the amplitude, binds)."""
     args, n, params = ctx.args, ctx.n, ctx.params
     t0 = time.perf_counter()
     dt_s = n * lcs.SIM_DT_S
     fname = f"episode_{i:04d}"
     label = f"{fname}-{name}"
-    row = {"file": f"{fname}.npz", "primitive": name, "amp_mul": amp_mul, "stretch_lobe": lobe}
+    row = {"file": f"{fname}.npz", "primitive": name, "amp_mul": amp_mul, "stretch_lobe": lobe,
+           **(extra or {})}
     sim.restore(ctx.snap, settle_steps=0)
     grasp = sim.settle(round(args.osc_settle_s / sim.frame_dt))
     if grasp.held() != (True, True):
@@ -404,17 +509,25 @@ def run_primitive(sim, ctx, i: int, name: str, amp_mul: float, gauge: RodGauge, 
     X_f0 = pose_mat(pos[0], quat[0])
     X_u0 = UrTracking.fk(q_ur)
     axes = axes_from_start(belt0, X_f0, X_u0)
-    rng = np.random.default_rng([rng_seed, PRIMITIVES.index(name)])
+    key = [rng_seed, PRIMITIVES.index(name)] + ([] if rep is None else [rep])
+    rng = np.random.default_rng(key)
     comps = primitive_components(name, axes, args.amp_mm * 1e-3 * amp_mul,
                                  math.radians(args.amp_deg) * amp_mul, rng, RANDOM_T_REF)
-    auto = args.motion_s <= 0.0
-    motion = Motion(comps, X_f0, X_u0, t_start, RANDOM_T_REF if auto else args.motion_s, lobe)
+    T_req = args.motion_s if motion_s is None else motion_s
+    auto = T_req <= 0.0
+    warp, holds = hold_warp(rng, RANDOM_T_REF if auto else T_req) \
+        if name == "random_mix_holds" else (None, None)
+    motion = Motion(comps, X_f0, X_u0, t_start, RANDOM_T_REF if auto else T_req, lobe, warp)
     if auto:
         plan_duration(motion, dt_s, lb, ub, args.bound_frac, args.motion_s_min,
                       args.motion_s_max)
     motion_s = motion.T
     motion_n = round(motion_s / dt_s)
+    if extra is not None:
+        row["motion_s"] = motion_s
     scale = plan_scales(motion, dt_s, motion_n + 1, lb, ub, args.bound_frac)
+    if post_mul != 1.0:
+        scale = {g: v * post_mul for g, v in scale.items()}
     jaws = (byte0,) if byte0 is not None else (None,)
     min_c = args.min_clearance * 1e-3
     for _ in range(8):  # board guard at plan time: shrink until the 2F-85 keeps min_c
@@ -429,7 +542,8 @@ def run_primitive(sim, ctx, i: int, name: str, amp_mul: float, gauge: RodGauge, 
     u_plan = planned_actions(motion, dt_s, scale, motion_n + 1)
     eff = {c.name: c.amp * scale.get(c.group, 1.0) * (1e3 if c.kind == "trans"
                                                       else 180.0 / math.pi) for c in comps}
-    logger.info(f"[PRIM] {i} {name} x{amp_mul:g}: scales {({g: round(s, 3) for g, s in scale.items()})}"
+    logger.info(f"[PRIM] {i} {name} x{amp_mul:g}: scales "
+                f"{({g: round(s, 3) for g, s in scale.items()})}"
                 f", effective amp (mm|deg) {({k: round(v, 2) for k, v in eff.items()})}, plan "
                 f"bound ratio max {bound_ratio(u_plan, lb, ub).max():.3f}, plan 2F-85 clearance "
                 f"{clear * 1e3:.1f} mm, franka tip floor {tip_floor * 1e3:.1f} mm")
@@ -526,7 +640,8 @@ def run_primitive(sim, ctx, i: int, name: str, amp_mul: float, gauge: RodGauge, 
                     break
                 near = [bool(np.any((np.linalg.norm(pb[:, :2] - pc[:2], axis=1) < r)
                                     & (pb[:, 2] < pc[2] + h)))
-                        for pc, (r, h) in zip(pulleys, PULLEY_KEEPOUT, strict=True)]
+                        for pc, (r, h) in zip(pulleys, PULLEY_KEEPOUT, strict=True)
+                        if not getattr(args, "no_pulley_keepout", False)]
                 if any(near):
                     fail = f"belt near a pulley ({near}) at k {k}"
                     break
@@ -595,6 +710,11 @@ def run_primitive(sim, ctx, i: int, name: str, amp_mul: float, gauge: RodGauge, 
             motion, scale), "action_ood": args.bound_frac > 1.0, "pre_hold_s": args.pre_hold_s,
         "post_hold_s": args.post_hold_s, "bound_frac": args.bound_frac, "amp_mul": amp_mul,
         "plan_min_2f85_clearance_mm": clear * 1e3, "plan_franka_tip_floor_mm": tip_floor * 1e3}
+    if holds is not None:  # plateau [t0, t1] s after the motion start: u == 0 inside
+        plan_meta["holds"] = [{**h, "t0_s": h["s0"] * motion_s, "t1_s": h["s1"] * motion_s}
+                              for h in holds]
+    if extra:
+        plan_meta.update(extra)
     extras_meta = {
         "phase_labels": phase_labels, "intent": name, "outcome": label_out,
         "perturbation": {"intent": name}, "backend": "osc", "scenario": "motion_primitive",
@@ -656,13 +776,28 @@ def main() -> int:
     p.add_argument("--retries", type=int, default=2, help="halve the amplitude on failure")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--deploy", type=Path, default=DEPLOY)
-    p.add_argument("--start-state", type=Path,
-                   default=sim_snapshot.DEFAULT_START_STATE_DIR / "pre_place_1_osc.npz")
+    p.add_argument("--start-state", type=Path, default=None,
+                   help="default: pre_place_1_osc.npz")
     p.add_argument("--min-clearance", type=float, default=col.clr.DEFAULT_MIN_CLEARANCE_MM)
     p.add_argument("--osc-settle-s", type=float, default=0.5)
     p.add_argument("--osc-timeout-s", type=float, default=5.0)
     p.add_argument("--record", action="store_true")
     p.add_argument("--no-pcd", action="store_true")
+    p.add_argument("--step-cap", default=None, metavar="F_MM,F_MRAD,U_MM,U_MRAD",
+                   help="symmetric per-step caps per arm replacing --deploy's u_lb/u_ub")
+    p.add_argument("--repeats", type=int, default=1,
+                   help="episodes per primitive; > 1 adds the repeat to the RNG key")
+    p.add_argument("--amp-range", default=None, metavar="LO,HI",
+                   help="per-episode amplitude multiplier ~ U[LO, HI]")
+    p.add_argument("--motion-s-range", default=None, metavar="LO,HI",
+                   help="per-episode motion duration ~ U[LO, HI] (not with --motion-s <= 0)")
+    p.add_argument("--motion-s-mul", default=None, metavar="NAME=X[,NAME=X]",
+                   help="per-family multiplier on the --motion-s-range draw")
+    p.add_argument("--start-states", type=Path, default=None,
+                   help="variant-set dir (index.json); episodes round-robin over --variants")
+    p.add_argument("--variants", default=None, help="comma list of --start-states ids")
+    p.add_argument("--no-pulley-keepout", action="store_true",
+                   help="drop the live belt-near-pulley check")
     args = p.parse_args()
     col.configure_logging()
     check_private_url(args.lcm_url)
@@ -670,14 +805,56 @@ def main() -> int:
     bad = [s for s in names if s not in PRIMITIVES]
     if bad:
         p.error(f"unknown primitives {bad}")
+
+    def pair(text, flag):
+        v = [float(x) for x in text.split(",")]
+        if len(v) != 2 or v[0] > v[1] or v[0] <= 0.0:
+            p.error(f"{flag} needs LO,HI with 0 < LO <= HI")
+        return v
+
+    amp_range = pair(args.amp_range, "--amp-range") if args.amp_range else None
+    t_range = pair(args.motion_s_range, "--motion-s-range") if args.motion_s_range else None
+    if t_range and args.motion_s <= 0.0:
+        p.error("--motion-s-range excludes --motion-s <= 0")
+    t_mul = {}
+    for item in (args.motion_s_mul.split(",") if args.motion_s_mul else []):
+        k, _, v = item.partition("=")
+        if k not in names or not v or float(v) <= 0.0:
+            p.error(f"--motion-s-mul: bad item {item!r} (NAME in --primitives, X > 0)")
+        t_mul[k] = float(v)
+    if t_mul and not t_range:
+        p.error("--motion-s-mul needs --motion-s-range")
+    if args.repeats < 1:
+        p.error("--repeats >= 1")
+    if args.variants and args.start_states is None:
+        p.error("--variants needs --start-states")
+    if args.start_states is not None and args.start_state is not None:
+        p.error("--start-states excludes --start-state")
+    if args.start_state is None:
+        args.start_state = sim_snapshot.DEFAULT_START_STATE_DIR / "pre_place_1_osc.npz"
     with np.load(args.deploy, allow_pickle=True) as d:
         lb, ub = d["u_lb"].astype(np.float64), d["u_ub"].astype(np.float64)
+    step_cap = None
+    if args.step_cap:
+        v = [float(x) for x in args.step_cap.split(",")]
+        if len(v) != 4 or min(v) <= 0.0:
+            p.error("--step-cap needs 4 positive values F_MM,F_MRAD,U_MM,U_MRAD")
+        step_cap = dict(zip(("franka_mm", "franka_mrad", "ur_mm", "ur_mrad"), v, strict=True))
+        f_mm, f_mrad, u_mm, u_mrad = (x * 1e-3 for x in v)
+        ub = np.array([f_mm] * 3 + [u_mm] * 3 + [f_mrad] * 3 + [u_mrad] * 3)  # action_vector
+        lb = -ub
+    set_states, set_meta = [], None
+    if args.start_states is not None:
+        states, set_meta = col.load_start_set(args.start_states, args.variants)
+        set_states = [(vid, f, sim_snapshot.load(f)) for vid, f in states]
+        args.start_state = set_states[0][1]
+    new_mode = any(x for x in (step_cap, amp_range, t_range, set_states, args.repeats > 1))
     out = args.out or OUT_ROOT / time.strftime("%Y%m%d-%H%M%S")
     out.mkdir(parents=True, exist_ok=True)
     args.action_definition = "cmd_delta"
     n = col.sample_steps(lcs.SAMPLE_PERIOD_S)
     nominal = load_pre_mpc_segment(MAGNA_PARAMS_SIM_YAML, first=col.FIRST, last=col.LAST)
-    snap = sim_snapshot.load(args.start_state)
+    snap = set_states[0][2] if set_states else sim_snapshot.load(args.start_state)
     index = {"args": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
              "git": git_info(), "kind": "motion_primitives", "backend": "osc",
              "start_state": {"path": str(args.start_state),
@@ -686,6 +863,11 @@ def main() -> int:
              "action_definition": "cmd_delta", "sample_period_s": n * lcs.SIM_DT_S,
              "sample_steps": n, "belt_sampling": lcs.BELT_SAMPLING,
              "crop_box": {"lo": CROP_LO.tolist(), "hi": CROP_HI.tolist()}, "episodes": []}
+    if set_meta is not None:
+        index["start_state"] = {**set_meta, "states": [
+            {"id": v, "file": str(f), "sha256": sha256_file(f)} for v, f, _ in set_states]}
+    if step_cap is not None:
+        index["step_cap"] = step_cap
     index_path = out / "index.json"
     if args.append and index_path.exists():
         old = json.loads(index_path.read_text())
@@ -713,17 +895,38 @@ def main() -> int:
                              params=CommanderParams(), x_tool0=x_tool0_tracking())
         gauge = RodGauge(sim)
         i = sum(r["status"] == "ok" for r in index["episodes"])
-        for name in names:
+        plan = [(nm, r) for nm in names for r in range(args.repeats)]
+        for slot, (name, rep) in enumerate(plan):
+            ep_rng = np.random.default_rng([args.seed, PRIMITIVES.index(name), rep, 1])
+            drawn = float(ep_rng.uniform(*amp_range)) if amp_range else 1.0
+            T_ep = None
+            if t_range:
+                T_ep = ep_rng.uniform(*t_range) * t_mul.get(name, 1.0)
+                T_ep = n * lcs.SIM_DT_S * round(T_ep / (n * lcs.SIM_DT_S))
+            extra = None
+            if new_mode:
+                extra = {"rep": rep, "amp_mul_drawn": drawn if amp_range else None,
+                         "motion_s_drawn": T_ep, "start_variant": None, "step_cap": step_cap}
+                if name in t_mul:
+                    extra["motion_s_mul"] = t_mul[name]
+            if set_states:
+                vid, ctx.start_state, ctx.snap = set_states[slot % len(set_states)]
+                extra["start_variant"] = vid
             mul, lobe = 1.0, 1.0
             for attempt in range(args.retries + 1):
-                row = run_primitive(sim, ctx, i, name, mul, gauge, lb, ub, args.seed, lobe)
+                if extra is None:
+                    row = run_primitive(sim, ctx, i, name, mul, gauge, lb, ub, args.seed, lobe)
+                else:
+                    row = run_primitive(sim, ctx, i, name, drawn, gauge, lb, ub, args.seed, lobe,
+                                        rep if args.repeats > 1 else None, T_ep,
+                                        {**extra, "retry_mul": mul}, post_mul=mul)
                 row["attempt"] = attempt
                 index["episodes"].append(row)
                 write_json(index_path, index)
                 if row["status"] == "ok":
                     i += 1
                     break
-                stretchy = name in ("opposite_sideways", "franka_only", "ur_only", "random_mix")
+                stretchy = name in STRETCHY
                 if args.retry_policy == "halve":
                     mul *= 0.5
                 elif "stretch" in row.get("reason", "") and stretchy and lobe > 0.2:

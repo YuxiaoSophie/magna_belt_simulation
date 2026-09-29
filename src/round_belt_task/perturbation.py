@@ -91,12 +91,18 @@ class Perturbation:
     ur_tilt_deg: float = 0.0
     franka_dpos_m: np.ndarray = field(default_factory=lambda: np.zeros(3))
     franka_tilt_deg: float = 0.0
+    ur_yaw_deg: float = 0.0  # about world z, after the tilt
+    franka_yaw_deg: float = 0.0
 
     def to_dict(self) -> dict:
-        return {"intent": self.intent, "ur_dpos_m": [float(v) for v in self.ur_dpos_m],
-                "ur_tilt_deg": float(self.ur_tilt_deg),
-                "franka_dpos_m": [float(v) for v in self.franka_dpos_m],
-                "franka_tilt_deg": float(self.franka_tilt_deg)}
+        out = {"intent": self.intent, "ur_dpos_m": [float(v) for v in self.ur_dpos_m],
+               "ur_tilt_deg": float(self.ur_tilt_deg),
+               "franka_dpos_m": [float(v) for v in self.franka_dpos_m],
+               "franka_tilt_deg": float(self.franka_tilt_deg)}
+        if self.ur_yaw_deg or self.franka_yaw_deg:  # absent when 0: older rows unchanged
+            out.update(ur_yaw_deg=float(self.ur_yaw_deg),
+                       franka_yaw_deg=float(self.franka_yaw_deg))
+        return out
 
 
 def ranges_to_dict(ranges: dict[str, ClassRanges] = DEFAULT_RANGES) -> dict:
@@ -144,8 +150,10 @@ def belt_tangent(waypoints: list[Waypoint]) -> np.ndarray:
     return d / n
 
 
-def _moved(pos, quat_xyzw, dpos, tilt_deg: float, tangent: np.ndarray):
+def _moved(pos, quat_xyzw, dpos, tilt_deg: float, tangent: np.ndarray, yaw_deg: float = 0.0):
     rot = rot_axis_angle(tangent, math.radians(tilt_deg)) @ quat_xyzw_to_mat3(quat_xyzw)
+    if yaw_deg:
+        rot = rot_axis_angle((0.0, 0.0, 1.0), math.radians(yaw_deg)) @ rot
     return np.asarray(pos, float) + np.asarray(dpos, float), mat3_to_quat_xyzw(rot)
 
 
@@ -157,10 +165,11 @@ def apply(waypoints: list[Waypoint], p: Perturbation, tangent: np.ndarray) -> li
             out.append(w)
             continue
         f_pos, f_quat = _moved(w.franka_pos, w.franka_quat_xyzw, p.franka_dpos_m,
-                               p.franka_tilt_deg, tangent)
+                               p.franka_tilt_deg, tangent, p.franka_yaw_deg)
         u_pos, u_quat = w.ur_pos, w.ur_quat_xyzw
         if u_pos is not None:
-            u_pos, u_quat = _moved(u_pos, u_quat, p.ur_dpos_m, p.ur_tilt_deg, tangent)
+            u_pos, u_quat = _moved(u_pos, u_quat, p.ur_dpos_m, p.ur_tilt_deg, tangent,
+                                   p.ur_yaw_deg)
         out.append(replace(w, franka_pos=f_pos, franka_quat_xyzw=f_quat, ur_pos=u_pos,
                            ur_quat_xyzw=u_quat))
     return out

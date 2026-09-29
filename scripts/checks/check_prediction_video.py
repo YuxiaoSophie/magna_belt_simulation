@@ -183,8 +183,11 @@ def main() -> int:
     p.add_argument("--port", type=int, default=19391, help="scratch viser port")
     p.add_argument("--scan", type=Path, nargs="*", default=None,
                    help="check these rendered videos instead of rendering a clip")
+    p.add_argument("--deploy", type=Path, default=pv.DEPLOY,
+                   help="model the scanned videos were rendered with (default: v2)")
+    p.add_argument("--decoder", type=Path, default=pv.DECODER)
     args = p.parse_args()
-    model = pv.OneStepModel()
+    model = pv.OneStepModel(args.deploy, args.decoder)
     results: list[bool] = []
     if args.scan:
         for video in args.scan:

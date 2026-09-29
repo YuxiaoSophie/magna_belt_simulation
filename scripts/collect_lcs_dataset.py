@@ -55,7 +55,15 @@ from loguru import logger
 
 from round_belt_task import clearance as clr
 from round_belt_task import perturbation as pert
-from round_belt_task.arm_kinematics import FrankaTip, UrTracking, ik, pose7_from_mat
+from round_belt_task.arm_kinematics import (
+    FrankaTip,
+    UrTracking,
+    ik,
+    mat3_to_quat_xyzw,
+    pose7_from_mat,
+    quat_xyzw_to_mat3,
+    rot_axis_angle,
+)
 from round_belt_task.commander import (
     EXCITE_MODES,
     EXCITE_RAMP_S,
@@ -92,8 +100,11 @@ from round_belt_task.outcome import (
     DEFAULT_THRESHOLDS,
     LABELS,
     OutcomeThresholds,
+    classify,
     classify_episode,
+    frame_metrics,
     slant_episode,
+    slant_metrics,
 )
 from round_belt_task.waypoints import MAGNA_PARAMS_SIM_YAML, load_pre_mpc_segment
 from task_common import lcs_dataset as lcs
@@ -123,6 +134,21 @@ EXCITE_UR_DEFAULTS = (2.0, 1.0)  # ou only: per-axis std (mm, deg)
 UR_SCALE_BISECT = 12
 PRE_HOLD_S = 1.5
 PREHOLD_PHASE = "prehold"
+# Opt-in approach / place_3 / tail modes (flags off = the paths above, unchanged).
+APPROACH_KEYS = ("yaw_deg", "elev_mm", "offset_mm", "tilt_deg")
+PLACE3_MODES = ("intents", "continuous", "engaged_band", "fixed")
+PLACE3_ARM_KEYS = ("depth_mm", "normal_mm", "tangent_mm", "roll_deg", "yaw_deg")
+WIDE_BOX = {"depth_mm": (-6.0, 20.0), "normal_mm": (-10.0, 10.0), "tangent_mm": (-10.0, 10.0),
+            "roll_deg": (-10.0, 10.0), "yaw_deg": (-15.0, 15.0)}
+BAND_YAW_DEG = 2.0
+FRANKA_FLOOR_MM = 12.0
+IN_CONTACT_MIN_NEIGHBOUR = 3
+APPROACH_RNG, PLACE3_RNG, TAIL_RNG = 13, 14, 15
+NEW_ARG_DEFAULTS = {"approach": None, "approach_range": None, "place3_mode": "intents",
+                    "engaged_share": 0.40, "place3_box": None, "place3_box_ur": None,
+                    "place3_values": None,
+                    "tail": None, "tail_families": None, "tail_gentle": "auto",
+                    "tail_cap": "3,25,3,25", "tail_stretch_cap_pct": 2.0, "row_tag": None}
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -216,6 +242,37 @@ def create_parser() -> argparse.ArgumentParser:
                    help="print the sampled perturbation table and exit")
     p.add_argument("--thresholds", nargs="*", default=[], metavar="KEY=VALUE",
                    help="OutcomeThresholds overrides")
+    d = NEW_ARG_DEFAULTS
+    p.add_argument("--approach", default=d["approach"], metavar="YAW,ELEV,OFFSET,TILT|start",
+                   help="osc: rigid approach transform of pre_place_2/place_3 (deg, mm, mm, deg) "
+                        "about the large pulley axis; 'start' = each start state's index entry")
+    p.add_argument("--approach-range", default=d["approach_range"],
+                   metavar="YLO:YHI,ELO:EHI,OLO:OHI,TLO:THI",
+                   help="osc: per-episode approach ~ U[range] (RNG [seed, i, 13])")
+    p.add_argument("--place3-mode", choices=PLACE3_MODES, default=d["place3_mode"],
+                   help="intents: --intents (today); continuous: engaged band with "
+                        "--engaged-share, else the wide box per arm; engaged_band; fixed: "
+                        "--place3-values")
+    p.add_argument("--engaged-share", type=float, default=d["engaged_share"])
+    p.add_argument("--place3-box", default=d["place3_box"],
+                   metavar="DLO:DHI,NORMAL,TANGENT,ROLL,YAW",
+                   help="wide box (mm, mm, mm, deg, deg; symmetric except depth)")
+    p.add_argument("--place3-box-ur", default=d["place3_box_ur"],
+                   metavar="DLO:DHI,NORMAL,TANGENT,ROLL,YAW",
+                   help="UR wide box (default --place3-box)")
+    p.add_argument("--place3-values", default=d["place3_values"], metavar="F:U[;F:U]",
+                   help="fixed mode: per arm depth,normal,tangent,roll,yaw; episode i uses "
+                        "entry i %% n")
+    p.add_argument("--tail", default=d["tail"], metavar="MIN_S,MAX_S",
+                   help="osc: post-place_3 scripted contact tail of U[MIN_S, MAX_S] + 0.5 s hold")
+    p.add_argument("--tail-families", default=d["tail_families"],
+                   help="comma list of tail families to draw from (default all / gentle set)")
+    p.add_argument("--tail-gentle", choices=("auto", "on", "off"), default=d["tail_gentle"],
+                   help="auto: engaged-band episodes get gentle tails")
+    p.add_argument("--tail-cap", default=d["tail_cap"], metavar="F_MM,F_MRAD,U_MM,U_MRAD",
+                   help="per-step cmd_delta caps of the tail")
+    p.add_argument("--tail-stretch-cap-pct", type=float, default=d["tail_stretch_cap_pct"])
+    p.add_argument("--row-tag", default=d["row_tag"], help="recorded as row['tag']")
     return p
 
 
@@ -286,6 +343,223 @@ def override_waypoints(waypoints: list, opts: dict) -> tuple[list, dict | None]:
             w = dataclasses.replace(w, ur_gripper_byte=None)
         out.append(w)
     return out, (stripped if hold else None)
+
+
+def _floats(text: str, n: int, flag: str) -> list[float]:
+    v = [float(x) for x in str(text).split(",")]
+    if len(v) != n:
+        raise ValueError(f"{flag} {text!r}: want {n} comma-separated numbers")
+    return v
+
+
+def _spans(text: str, flag: str) -> list[tuple[float, float]]:
+    out = []
+    for part in str(text).split(","):
+        lo, _, hi = part.partition(":")
+        lo, hi = float(lo), float(hi if hi else lo)
+        if hi < lo:
+            raise ValueError(f"{flag} {text!r}: {part!r} has HI < LO")
+        out.append((lo, hi))
+    return out
+
+
+def new_options(args) -> dict:
+    """The opt-in approach / place_3 / tail options; ``{}`` when all are off."""
+    out = {}
+    approach = getattr(args, "approach", None)
+    a_range = getattr(args, "approach_range", None)
+    if approach is not None and a_range is not None:
+        raise ValueError("--approach excludes --approach-range")
+    if approach == "start":
+        out["approach_cfg"] = {"source": "start_state"}
+    elif approach is not None:
+        out["approach_cfg"] = {"source": "fixed", **dict(zip(
+            APPROACH_KEYS, _floats(approach, 4, "--approach"), strict=True))}
+    elif a_range is not None:
+        spans = _spans(a_range, "--approach-range")
+        if len(spans) != 4:
+            raise ValueError("--approach-range wants 4 LO:HI spans")
+        out["approach_cfg"] = {"source": "range", "range": dict(zip(APPROACH_KEYS, spans))}
+    mode = getattr(args, "place3_mode", "intents")
+    if mode != "intents":
+        box = parse_box(getattr(args, "place3_box", None), dict(WIDE_BOX), "--place3-box")
+        box_ur = parse_box(getattr(args, "place3_box_ur", None), dict(box), "--place3-box-ur")
+        cfg = {"mode": mode, "engaged_share": float(args.engaged_share),
+               "wide_box": {k: list(v) for k, v in box.items()},
+               "band": {"ranges": "OSC_RANGES['engaged']", "yaw_deg": BAND_YAW_DEG,
+                        "depth": "UR dz on pre_place_2 and place_3 (as the engaged intent)"},
+               "franka_floor_mm": FRANKA_FLOOR_MM, "intents_ignored": True}
+        if box_ur != box:
+            cfg["wide_box_ur"] = {k: list(v) for k, v in box_ur.items()}
+        if mode == "fixed":
+            if not getattr(args, "place3_values", None):
+                raise ValueError("--place3-mode fixed needs --place3-values")
+            cfg["values"] = [parse_place3_values(v) for v in args.place3_values.split(";")]
+        out["place3_cfg"] = cfg
+    elif getattr(args, "place3_values", None):
+        raise ValueError("--place3-values needs --place3-mode fixed")
+    if getattr(args, "tail", None) is not None:
+        lo, hi = _floats(args.tail, 2, "--tail")
+        if not 0.0 < lo <= hi:
+            raise ValueError("--tail wants 0 < MIN_S <= MAX_S")
+        fams = _csv(args.tail_families) if getattr(args, "tail_families", None) else None
+        out["tail_cfg"] = {"min_s": lo, "max_s": hi, "families": fams,
+                           "gentle": args.tail_gentle,
+                           "cap": _floats(args.tail_cap, 4, "--tail-cap"),
+                           "stretch_cap_pct": float(args.tail_stretch_cap_pct)}
+    if getattr(args, "row_tag", None):
+        out["row_tag"] = args.row_tag
+    return out
+
+
+def parse_box(text: str | None, box: dict, flag: str) -> dict:
+    """``DLO:DHI,NORMAL,TANGENT,ROLL,YAW`` over ``box``; a single value X means +-X."""
+    if not text:
+        return box
+    spans = _spans(text, flag)
+    if len(spans) != 5:
+        raise ValueError(f"{flag} wants DLO:DHI,NORMAL,TANGENT,ROLL,YAW")
+    box = dict(box, depth_mm=spans[0])
+    for key, (lo, hi) in zip(PLACE3_ARM_KEYS[1:], spans[1:], strict=True):
+        box[key] = (-hi, hi) if lo == hi else (lo, hi)
+    return box
+
+
+def parse_place3_values(text: str) -> dict:
+    """``"d,n,t,roll,yaw:d,n,t,roll,yaw"`` (Franka : UR) -> per-arm dict."""
+    parts = str(text).split(":")
+    if len(parts) != 2:
+        raise ValueError(f"--place3-values {text!r}: want FRANKA:UR")
+    return {arm: dict(zip(PLACE3_ARM_KEYS, _floats(v, 5, "--place3-values"), strict=True))
+            for arm, v in zip(("franka", "ur"), parts, strict=True)}
+
+
+def pulley_frame(sim) -> dict:
+    """Large pulley origin + axis (body +z) from the current state."""
+    q = sim.state_0.body_q.numpy()[int(sim.info.pulley_bodies[1])].astype(np.float64)
+    R = quat_xyzw_to_mat3(q[3:7])
+    return {"centre": q[:3].copy(), "axis": R[:, 2] / np.linalg.norm(R[:, 2])}
+
+
+def approach_frame(a: dict, pulley: dict, ref_f: np.ndarray, ref_u: np.ndarray) -> dict:
+    """Rotation about the pulley axis, the rotated tangent / horizontal normal, the tilt."""
+    R = rot_axis_angle(pulley["axis"], math.radians(a["yaw_deg"]))
+    t = R @ (np.asarray(ref_u, float) - np.asarray(ref_f, float))
+    t[2] = 0.0
+    t /= np.linalg.norm(t)
+    n = np.cross([0.0, 0.0, 1.0], t)
+    return {"R": R, "tangent": t, "normal": n, "R_tilt": rot_axis_angle(t, math.radians(
+        a["tilt_deg"])), "centre": np.asarray(pulley["centre"], float)}
+
+
+def approach_pose(X: np.ndarray, a: dict, fr: dict, elev: bool) -> np.ndarray:
+    """``X`` (4x4) through the approach transform; ``elev`` adds ``elev_mm`` to z."""
+    out = np.eye(4)
+    c = fr["centre"]
+    out[:3, 3] = (c + fr["R"] @ (X[:3, 3] - c) + fr["normal"] * a["offset_mm"] * 1e-3
+                  + np.array([0.0, 0.0, a["elev_mm"] * 1e-3 if elev else 0.0]))
+    out[:3, :3] = fr["R_tilt"] @ fr["R"] @ X[:3, :3]
+    return out
+
+
+def approach_waypoints(waypoints: list, a: dict | None, pulley: dict | None) -> list:
+    """Both arms' ``pre_place_1/2`` / ``place_3`` moved rigidly; ``elev`` on all but place_3."""
+    if a is None:
+        return waypoints
+    ref = next(w for w in waypoints if w.label == pert.TANGENT_LABEL)
+    fr = approach_frame(a, pulley, ref.franka_pos, ref.ur_pos)
+    out = []
+    for w in waypoints:
+        if w.label not in (FIRST, *pert.PERTURBED_LABELS):
+            out.append(w)
+            continue
+        elev = w.label != LAST
+        Xf = approach_pose(w.franka_mat(), a, fr, elev)
+        kw = {"franka_pos": Xf[:3, 3], "franka_quat_xyzw": mat3_to_quat_xyzw(Xf[:3, :3])}
+        if w.ur_pos is not None:
+            Xu = approach_pose(w.ur_mat(), a, fr, elev)
+            kw.update(ur_pos=Xu[:3, 3], ur_quat_xyzw=mat3_to_quat_xyzw(Xu[:3, :3]))
+        out.append(dataclasses.replace(w, **kw))
+    return out
+
+
+def draw_approach(cfg: dict, seed: int, i: int, start: dict | None) -> dict | None:
+    if cfg is None:
+        return None
+    if cfg["source"] == "fixed":
+        return {k: cfg[k] for k in APPROACH_KEYS} | {"source": "fixed"}
+    if cfg["source"] == "start_state":
+        if start is None:
+            raise ValueError("--approach start: the start state's index row has no 'approach'")
+        return {k: float(start[k]) for k in APPROACH_KEYS} | {"source": "start_state"}
+    rng = np.random.default_rng([seed, i, APPROACH_RNG])
+    return {k: float(rng.uniform(*cfg["range"][k])) for k in APPROACH_KEYS} | {"source": "range"}
+
+
+def draw_place3(cfg: dict, seed: int, i: int, ranges: dict) -> dict:
+    """The episode's place_3 sample: ``{mode, perturbation | per-arm values}`` (world-free)."""
+    rng = np.random.default_rng([seed, i, PLACE3_RNG])
+    mode = cfg["mode"]
+    if mode == "fixed":
+        vals = cfg["values"][i % len(cfg["values"])]
+        return {"mode": "fixed", **{arm: dict(v) for arm, v in vals.items()}}
+    band = mode == "engaged_band" or rng.random() < cfg["engaged_share"]
+    if band:
+        p = pert.sample(rng, "engaged", ranges)
+        yaw = rng.uniform(-BAND_YAW_DEG, BAND_YAW_DEG, 2)
+        p = dataclasses.replace(p, intent="engaged_band", franka_yaw_deg=float(yaw[0]),
+                                ur_yaw_deg=float(yaw[1]))
+        return {"mode": "engaged_band", "perturbation": p.to_dict()}
+    boxes = {"franka": cfg["wide_box"], "ur": cfg.get("wide_box_ur", cfg["wide_box"])}
+    return {"mode": "wide", **{arm: {k: float(rng.uniform(*boxes[arm][k]))
+                                     for k in PLACE3_ARM_KEYS} for arm in ("franka", "ur")}}
+
+
+def place3_perturbation(sample: dict, tangent: np.ndarray
+                        ) -> tuple[pert.Perturbation, dict[str, float]]:
+    """``(Perturbation, place_3-only depth per arm [mm])`` of a :func:`draw_place3` sample."""
+    if sample["mode"] == "engaged_band":
+        d = sample["perturbation"]
+        return pert.Perturbation(
+            intent="engaged_band", ur_dpos_m=np.array(d["ur_dpos_m"]),
+            ur_tilt_deg=d["ur_tilt_deg"], franka_dpos_m=np.array(d["franka_dpos_m"]),
+            franka_tilt_deg=d["franka_tilt_deg"], ur_yaw_deg=d["ur_yaw_deg"],
+            franka_yaw_deg=d["franka_yaw_deg"]), {}
+    t = np.asarray(tangent, float)
+    n = np.cross([0.0, 0.0, 1.0], t)
+
+    def dpos(v):
+        return (v["normal_mm"] * n + v["tangent_mm"] * t) * 1e-3
+
+    f, u = sample["franka"], sample["ur"]
+    p = pert.Perturbation(intent=sample["mode"], ur_dpos_m=dpos(u), ur_tilt_deg=u["roll_deg"],
+                          franka_dpos_m=dpos(f), franka_tilt_deg=f["roll_deg"],
+                          ur_yaw_deg=u["yaw_deg"], franka_yaw_deg=f["yaw_deg"])
+    return p, {"franka": f["depth_mm"], "ur": u["depth_mm"]}
+
+
+def depth_waypoints(waypoints: list, depth_mm: dict) -> list:
+    """``place_3`` z per arm: depth > 0 above the nominal, < 0 pressing past it."""
+    if not depth_mm:
+        return waypoints
+    out = []
+    for w in waypoints:
+        if w.label == LAST:
+            dz = np.array([0.0, 0.0, 1e-3])
+            w = dataclasses.replace(w, franka_pos=np.asarray(w.franka_pos, float)
+                                    + depth_mm["franka"] * dz,
+                                    ur_pos=None if w.ur_pos is None
+                                    else np.asarray(w.ur_pos, float) + depth_mm["ur"] * dz)
+        out.append(w)
+    return out
+
+
+def start_approaches(path: Path | None) -> dict:
+    """``{variant id: approach dict}`` of a start-state set's ``index.json`` (if any)."""
+    if path is None or not (Path(path) / "index.json").is_file():
+        return {}
+    index = json.loads((Path(path) / "index.json").read_text())
+    return {str(r["id"]): r["approach"] for r in index.get("variants", []) if r.get("approach")}
 
 
 def sample_steps(period_s: float) -> int:
@@ -557,10 +831,26 @@ def collect(args: argparse.Namespace, ranges: dict | None = None,
     n = sample_steps(args.sample_period)
     thresholds = parse_thresholds(args.thresholds)
     intents = ["nominal"] if scenario == "nominal" else _csv(args.intents)
-    perts = plan_episodes(args, ranges, scenario)
+    new_opts = new_options(args)
+    if new_opts and backend != "osc":
+        raise ValueError("--approach* / --place3-* / --tail / --row-tag need --backend osc")
+    p3_cfg = new_opts.get("place3_cfg")
+    if p3_cfg is not None:
+        if scenario is not None:
+            raise ValueError("--place3-mode needs no --scenario")
+        logger.info(f"[LCS] --place3-mode {p3_cfg['mode']}: --intents ignored")
+        intents = ["engaged_band", "wide"] if p3_cfg["mode"] == "continuous" else (
+            ["engaged_band"] if p3_cfg["mode"] == "engaged_band" else ["fixed"])
+        perts = [pert.Perturbation(intent="place3") for _ in range(args.episodes)]
+    else:
+        perts = plan_episodes(args, ranges, scenario)
     nominal = load_pre_mpc_segment(args.params, first=FIRST, last=LAST)
     tangent = pert.belt_tangent(nominal)
     if args.dry_run:
+        if p3_cfg is not None:
+            for i in range(args.episodes):
+                print(i, json.dumps(draw_place3(p3_cfg, args.seed, i, ranges)))
+            return {"episodes": []}
         print(perturbation_table(perts))
         return {"episodes": [p.to_dict() for p in perts]}
 
@@ -592,8 +882,12 @@ def collect(args: argparse.Namespace, ranges: dict | None = None,
     opts = hold_options(args, scenario)
     if opts and backend != "osc":
         raise ValueError("--hold-ur-gripper / --nominal-ur-dz-mm need --backend osc")
+    opts.update(new_opts)
+    # New flags at their defaults stay out of index.args (flags-off index unchanged).
+    arg_items = {k: v for k, v in vars(args).items()
+                 if not (k in NEW_ARG_DEFAULTS and v == NEW_ARG_DEFAULTS[k])}
     index = {
-        "args": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
+        "args": {k: (str(v) if isinstance(v, Path) else v) for k, v in arg_items.items()},
         "git": _git(), "backend": backend, "scenario": scenario, "start_state": start_meta,
         "sample_period_s": n * lcs.SIM_DT_S,
         "sample_steps": n, "thresholds": dataclasses.asdict(thresholds),
@@ -642,6 +936,15 @@ def collect(args: argparse.Namespace, ranges: dict | None = None,
                              snap=snap, nominal=nominal, board=board, gripper=gripper,
                              excite=excite, scenario=scenario, osc=osc_info,
                              start_state=start_state, opts=opts)
+            if new_opts:
+                ctx.pulley = pulley_frame(sim)
+                index["pulley_large"] = {k: v.tolist() for k, v in ctx.pulley.items()}
+                index["board_colliders"] = {"plate": clr.BOARD_PLATE_SHAPE,
+                                            "pulleys": len(board.pulleys)}
+                _write_json(index_path, index)
+            if "tail_cfg" in new_opts:
+                ctx.gauge = _rod_gauge(sim)
+        approaches = start_approaches(start_states) if new_opts.get("approach_cfg") else {}
         for i, p in enumerate(perts):
             if ctx is None:
                 row = run_episode(sim, i, p, args, out, n, thresholds, tangent, snap, initial,
@@ -650,8 +953,16 @@ def collect(args: argparse.Namespace, ranges: dict | None = None,
                 variant = None
                 if set_states:
                     variant, ctx.start_state, ctx.snap = set_states[i % len(set_states)]
+                if new_opts:
+                    ctx.ep = plan_new_episode(ctx, new_opts, i, variant, approaches, ranges)
                 try:
                     row = run_osc_episode(sim, ctx, i, p)
+                    if row.get("reason_key") == "tail grasp lost":
+                        logger.warning(f"[LCS] {i:4d} tail grasp lost: retry at amplitude x0.5")
+                        ctx.ep["tail"] = {**ctx.ep["tail"], "amp_mul": 0.5, "retry": 1}
+                        first = row
+                        row = run_osc_episode(sim, ctx, i, p)
+                        row["tail_retry"] = {"first_reason": first.get("reason")}
                 except OscTimeout as exc:
                     _finish_recording(sim, out, f"episode_{i:04d}-{p.intent}", "osc timeout")
                     if not exc.process_alive:
@@ -667,6 +978,8 @@ def collect(args: argparse.Namespace, ranges: dict | None = None,
                            "error": str(exc)}
                 if variant is not None:
                     row["start_variant"] = variant
+                if new_opts.get("row_tag"):
+                    row["tag"] = new_opts["row_tag"]
             index["episodes"].append(row)
             _write_json(index_path, index)
             if row["status"] == "ok":
@@ -866,6 +1179,9 @@ class OscContext:
     opts: dict = dataclasses.field(default_factory=dict)
     params: CommanderParams = dataclasses.field(default_factory=CommanderParams)
     x_tool0: np.ndarray = dataclasses.field(default_factory=x_tool0_tracking)
+    ep: dict = dataclasses.field(default_factory=dict)  # opt-in per-episode plan
+    pulley: dict | None = None
+    gauge: object = None
 
     @property
     def plate_top_z(self) -> float:
@@ -896,6 +1212,7 @@ class OscEpisodeSampler(EpisodeSampler):
                          phase_offset=0, board=ctx.board, gripper=ctx.gripper)
         self.ctx = ctx
         self.phase_index = {label: i for i, label in enumerate(phase_labels)}
+        self.on_frame = None  # opt-in: (k, frame, FrameMetrics, sim) per sampled frame
 
     def sample_tick(self, tick: OscTick) -> None:
         t0 = time.perf_counter()
@@ -936,6 +1253,9 @@ class OscEpisodeSampler(EpisodeSampler):
         self.render_s += time.perf_counter() - t1
         self.sample_s += time.perf_counter() - t0
         self.frames.append(frame)
+        if self.on_frame is not None:
+            fm = frame_metrics(frame["belt"], frame["pulley_raw"], th=ctx.thresholds)
+            self.on_frame(tick.k, frame, fm, sim)
 
 
 def tracking_errors(frames: list[dict]) -> np.ndarray:
@@ -1060,12 +1380,54 @@ def _scenario_targets(sim) -> tuple[list[FrankaTarget], list[UrTarget | None]]:
                                byte=None)]
 
 
-def _guard(sim, ctx: OscContext, p: pert.Perturbation):
-    """Perturbed, clamped waypoints + the path check on straight lines from the measured poses."""
+def _rod_gauge(sim):
+    sys.path.insert(0, str(REPO_ROOT / "scripts" / "lcs"))
+    from make_flat_engaged_state import RodGauge
+
+    return RodGauge(sim)
+
+
+def plan_new_episode(ctx: OscContext, opts: dict, i: int, variant: str | None,
+                     approaches: dict, ranges: dict) -> dict:
+    """Episode ``i``'s approach / place_3 sample / tail request (the opt-in modes)."""
+    seed = ctx.args.seed
+    ep = {"approach": draw_approach(opts.get("approach_cfg"), seed, i, approaches.get(variant))}
+    if opts.get("place3_cfg"):
+        ep["place3"] = draw_place3(opts["place3_cfg"], seed, i, ranges)
+    if opts.get("tail_cfg"):
+        ep["tail"] = {"amp_mul": 1.0, "retry": 0}
+    return ep
+
+
+def franka_floor(waypoints: list, plate_top_z: float) -> tuple[list, float]:
+    """``place_3`` Franka tip raised to plate + FRANKA_FLOOR_MM; ``(waypoints, lift mm)``."""
+    z_min = plate_top_z + FRANKA_FLOOR_MM * 1e-3
+    out, lift = [], 0.0
+    for w in waypoints:
+        if w.label == LAST and w.franka_pos[2] < z_min:
+            lift = z_min - float(w.franka_pos[2])
+            w = dataclasses.replace(w, franka_pos=np.asarray(w.franka_pos, float)
+                                    + np.array([0.0, 0.0, lift]))
+        out.append(w)
+    return out, lift * 1e3
+
+
+def _guard(sim, ctx: OscContext, p: pert.Perturbation, plan: dict | None = None):
+    """Perturbed, clamped waypoints + the path check on straight lines from the measured poses.
+
+    ``plan`` (opt-in modes): ``{nominal, tangent, depth}`` -- the approach-transformed waypoints,
+    their tangent and the place_3-only depths; adds the Franka floor (``clamp.franka_lift_mm``).
+    """
     args = ctx.args
-    nominal, _ = override_waypoints(ctx.nominal, ctx.opts) if ctx.opts else (ctx.nominal, None)
-    waypoints, clamp = clr.clamp_waypoints(nominal, p, ctx.tangent, ctx.board, ctx.gripper,
+    base = ctx.nominal if plan is None else plan["nominal"]
+    nominal, _ = override_waypoints(base, ctx.opts) if ctx.opts else (base, None)
+    tangent = ctx.tangent if plan is None else plan["tangent"]
+    if plan is not None:
+        nominal = depth_waypoints(nominal, plan["depth"])
+    waypoints, clamp = clr.clamp_waypoints(nominal, p, tangent, ctx.board, ctx.gripper,
                                            min_clearance=args.min_clearance * 1e-3)
+    if plan is not None:
+        waypoints, clamp.franka_lift_mm = franka_floor(waypoints, ctx.plate_top_z)
     q_f, q_u = sim.arm_positions()
     meas_f, meas_u = FrankaTip.fk(q_f), UrTracking.fk(q_u)
     franka_mm, ur_byte = sim.gripper_commands()
@@ -1095,13 +1457,29 @@ def _skip(row: dict, i: int, reason: str, key: str) -> dict:
     return {**row, "file": None, "status": "skipped", "reason": reason, "reason_key": key}
 
 
-def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
+def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation,
+                    on_frame=None) -> dict:
+    """``on_frame(k, frame, FrameMetrics, sim)``: opt-in, called at every sampled frame
+    (between control steps)."""
     args, n, params = ctx.args, ctx.n, ctx.params
     t0 = time.perf_counter()
     timing: dict[str, float] = {}
     name = f"episode_{i:04d}"
+    ep, plan, tangent = ctx.ep, None, ctx.tangent
+    if ep:
+        nominal_ep = approach_waypoints(ctx.nominal, ep.get("approach"), ctx.pulley)
+        if ep.get("approach") is not None:
+            tangent = pert.belt_tangent(nominal_ep)
+        depth = {}
+        if ep.get("place3"):
+            p, depth = place3_perturbation(ep["place3"], tangent)
+        plan = {"nominal": nominal_ep, "tangent": tangent, "depth": depth}
     row = {"file": f"{name}.npz", "intent": p.intent, "perturbation": p.to_dict(),
            "backend": "osc", "scenario": ctx.scenario, "excite": bool(ctx.excite["on"])}
+    if plan is not None:
+        row.update(approach=ep.get("approach"), tangent=tangent.tolist(),
+                   place3_sample=None if not ep.get("place3")
+                   else {**ep["place3"], "depth_mm": depth})
     opts_meta = dict(ctx.opts)
     if ctx.opts.get("hold_ur_gripper"):
         opts_meta["ur_gripper_bytes_not_applied"] = override_waypoints(ctx.nominal, ctx.opts)[1]
@@ -1120,13 +1498,20 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
         clamp = None
         row["clamp"] = None
     else:
-        waypoints, clamp = _guard(sim, ctx, p)
-        row["clamp"] = clamp.to_dict()
+        waypoints, clamp = _guard(sim, ctx, p, plan)
+        row["clamp"] = _clamp_dict(clamp)
         f_targets, u_targets = targets_from_waypoints([w for w in waypoints if w.label != FIRST])
     timing["guard"] = time.perf_counter() - t2
     last = len(f_targets) - 1
     phase_labels = [f"{kind}:{t.label}" for t in f_targets for kind in ("move", "hold")]
     phase_labels += ["done", PREHOLD_PHASE]
+    tail_spec = None
+    if plan is not None and ep.get("tail") is not None:
+        place_tail = _place_tail()
+        band = (ep.get("place3") or {}).get("mode") == "engaged_band"
+        tail_spec = place_tail.draw_spec(ctx.opts["tail_cfg"], args.seed, i, band,
+                                         n * lcs.SIM_DT_S, ep["tail"]["amp_mul"])
+        phase_labels += [place_tail.phase_label(tail_spec["family"]), place_tail.PHASE_HOLD]
 
     hand0, byte0 = sim.gripper_commands()
     franka = FrankaWaypointCommander(f_targets, params, hand_mm=hand0)
@@ -1238,6 +1623,7 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
     if args.record:
         sim.start_recording(ctx.out / "recordings", f"{name}-{p.intent}")
     sampler = OscEpisodeSampler(sim, ctx, phase_labels)
+    sampler.on_frame = on_frame
     q_ur = sim.arm_targets()[1]
     if pre_n > 0:
         _pre_hold(sim, ctx, sampler, state, pre_n * n, s0, q_ur, ur, hand0, byte0)
@@ -1248,6 +1634,8 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
     ik_s = step_s = 0.0
     wait0 = sim.bridge.wait_s
     done_at = None
+    rods = [] if ctx.gauge is not None else None
+    tail = None
     sim.commander_hook = hook
     try:
         while True:
@@ -1277,6 +1665,8 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
                 sampler.clearance(sim.state_0.body_q.numpy())
             if k % n == 0:
                 sampler.sample_tick(tick)
+                if rods is not None:
+                    rods.append(ctx.gauge.measure(sim.state_0.body_q.numpy())["stretch_pct"])
             if done_at is None and tick.cmd.phase == "done":
                 done_at = k
             if done_at is not None and k >= done_at + settle_steps and k % n == 0:
@@ -1285,6 +1675,9 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
                 raise TimeoutError(f"timeout: {tick.cmd.phase} after {args.max_episode_s:g} s "
                                    "(franka {:.1f} mm {:.1f} deg, ur {:.1f} mm {:.1f} deg)"
                                    .format(*state["reach"]))
+        if tail_spec is not None:
+            tail = _place_tail().run_tail(sim, ctx, sys.modules[__name__], sampler, state, s0,
+                                          q_ur, franka, ur, tail_spec, rods)
     except (MotionError, TimeoutError) as exc:
         _finish_recording(sim, ctx.out, f"{name}-{p.intent}", "episode skipped")
         key = "timeout" if isinstance(exc, TimeoutError) else "ik miss"
@@ -1297,6 +1690,12 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
     timing["commander"] = state["hook_s"] + ik_s
     timing["lcm_wait"] = lcm_wait
     timing["physics"] = step_s - lcm_wait - state["hook_s"]
+    if tail is not None:
+        timing["tail"] = tail["wall_s"]
+        if tail["grasp_lost"]:
+            _finish_recording(sim, ctx.out, f"{name}-{p.intent}", "episode skipped")
+            return _skip({**row, "tail": _tail_row(tail)}, i, f"tail: {tail['stopped']}",
+                         "tail grasp lost")
     recording = _finish_recording(sim, ctx.out, f"{name}-{p.intent}", "episode done")
 
     t3 = time.perf_counter()
@@ -1309,9 +1708,11 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
             bad = np.argwhere(u_pre != 0.0)
             raise RuntimeError(f"pre-hold cmd_delta not 0 ({np.abs(u_pre).max():.2e} at "
                                f"[row, dim] {bad[:4].tolist()})")
-    label, metrics, min_clear_mm, contact = _classify(sampler, ctx.thresholds, ctx.tangent)
+    label, metrics, min_clear_mm, contact = _classify(sampler, ctx.thresholds, tangent)
     tip_min_mm = state["tip_min"] * 1e3
-    clamp_dict = None if clamp is None else clamp.to_dict()
+    if tail is not None:
+        tip_min_mm = min(tip_min_mm, tail["min_franka_tip_mm"])
+    clamp_dict = None if clamp is None else _clamp_dict(clamp)
     ur_scale = np.array([fr["ur_excite_scale"] for fr in frames])
     ur_active = np.array([bool(np.any(fr["excite_ur_raw"])) for fr in frames])
     ur_stats = {"frames_active": int(ur_active.sum()),
@@ -1345,6 +1746,12 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
     osc_post = {"backend": np.array("osc"),
                 "osc_utime_offset_us": np.int64(sim.bridge.utime_offset_us),
                 "min_franka_tip_clearance_mm": np.float32(tip_min_mm)}
+    new_row = {}
+    if plan is not None:
+        new_meta, new_post, new_row = _new_mode_outputs(ctx, frames, metrics, tangent, ep, row,
+                                                        tail, rods, int(pre.sum()))
+        extras_meta.update(new_meta)
+        osc_post.update(new_post)
     path = ctx.out / row["file"]
     writer, track = build_osc_writer(frames, n, pcd=not args.no_pcd, definition=definition)
     steps = frames[-1]["step"] + 1
@@ -1371,7 +1778,76 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation) -> dict:
             "grasp_ok_final": [bool(v) for v in frames[-1]["grasp_ok"]],
             "osc_stats": sim.bridge.stats(),
             "size_bytes": path.stat().st_size, "recording": recording,
-            "timing_s": timing, "status": "ok"}
+            "timing_s": timing, **new_row, "status": "ok"}
+
+
+def _place_tail():
+    sys.path.insert(0, str(REPO_ROOT / "scripts" / "lcs"))
+    import place_tail
+
+    return place_tail
+
+
+def _clamp_dict(clamp) -> dict:
+    out = clamp.to_dict()
+    if hasattr(clamp, "franka_lift_mm"):
+        out["franka_lift_mm"] = clamp.franka_lift_mm
+    return out
+
+
+def _tail_row(tail: dict | None) -> dict | None:
+    return None if tail is None else {k: v for k, v in tail.items() if k != "_arrays"}
+
+
+def _new_mode_outputs(ctx: OscContext, frames: list, metrics: dict, tangent, ep: dict,
+                      row: dict, tail: dict | None, rods: list | None, n_pre: int
+                      ) -> tuple[dict, dict, dict]:
+    """``(sim_meta, npz extras, row)`` additions of the opt-in modes: the place_3 label, the
+    per-frame contact metrics, the approach / place_3 sample / tail records."""
+    th = ctx.thresholds
+    p3 = len(frames) - 1 if tail is None else tail["start_frame"]
+    fm3 = frame_metrics(frames[p3]["belt"], frames[p3]["pulley_raw"], th=th)
+    label3 = classify(fm3, th)
+    slant3 = slant_metrics(frames[p3]["belt"], frames[p3]["pulley_raw"], tangent, th=th)
+    nn = np.asarray(metrics["n_neighbour"])
+    in_contact = nn >= IN_CONTACT_MIN_NEIGHBOUR
+    grasp = np.stack([fr["grasp_ok"] for fr in frames])
+    tail_rec = _tail_row(tail)
+    if tail_rec is not None:
+        tail_contact = in_contact[p3 + 1:]
+        tail_rec["contact_frame_frac"] = float(tail_contact.mean()) if tail_contact.size else None
+    p3_rec = {"outcome": label3, "frame": p3, "wrap_deg": fm3.wrap_deg,
+              "h_median_mm": fm3.h_median_mm, "n_neighbour": fm3.n_neighbour,
+              "slant_deg": slant3.slant_deg, "slant_dir": slant3.slant_dir}
+    meta = {"approach": ep.get("approach"), "place3_sample": row.get("place3_sample"),
+            "tail": tail_rec, "outcome_place3": label3, "place3_frame": p3,
+            "place3_metrics": p3_rec, "tangent_episode": np.asarray(tangent).tolist(),
+            "pulley_large": {k: np.asarray(v).tolist() for k, v in (ctx.pulley or {}).items()},
+            "in_contact_rule": f"n_neighbour >= {IN_CONTACT_MIN_NEIGHBOUR}",
+            "label_rule": "outcome = classifier at the last frame; outcome_place3 = classifier "
+                          "at place3_frame (end of the place_3 settle window)"}
+    post = {"n_neighbour": nn.astype(np.int32), "in_contact": in_contact,
+            "outcome_place3": np.array(label3), "place3_frame": np.int64(p3),
+            "approach": np.array(json.dumps(ep.get("approach"))),
+            "place3_sample": np.array(json.dumps(row.get("place3_sample"))),
+            "tail": np.array(json.dumps(tail_rec, default=float))}
+    out_row = {"outcome_place3": label3, "place3_frame": p3, "place3": p3_rec,
+               "grasp_ok_all": [bool(v) for v in grasp.all(axis=0)],
+               "contact_frame_frac": float(in_contact.mean())}
+    if rods is not None:
+        rod = np.concatenate([np.full(n_pre, np.nan), np.asarray(rods, float)])
+        post["rod_stretch_pct"] = rod
+        out_row["rod_stretch_pct_max"] = float(np.nanmax(rod))
+        out_row["rod_stretch_gain_pct_max"] = float(np.nanmax(rod) - rod[n_pre])
+    if tail is not None:
+        a = tail["_arrays"]
+        n_before = p3 + 1
+        post["ur_guard_scale"] = np.concatenate([np.ones(n_before), a["guard_scale"]])
+        post["motion_offset_franka"] = np.concatenate([np.zeros((n_before, 6)),
+                                                       a["offset_franka"]])
+        post["motion_offset_ur"] = np.concatenate([np.zeros((n_before, 6)), a["offset_ur"]])
+        out_row["tail"] = tail_rec
+    return meta, post, out_row
 
 
 def _pre_hold(sim, ctx: OscContext, sampler, state: dict, steps: int, s0: int, q_ur,

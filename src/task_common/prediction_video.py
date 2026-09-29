@@ -24,6 +24,7 @@ import trimesh
 import viser
 import warp as wp
 
+from task_common import REPO_ROOT
 from task_common.latent_encoder import LatentDecoder, LatentEncoder, LearnedLcs
 from task_common.replay_learned_mpc import _tube_faces, tube_vertices
 from task_common.replay_video import LEGEND_FONT, LEGEND_PANEL, LEGEND_TEXT, CameraPose
@@ -237,7 +238,8 @@ class EpisodeScene:
 
     def __init__(self, model: newton.Model, ep: Episode) -> None:
         meta = json.loads(str(ep.data["sim_meta"]))
-        self.snapshot_path = Path(meta["start_state"])
+        path = Path(meta["start_state"])
+        self.snapshot_path = path if path.is_absolute() else REPO_ROOT / path
         snap = load_snapshot(self.snapshot_path)
         labels = [str(b) for b in model.body_label]
         jlabels = [str(j) for j in model.joint_label]

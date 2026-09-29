@@ -10,6 +10,7 @@ Run:
     uv run python scripts/replay_viewer.py --port 8082 --show-collision --point-cloud
     uv run python scripts/replay_viewer.py --render-fps 15 --stats   # slow link / client
     uv run python scripts/replay_viewer.py --recordings DIR --learned-layers planned_belt,actions
+    uv run python scripts/replay_viewer.py --episodes data/lcs/approach/v1_heldout   # LCS data
 """
 
 from __future__ import annotations
@@ -26,17 +27,21 @@ if str(REPO_ROOT / "src") not in sys.path:
 
 import newton
 
+from round_belt_task import BELT_COLOR
 from round_belt_task.scene import build_scene
+from task_common import prediction_video as pv
 from task_common.cameras import RgbdCameras
 from task_common.point_cloud import CroppedPointCloud
 from task_common.recording import Recording
 from task_common.replay_app import DEFAULT_DEVICE, DEFAULT_RENDER_FPS, ReplayApp
+from task_common.replay_episode import EpisodeReplayApp, PredictionPanel, list_episodes
 from task_common.replay_learned_mpc import (
     LAYERS,
     LearnedMpcPanel,
     any_learned_runs,
     parse_layers,
 )
+from task_common.replay_video import belt_rgb
 from task_common.scene import make_builder
 from utils.viewer_patches import (
     patch_viewer_shape_names,
@@ -84,6 +89,14 @@ def create_parser() -> argparse.ArgumentParser:
                         help="max 3D redraws per second during playback (default %(default)g)")
     parser.add_argument("--stats", action="store_true",
                         help="log tick/render/plot rates every 10 s")
+    episodes = parser.add_argument_group(
+        "LCS dataset episodes", "replay collected episode_*.npz files (not MPC recordings) with "
+        "the one-step LCS prediction; --deploy/--decoder pick the model (default: "
+        "record_prediction_video.py's)")
+    source = episodes.add_mutually_exclusive_group()
+    source.add_argument("--episode", type=Path, default=None, help="one episode .npz")
+    source.add_argument("--episodes", type=Path, default=None,
+                        help="a directory of episode_*.npz (dropdown to switch)")
     learned = parser.add_argument_group(
         "learned MPC layers", "shown when a run has LEARNED_MPC_DEBUG or a path is given; "
         "paths default to the run's meta.json learned_mpc block")
@@ -114,9 +127,48 @@ def learned_hooks(args: argparse.Namespace) -> list[LearnedMpcPanel]:
     return [LearnedMpcPanel(**paths, layers=layers)]
 
 
+def episode_main(args: argparse.Namespace) -> int:
+    """``--episode``/``--episodes``: dataset episodes with the one-step prediction layers."""
+    extra = [flag for flag, value in (("--run", args.run), ("--demo-goals", args.demo_goals),
+                                      ("--demo-episode", args.demo_episode),
+                                      ("--target-belt", args.target_belt),
+                                      ("--learned-layers", args.learned_layers)) if value]
+    if extra:
+        logger.error(f"{', '.join(extra)} do not apply to --episode/--episodes")
+        return 2
+    if args.episode is not None:
+        if not args.episode.is_file():
+            logger.error(f"no episode file {args.episode}")
+            return 2
+        root, only = args.episode.parent, args.episode.name
+    else:
+        root, only = args.episodes, None
+        if not list_episodes(root):
+            logger.error(f"no episode_*.npz under {root}")
+            return 2
+    deploy = args.deploy or pv.DEPLOY
+    decoder = args.decoder or (args.deploy.parent / "decoder.npz" if args.deploy else pv.DECODER)
+    try:
+        panel = PredictionPanel(deploy, decoder, true_color=belt_rgb(BELT_COLOR))
+    except (OSError, KeyError, ValueError) as exc:
+        logger.error(f"cannot load the LCS model ({deploy}, {decoder}): {exc!r}")
+        return 2
+    patch_viewer_shape_names()
+    patch_viser_texture_material()
+    app = EpisodeReplayApp(root, build_model, only=only, port=args.port,
+                           show_collision=args.show_collision, hooks=[panel],
+                           build_point_clouds=build_point_clouds,
+                           show_point_cloud=args.point_cloud, render_fps=args.render_fps,
+                           device=args.device)
+    app.run_forever(stats=args.stats)
+    return 0
+
+
 if __name__ == "__main__":
     configure_logging()
     args = create_parser().parse_args()
+    if args.episode is not None or args.episodes is not None:
+        sys.exit(episode_main(args))
     if not Recording.list_runs(args.recordings):
         logger.error(f"no recorded runs under {args.recordings} "
                      "(record one with round_belt_lcm_simulation.py --record)")

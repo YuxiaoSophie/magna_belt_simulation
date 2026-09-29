@@ -26,6 +26,10 @@ MAX_PLOT_POINTS = 300
 DEFAULT_WINDOW_S = 10.0
 COLORS = ("#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c", "#0891b2", "#ca8a04")
 NOW_COLOR = "#6b7280"
+# "now" is every chart's last series: it has no legend value, and uPlot parks its hover marker
+# at the plot's top-left corner wherever it is NaN.
+NOW_SERIES_CSS = ("<style>.u-legend .u-series:last-child, "
+                  ".u-over .u-cursor-pt:last-child { display: none !important; }</style>")
 BLANK_TRIAD = "(pick a body or target)"
 REMOVE_LABEL = "✕"
 DEFAULT_AXES_LENGTH = 0.05
@@ -90,10 +94,7 @@ class PlotsPanel:
                 self.charts[name] = _Chart(name, title, labels, source, checkbox)
             for chart in self.charts.values():
                 chart.handle = self._make_handle(app, chart)
-            # "now" is every chart's last series: it has no legend value, and uPlot parks its
-            # hover marker at the plot's top-left corner wherever it is NaN.
-            gui.add_html("<style>.u-legend .u-series:last-child, "
-                         ".u-over .u-cursor-pt:last-child { display: none !important; }</style>")
+            gui.add_html(NOW_SERIES_CSS)
         self.window.on_update(
             lambda e: app.call_soon(lambda v=float(e.target.value): self.set_window(app, v)))
         for chart in self.charts.values():
@@ -204,6 +205,48 @@ class PlotsPanel:
         app._set_gui(chart.checkbox, bool(visible))
         if visible:
             self.update()
+
+
+class TrajectoryChart:
+    """A whole-trajectory uPlot chart of fixed series with a "now" cursor line (the charts'
+    "now" convention); :meth:`set_time` resends only when the cursor moves."""
+
+    def __init__(self, gui: Any, x: np.ndarray, series: list[np.ndarray],
+                 labels: tuple[str, ...], *, title: str | None, y_label: str,
+                 x_label: str = "t (s)", aspect: float = 2.0) -> None:
+        self.x = np.asarray(x, dtype=np.float64)
+        self.series = [np.asarray(v, dtype=np.float64) for v in series]
+        lo, hi = PlotsPanel._range(self.series)
+        self.y_range = (min(lo, 0.0), hi)
+        self.sent_t: float | None = None
+        self.sends = 0
+        lines = [uplot.Series(label=x_label)]
+        for i, label in enumerate(labels):
+            lines.append(uplot.Series(label=label, stroke=COLORS[i % len(COLORS)], width=1.5,
+                                      spanGaps=True))
+        lines.append(uplot.Series(label="now", stroke=NOW_COLOR, width=1.5, dash=[4, 4],
+                                  points={"show": False}))
+        self.handle = gui.add_uplot(
+            data=self._data(float(self.x[0]) if len(self.x) else 0.0), series=tuple(lines),
+            scales=PlotsPanel._scales(self.y_range), title=title, aspect=aspect,
+            axes=(uplot.Axis(label=x_label), uplot.Axis(label=y_label)))
+
+    def _data(self, t: float) -> tuple[np.ndarray, ...]:
+        k = int(np.searchsorted(self.x, t))
+        xs = np.insert(self.x, k, [t, t])
+        ys = [np.insert(y, k, [np.nan, np.nan]) for y in self.series]
+        now = np.full(len(xs), np.nan)
+        now[k:k + 2] = self.y_range
+        return (xs, *ys, now)
+
+    def set_time(self, t: float) -> None:
+        if t != self.sent_t:
+            self.sent_t = t
+            self.handle.data = self._data(t)
+            self.sends += 1
+
+    def remove(self) -> None:
+        self.handle.remove()
 
 
 def _min_max_decimate(x: np.ndarray, ys: list[np.ndarray],

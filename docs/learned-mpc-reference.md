@@ -366,6 +366,88 @@ MPC layers". `--deploy`, `--decoder`, `--demo-goals` and `--demo-episode` overri
 `meta.json` recorded; pass `--decoder` explicitly if the run's own deploy dir has no
 `decoder.npz` next to it (only exports run with `--decoder-out` have one).
 
+### 5.11 Train, gate and re-test a new model (v3, 2026-09-28)
+
+**Train** (in `~/git/lcs_learning`). `scripts/train_joint_pointnet_lcs.py --init-checkpoint
+PATH` (or `init_checkpoint:` in the config) starts from a trained checkpoint. It copies the AE
+weights and `lcs_params`, keeps fresh optimizers/schedulers and skips `lcs_warm_init`. It
+refuses a checkpoint whose architecture differs (num_points, proprio/control/latent/feature
+dims, point-cloud source, belt points, `n_lam`, stiffness). Without the flag, training is
+bit-identical to before. The v3 run lives in `outputs/sim_belt_v3_20260928/`: `v3_mix.yaml`
+(A, the v2 recipe on the union), `v3_ft.yaml` (B, `init_checkpoint` = `nsxihz32` epoch 300),
+`make_split_v3.py`, `run_v3.sh` (smokes → A ∥ B → `evaluate_v3.py` → `eval_table.md` → CPU
+exports + decoders → E0-E8), `eval_results.json`. The training split is
+`data/lcs/v3/split.json` (`docs/lcs-dataset.md` §10).
+
+**Exports:** `deploy_v3_mix/` and `deploy_v3_ft/`, each with `deploy.npz`, `learned_lcs.yaml`
+and `decoder.npz`. The `u` bounds come from every collected episode, including the approach
+top-ups:
+
+```bash
+cd ~/git/lcs_learning
+D=outputs/sim_belt_v3_20260928; M=/home/hienbui/git/magna_belt_simulation-main
+uv run python scripts/export_learned_lcs_deploy.py --checkpoint <ckpt_v3_mix/.../last.pt> \
+    --device cpu --goal-episode $M/data/lcs/demo_flat/demo_episode.npz --goal-frames 13,59 \
+    --data-glob "$M/data/lcs/v2/*/episode_*.npz" \
+    --data-glob "$M/data/lcs/20260925-ep300-ou-cmd_delta/*/episode_*.npz" \
+    --data-glob "$M/data/lcs/free_space/v1/*/episode_*.npz" \
+    --data-glob "$M/data/lcs/approach/v1/train*/episode_*.npz" \
+    --data-glob "$M/data/lcs/contact/v1/train/episode_*.npz" --out-dir $D/deploy_v3_mix
+uv run python scripts/export_learned_lcs_deploy.py --checkpoint <same> \
+    --decoder-out $D/deploy_v3_mix/decoder.npz
+```
+
+**Open-loop gates** (this repo). `scripts/lcs/eval_motion_primitives.py --run RUN --deploy
+--decoder --split [--skip-test] --out JSON` evaluates one model on one run: per-tuple model /
+recon / no-motion RMSE, displacement gain, and the test-split recompute of `--split`. Without
+`--out` it writes `<run>/eval.json`; pass `--out` for any new model or run, so that no reference
+`eval.json` is overwritten. Rows without a `primitive` (approach / contact runs) are keyed by
+file stem. `scripts/lcs/summarize_v3.py [--root data/lcs/free_space/eval_v3] [--eval-results
+<lcs_learning>/…/eval_results.json]` reads `<root>/<model>/<run>.json` for `{v2, v3_mix,
+v3_ft}` and writes `summary.md` / `summary.json`: the pooled matrix, breakdowns (yaw bins,
+`outcome_place3`, contact vs free frames, tails), contact h3/h7 rollouts, gates G1-G5 and the
+PICK.
+
+```bash
+D=~/git/lcs_learning/outputs/sim_belt_v3_20260928/deploy_v3_mix
+uv run --frozen python scripts/lcs/eval_motion_primitives.py --run data/lcs/approach/v1_heldout \
+    --deploy $D/deploy.npz --decoder $D/decoder.npz --split data/lcs/v3/split.json \
+    --out data/lcs/free_space/eval_v3/v3_mix/approach_heldout.json
+uv run --frozen python scripts/lcs/summarize_v3.py
+```
+
+**Closed-loop re-test:** `data/lcs/mpc_eval/20260928-223352-synthtargets-v3/`. It contains
+`goals/<target>/{deploy.npz,demo_goals.npz}` (the PICK export re-encoded at the 2026-09-26
+goal frames), one run dir per target (`fe_nominal`, `fe_set1`, `urtip`, `urtip6`,
+`urtip6_high`), `recordings/<target>__<start>` symlinks, `videos/`, `table.{json,md}`,
+`c3check/`, `check_mpc_harness.log` and `scripts/` (goal builder, table, `diag_*.py`). The
+params and LCS yamls are in the worktree under `learned_archive/2026-09-28/`. Run with, per
+target:
+
+```bash
+E=data/lcs/mpc_eval/20260928-223352-synthtargets-v3
+uv run python scripts/lcs/eval_learned_mpc.py --mode learned --repeats 1 --record \
+    --params systems/parameters/learned_archive/2026-09-28/\
+round_belt_controller_params_learned_eval_v3_flat_engaged.yaml \
+    --deploy $E/goals/flat_engaged/deploy.npz --demo-goals $E/goals/flat_engaged/demo_goals.npz \
+    --start-states data/lcs/start_states/pre_place_1_osc.npz \
+    --max-episode-s 16 --settle-s 0.5 --pace 1 --out $E/fe_nominal \
+    --lcm-url udpm://239.255.76.135:7735?ttl=0
+```
+
+Replay (the goal deploys have no sibling `decoder.npz`, so `--decoder` is required):
+
+```bash
+E=data/lcs/mpc_eval/20260928-223352-synthtargets-v3
+V3=/home/hienbui/git/lcs_learning/outputs/sim_belt_v3_20260928
+uv run python scripts/replay_viewer.py --recordings $E/recordings \
+    --run flat_engaged__nominal --port 8081 --decoder $V3/deploy_v3_mix/decoder.npz \
+    --learned-layers planned_belt,planned_ee,actions,target_belt \
+    --target-belt $E/goals/flat_engaged/demo_goals.npz
+```
+
+Result and diagnosis: `docs/learned-mpc.md`, 2026-09-27/28.
+
 ## 6. Private LCM groups
 
 Every private-URL run in the day log picks its own group so concurrent runs never collide, and

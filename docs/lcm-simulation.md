@@ -1000,7 +1000,8 @@ uv run python scripts/record_prediction_video.py \
 - **Model.** Default `--solver lcp` is the exact LCP, solved by enumerating active sets
   (`lcp_exact`; unique, since F + F' > 0). That is what `evaluate_v2.py` ran through qpOASES:
   equal to 4e-16 on all 4369 test tuples, and it gives the same pooled one-step RMSE, 0.577 mm.
-  `pgd` is the trained 25-iteration PGD, which has no skew part J.
+  `pgd` is the trained 25-iteration PGD, which has no skew part J. `--deploy` / `--decoder`
+  pick the model (default v2 `deploy_v2_decoded_only`).
 - **Timing and output.** Each episode frame is shown for `--repeat` (3) video frames at
   `--speed` (0.5) episode s per video s, i.e. 20 fps. `--still-s` writes PNGs.
   `<out>.npz` is the sidecar: the belts, RMSEs, the predicted-tube vertices sent to the scene,
@@ -1009,6 +1010,19 @@ uv run python scripts/record_prediction_video.py \
   blank frames* above). Each is then centre-cropped to its view's aspect at full height and
   box-downsampled, which keeps the vertical fov. The blank guard applies too: `check_render`
   on every capture, and up to 3 Chromium restarts per frame.
+- **Compilation.** `scripts/lcs/compile_motion_primitive_videos.py --run RUN` joins
+  `RUN/videos/<episode>_<primitive>.mp4` into `all_primitives.mp4`, each clip after a 1.5 s
+  (`--card-s`) title card built from `index.json` / `eval.json`; `--first NAME` / `--exclude
+  a,b` order and filter. `--videos-dir DIR` (opt-in, instead of `--run`) compiles a flat dir of
+  `<set>_<name>.mp4` + sidecar into `DIR/all_pick.mp4`, with no `index.json` / `eval.json`;
+  its cards show only the set, the name and the motion duration (the sidecar's `time_s[-1]`).
+- **v3 videos** (2026-09-28, `data/lcs/free_space/videos_v3/`, layout D, `--belt-colors
+  'gold,#222222,#0072b2'`, stills at 25/50/75 % of each clip). `v3_mix/` holds 13 clips of
+  the PICK model (`--deploy` / `--decoder` = `deploy_v3_mix`): v2-big primitives, free-space
+  deformation, approach and contact held-out episodes (`contact_groove_slide_TRAIN` is a
+  train episode, as the held-out set has no such family). It also holds `all_pick.mp4`
+  (`--videos-dir ... --first good_mix`; 9474 frames, 473.70 s). `v2_reference/` holds the
+  same `both_sideways` and `recover` episodes rendered with v2.
 
 ### Learned-MPC layers
 
@@ -1136,4 +1150,6 @@ the sidecar's `pred` / `recon_next` bit for bit, and the sent tube vertices must
 identical values, and requires |Sinkhorn − exact EMD| < 0.5 mm on every frame. P3 checks that the luma std of the left view, the right view
 and the whole frame is >= 5 in every decoded frame. P4 checks that the right view clips no
 belt (|ndc| < 0.98), that it keeps the left view's direction, up and fov, and that FK matches
-the recorded EE (< 0.05 mm). `--scan VIDEO.mp4 ...` runs P1-P4 on already-rendered videos.
+the recorded EE (< 0.05 mm). `--scan VIDEO.mp4 ...` runs P1-P4 on already-rendered videos;
+`--deploy` / `--decoder` (default v2) name the model they were rendered with, since P2 fails
+on a video of another model otherwise.

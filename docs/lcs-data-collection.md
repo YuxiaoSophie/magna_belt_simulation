@@ -5,7 +5,8 @@ into the large pulley, for `~/git/lcs_learning`. On-disk format: `docs/lcs-datas
 does not repeat it). Implemented by `src/task_common/{lcs_dataset,sim_snapshot,osc_process}.py`,
 `src/round_belt_task/{waypoints,arm_kinematics,motion,offline_simulation,osc_simulation,
 osc_bridge,commander,perturbation,clearance,outcome}.py`, `scripts/lcs/make_start_state.py`,
-`scripts/collect_lcs_dataset.py`.
+`scripts/collect_lcs_dataset.py`. Free-space primitives, approach episodes and contact branches
+(2026-09-28): §4.5-4.7.
 
 ## 1. What this is
 
@@ -211,6 +212,255 @@ cd ~/git/lcs_learning && uv run python scripts/train_joint_pointnet_lcs.py \
     --data-glob "<run>/excite/episode_*.npz" --data-glob "<run>/noexcite/episode_*.npz" \
     --epochs 2 --ae-warmup-epochs 0 --disable-saving --no-wandb --disable-wandb-viz
 ```
+
+### 4.5 Free-space motion primitives (`scripts/lcs/collect_motion_primitives.py`)
+
+Scripted, smooth EE motions of both arms holding the belt, away from the pulley. Each episode
+restores `pre_place_1_osc.npz` (or a grasp-variant state) under magna's OSC, holds
+`--pre-hold-s` (`u = 0`), plays one motion and holds `--post-hold-s`. The Franka gets 7 knots
+sampled on the scripted pose; the UR gets per-step IK plus a 2-knot line `pose(t) -> pose(t +
+dt)`, so `cmd_delta` is `pose(t + dt) - pose(t)` exactly. Files use the collector's format plus
+`sim_motion_*` / `sim_rod_stretch_pct`. Originally the OOD one-step test sets
+(`data/lcs/motion_primitives/`, v1 and v2-big); since 2026-09-28 also training data
+(`data/lcs/free_space/`, `docs/lcs-dataset.md` §10). Flags off, the plans are bit-identical to
+the v1 / v2-big ones.
+
+**Live guards** (a failing episode is retried, see `--retry-policy`): grasp held; belt inside
+the crop box x/y and above its z-bottom; **crop rule:** the belt top may not rise more than
+`--crop-z-tol-mm` above its own start top. The crop top stays at 0.11 m (2026-09-28 decision
+D1), and the start belt already sits ~3 mm above it, so vertical motions only go down. Also: a
+belt-near-pulley keep-out, the 2F-85 board clearance, and a rod stretch gain ≤
+`--stretch-cap-pct`.
+
+**Families** (`--primitives`, default the 10 v1 ones): `both_up_down`, `both_fwd_back`,
+`both_sideways`, `opposite_fwd_back`, `opposite_sideways`, `opposite_up_down`, `franka_only`,
+`ur_only`, `wrist_roll`, `random_mix` (v1); `good_mix`, `good_mix_tilt` (v2-big); and the
+deformation families of 2026-09-28: `twist`, `bend`, `bend_lift`, `stretch_cycle`,
+`franka_sweep`, `ur_sweep`, `random_mix_holds` (random mix with `u = 0` plateaus),
+`wrist_tilt`, `hold_only` (no motion). twist / bend / bend_lift / wrist_tilt first drop both
+arms (−z, 0.5× amp) and deform in τ ∈ [0.2, 0.8]: without that drop the gripper rotations
+lift the belt past the crop rule.
+
+| flag | default | meaning |
+|---|---|---|
+| `--lcm-url` | required | private LCM URL of the OSC |
+| `--out` | `data/lcs/motion_primitives/<YYYYmmdd-HHMMSS>` | output dir |
+| `--append` | off | add episodes to an existing `--out` (extends its `index.json`) |
+| `--primitives` | the 10 v1 families | comma list (above) |
+| `--amp-mm` / `--amp-deg` | `20` / `5` | max translation / rotation amplitude |
+| `--bound-frac` | `0.8` | planned `\|cmd_delta\|` ≤ this fraction of the `--deploy` export's `u_lb/u_ub` (or of `--step-cap`) |
+| `--deploy` | v2 `deploy_v2_decoded_only/deploy.npz` | export whose `u_lb/u_ub` bound the plan without `--step-cap` |
+| `--step-cap F_MM,F_MRAD,U_MM,U_MRAD` | off | symmetric per-step caps per arm replacing the export bounds; retries then scale the capped plan (`row.retry_mul`) |
+| `--motion-s` | `8.0` | motion duration; `<= 0`: per primitive, the shortest in [`--motion-s-min`, `--motion-s-max`] (`15` / `25`) that keeps `--bound-frac` at full amplitude |
+| `--motion-s-range LO,HI` | off | per-episode duration ~ U[LO, HI] (not with `--motion-s <= 0`) |
+| `--motion-s-mul NAME=X[,NAME=X]` | off | per-family multiplier on the `--motion-s-range` draw (row field `motion_s_mul`); errors without `--motion-s-range` |
+| `--amp-range LO,HI` | off | per-episode amplitude multiplier ~ U[LO, HI] (row `amp_mul`) |
+| `--repeats` | `1` | episodes per primitive; `> 1` adds the repeat to the RNG key |
+| `--start-state` | `pre_place_1_osc.npz` | snapshot to restore |
+| `--start-states DIR` / `--variants a,b` | off | grasp-variant set; episodes round-robin over `--variants` (`start_state` in the index = set meta + sha256) |
+| `--retry-policy` | `halve` | `halve`: halve the amplitude on any failure (v1); `lobe`: on a stretch failure first halve the stretching lobe, else amplitude ×0.7 |
+| `--retries` | `2` | retries per episode |
+| `--pre-hold-s` / `--post-hold-s` | `1.5` / `0.5` | holds before / after the motion |
+| `--stretch-cap-pct` | `2.0` | max rod stretch gain over the episode |
+| `--crop-z-tol-mm` | `2.0` | crop rule above |
+| `--no-pulley-keepout` | off | drop the live belt-near-pulley check |
+| `--min-clearance` | `4.0` | 2F-85 board clearance (§5.1) |
+| `--osc-settle-s` / `--osc-timeout-s` | `0.5` / `5.0` | as in §4.2 |
+| `--seed` | `0` | RNG seed; amplitude / duration draws use their own stream `[seed, idx, rep, 1]` |
+| `--record` / `--no-pcd` | off | `RunRecorder` run per episode / skip camera renders |
+
+The per-step cap used on 2026-09-28 is `3,25,3,25` (3 mm / 25 mrad per 75 ms step, both arms):
+the cap probe met the realised-vs-`u` slope gate at 3 mm (slopes 0.956-1.067), so smaller caps
+were not run. Runs actually used (`data/lcs/free_space/`; train on `...133:7733`, held-out on
+`...134:7734`):
+
+```bash
+C="--step-cap 3,25,3,25 --bound-frac 1.0 --amp-mm 40 --amp-deg 20 --retry-policy lobe
+   --retries 4 --motion-s-range 6,14 --amp-range 0.4,1.0"
+F14=twist,bend,bend_lift,stretch_cycle,franka_sweep,ur_sweep,random_mix,random_mix_holds
+F14=$F14,wrist_tilt,wrist_roll,opposite_sideways,both_up_down,good_mix,hold_only
+F8=twist,bend,stretch_cycle,franka_sweep,ur_sweep,random_mix_holds,wrist_tilt,hold_only
+S2="--start-states data/lcs/start_states/grasp_variants/set2 --variants gv_01,gv_04,gv_07,gv_10"
+S3="--start-states data/lcs/start_states/grasp_variants/set3 --variants gv_02,gv_05"
+MP="uv run --frozen python scripts/lcs/collect_motion_primitives.py $C"
+T='udpm://239.255.76.133:7733?ttl=0'; H='udpm://239.255.76.134:7734?ttl=0'
+$MP --lcm-url $T --out data/lcs/free_space/v1/nominal_families --primitives $F14 --repeats 3 \
+    --motion-s-mul twist=2 --seed 301
+$MP --lcm-url $T --out data/lcs/free_space/v1/nominal_random \
+    --primitives random_mix_holds,random_mix --repeats 6 --seed 302
+$MP --lcm-url $T --out data/lcs/free_space/v1/set2_families $S2 --primitives $F8 --repeats 4 \
+    --motion-s-mul twist=2 --seed 303
+$MP --lcm-url $T --out data/lcs/free_space/v1/set2_random $S2 --primitives random_mix \
+    --repeats 4 --seed 304
+$MP --lcm-url $H --out data/lcs/free_space/v1_heldout/nominal --primitives $F14 --repeats 1 \
+    --amp-range 0.6,1.0 --motion-s-mul twist=2 --seed 401
+$MP --lcm-url $H --out data/lcs/free_space/v1_heldout/set3 $S3 --primitives $F8 --repeats 1 \
+    --motion-s-mul twist=2 --seed 402
+```
+
+With `--start-states`, variant = repeat index (set2: each of gv_01/04/07/10 sees each of the 8
+families once). **QC / reports:** `scripts/lcs/deform_report.py RUN [RUN ...] [--write-qc]
+[--json OUT]` (per-episode table, per-family stats, holds, causality, `<run>/qc.json`, pooled
+coverage; non-rigid deformation = belt RMSE after the best rigid Kabsch fit of the motion-start
+belt); `scripts/lcs/start_check.py RUN [--tol-mm 2]` (every episode's frame-0 belt is closest
+to its own variant); `check_lcs_tuples.py --causality-dir RUN`.
+
+Measured 2026-09-28: train 89 ok / 15,689 tuples, held-out 20 ok / 3,692 tuples (3 episodes
+failed on the crop rule). Causality gate [0.8, 1.1] met in every table (pooled train
+0.949-1.046). Stretch gain max 1.99 %, grasp held, no board contact. Holds `u == 0` exactly,
+mean belt drift ≤ 0.93 mm. `free_space/v1/nominal_random/episode_0010` has a Franka tracking
+excursion (6.2 mm RMS, 29 mm peak) and is excluded from training.
+
+### 4.6 Approach episodes (`collect_lcs_dataset.py`, opt-in)
+
+Insertion episodes approached from other directions, with a continuous `place_3` and a
+post-place contact tail. All flags are opt-in; at their defaults they are kept out of
+`index.args` and the collector is unchanged (`check_lcs_collector.py` C0-C8).
+
+- **Approach transform** (`--approach`): both arms' `pre_place_1/2` and `place_3` are moved
+  rigidly: yaw about the large pulley's vertical axis, offset along the rotated horizontal
+  normal, `+elev` in z (not on `place_3`), tilt about the rotated tangent.
+- **`place_3` sampling** (`--place3-mode`): `intents` = today's `--intents` draw; `continuous`
+  = with probability `--engaged-share` the engaged band (the OSC `engaged` intent box plus ±2°
+  yaw per arm), else the wide box drawn independently per arm (depth > 0 above the nominal,
+  < 0 pressing past it; normal, tangent, roll, yaw); `engaged_band` = the band only; `fixed` =
+  `--place3-values`. The Franka's `place_3` is floored at plate + 12 mm
+  (`clamp.franka_lift_mm`); the board guard (§5.1) still applies.
+- **Tail** (`--tail`, `scripts/lcs/place_tail.py`): after the `place_3` settle, one scripted
+  motion of both arms for U[MIN, MAX] s + a 0.5 s hold, from the commanded hold poses (no
+  jump). Families: `groove_slide`, `press_deeper`, `lift_repress`, `partial_pullout`,
+  `tension_release`, `random_contact`. Engaged-band episodes get gentle tails (groove_slide /
+  tension_release / lift_repress at 0.3× amplitude). Live guards: grasp (a loss discards the
+  episode), crop x/y + top, 2F-85 clearance, stretch gain, Franka tip floor; any other guard
+  ends the tail early and keeps the frames.
+- **Labels and extras:** the outcome at `place_3` (`sim_outcome_place3`, row `outcome_place3`)
+  and at the end; per-frame `sim_n_neighbour`, `sim_in_contact`, `sim_rod_stretch_pct`,
+  `sim_ur_guard_scale`, `sim_motion_offset_*`; rows `place3_frame`, `approach`,
+  `place3_sample`, `tail`, `tag`. With `--hold-ur-gripper` the UR holds through the tail, so
+  end labels are not comparable with UR-released episodes; `outcome_place3` is.
+
+| flag | default | meaning |
+|---|---|---|
+| `--approach YAW,ELEV,OFFSET,TILT\|start` | off | approach transform (deg, mm, mm, deg); `start` = each start state's own `index.json` entry (`make_approach_starts.py`) |
+| `--approach-range YLO:YHI,ELO:EHI,OLO:OHI,TLO:THI` | off | per-episode approach ~ U[range] (RNG `[seed, i, 13]`) |
+| `--place3-mode {intents,continuous,engaged_band,fixed}` | `intents` | above |
+| `--engaged-share` | `0.40` | `continuous`: share of episodes drawn from the engaged band |
+| `--place3-box DLO:DHI,NORMAL,TANGENT,ROLL,YAW` | depth −6..20 mm, ±10 mm, ±10 mm, ±10°, ±15° | wide box (symmetric except depth) |
+| `--place3-box-ur` | `--place3-box` | the UR's wide box |
+| `--place3-values F:U[;F:U]` | off | `fixed`: per arm `depth,normal,tangent,roll,yaw`; episode i uses entry `i % n` |
+| `--tail MIN_S,MAX_S` | off | post-`place_3` contact tail |
+| `--tail-families` | all (gentle set in the band) | comma list of tail families |
+| `--tail-gentle {auto,on,off}` | `auto` | `auto`: engaged-band episodes get gentle tails |
+| `--tail-cap F_MM,F_MRAD,U_MM,U_MRAD` | `3,25,3,25` | per-step `cmd_delta` caps of the tail |
+| `--tail-stretch-cap-pct` | `2.0` | tail stretch-gain guard |
+| `--row-tag` | none | recorded as `row["tag"]` (e.g. `top_up`) |
+
+Helper scripts:
+
+- `scripts/lcs/approach_probe.py --lcm-url URL --out screen.json [--path-min-mm 2]`: offline
+  screen (no physics) of the approach grid and the per-arm `place_3` box corners: UR IK reach,
+  Franka tip / crop proxy, 2F-85 pre-guard path clearance, `place_3` clamp lift.
+- `scripts/lcs/make_approach_starts.py --lcm-url URL --out DIR --settings
+  'id=yaw,elev,offset,tilt;...'`: start states `pre_place_1` moved rigidly through the
+  approach transform (min-jerk `--move-s`, hold, settle, grasp check, re-check on restore);
+  grasp-variant format + `approach` in `index.json`.
+- `scripts/lcs/approach_report.py RUN [RUN ...] [--write-qc] [--pool] [--probe A|B|C]
+  [--json OUT]`: labels at `place_3` / end per start state, transitions, engaged fractions,
+  tails, clearances, grasp, latch, causality on approach and tail rows, `<run>/qc.json`.
+- `scripts/lcs/place_tail.py`: the tail module (imported lazily by the collector).
+
+Usable box after the 2026-09-28 probes: yaw [-30, 30]°, elev [0, 30] mm, offset [-10, 10] mm,
+tilt [-4, 0]° (tilt +4 / +8 never wrap); UR tangent [0, 10] mm (any UR tangent < 0 stalls the
+held UR short of `pre_place_2`). Runs actually used (`...137:7737` for probes and start states,
+`...138:7738` for collection; train states a01-a12, held-out h01 (+25, 10, 0, -2), h02 (-25,
+10, 0, -2), h03 (0, 22, 5, -2), h04 (-10, 15, -5, -4)):
+
+```bash
+P='udpm://239.255.76.137:7737?ttl=0'; U='udpm://239.255.76.138:7738?ttl=0'
+uv run --frozen python scripts/lcs/approach_probe.py --lcm-url $P \
+    --out data/lcs/approach/probe/screen.json
+S='a01=-30,30,10,-4;a02=-30,0,10,-4;a03=30,0,-10,0;a04=-30,0,-10,-4;a05=-30,30,-10,0;'
+S+='a06=30,30,-10,-4;a07=5.4,4.7,-7.3,-0.9;a08=29.1,7.6,3.3,-2.3;a09=7.9,16.7,-8.3,-0.4;'
+S+='a10=6.6,3.5,-3.9,-3.5;a11=1.8,10.1,7.3,-1.4;a12=11.6,5.2,-7.3,-3.9;'
+S+='h01=25,10,0,-2;h02=-25,10,0,-2;h03=0,22,5,-2;h04=-10,15,-5,-4'
+uv run --frozen python scripts/lcs/make_approach_starts.py --lcm-url $P \
+    --out data/lcs/start_states/approach --settings "$S"
+A="--start-states data/lcs/start_states/approach --hold-ur-gripper --approach start --tail 4,6"
+COL="uv run --frozen python scripts/collect_lcs_dataset.py --lcm-url $U $A"
+$COL --out data/lcs/approach/v1/train --episodes 120 --seed 601 \
+    --variants a01,a02,a03,a04,a05,a06,a07,a08,a09,a10,a11,a12 \
+    --place3-mode continuous --place3-box-ur=-6:20,10,0:10,10,15
+$COL --out data/lcs/approach/v1_heldout --episodes 24 --seed 701 --variants h01,h02,h03,h04 \
+    --place3-mode continuous --place3-box-ur=-6:20,10,0:10,10,15
+# engaged-band top-ups (train_topup_1..4, v1_heldout_topup_1..2), states rotated per batch
+$COL --out data/lcs/approach/v1/train_topup_1 --episodes 10 --seed 611 \
+    --variants a01,a02,a03,a04,a05,a06,a07,a08,a09,a10 --place3-mode engaged_band --row-tag top_up
+uv run --frozen python scripts/lcs/approach_report.py data/lcs/approach/v1/train \
+    data/lcs/approach/v1/train_topup_* --write-qc --pool
+```
+
+Measured 2026-09-28: train 120/120 + top-ups 38/40, held-out 23/24 + top-ups 7/8 (5 skips,
+all `timeout`), ≈ 161 frames per episode, 3.91 ep/min. Engaged at `place_3` / end: train
+20.3 / 22.8 %, held-out 20.0 / 16.7 %, **below the 30 / 25 % targets (accepted)**. Tails ≥ 4 s
+in 98.1 % (held-out 100 %), contact-frame fraction 1.0 in every tail, grasp held on every frame,
+0 board contacts, tail stretch gain max 2.08 %. Causality: approach rows 0.68-0.96 (gate
+[0.6, 1.2]), tail rows 0.93-1.01 (gate [0.8, 1.1]).
+
+### 4.7 Contact branching (`scripts/lcs/collect_contact_branches.py`)
+
+Contact-rich rollouts branched from sim snapshots taken during insertions. Four phases:
+
+- **`snap`**: runs insertion source episodes through `collect_lcs_dataset.collect`
+  (`run_osc_episode` wrapped in-process with the opt-in `on_frame` callback; uniform intents,
+  no excitation, no pre-hold, `--no-pcd`, UR held) and snapshots `first_contact` (first frame
+  with `n_neighbour >= 3` and `h_min <= 10 mm`, or wrap > 0), `partial` (the first later frame
+  with 15 <= wrap < 60°) and `final_<label>`. Each snapshot is validated right away (restore +
+  0.5 s settle + grasp). The source episodes (`--source-out`) have no point clouds and are
+  **not** training data.
+- **`select`** (offline): a balanced working set of the validated snapshots
+  (`working_set.json`); `--all` = every snapshot, 1 rollout each.
+- **`branch`**: per (snapshot, family): restore + 0.5 s settle, 1.0 s pre-hold (`u = 0`), a
+  scripted 4-8 s rollout of both arms (per-step cap 3,25,3,25), 0.5 s hold, in the
+  collector's training format. Families: `rim_press`, `top_cross`, `pullout_reseat`,
+  `groove_slide`, `recover` (lift, re-descend, hold), `random_contact`. Guard failures get one
+  ×0.7 retry. Per-frame extras: `sim_wrap_deg`, `sim_h_median_mm`, `sim_slant_deg_t`,
+  `sim_n_neighbour`, `sim_in_contact`, `sim_outcome`; plus `sim_outcome_start`, `sim_family`,
+  `sim_branch`.
+- **`report`**: `qc.json` per branch run, plus `--rebalance OUT` (contact-frame share of the
+  v2 insertion, approach and branch sets).
+
+| phase | flags |
+|---|---|
+| `snap` | `--lcm-url` (req.), `--src NAME` (snapshot id prefix), `--episodes`, `--seed`, `--start-states`, `--variants`, `--snap-dir` (default `data/lcs/contact/snapshots`), `--source-out` (req.) |
+| `select` | `--snap-dir`, `--out` (req.), `--all` |
+| `branch` | `--lcm-url` (req.), `--snap-dir`, `--working-set` (req.), `--out` (req.), `--seed`, `--append`, `--families`, `--limit`, `--no-pcd`, `--record`, `--min-clearance` |
+| `report` | `RUN [RUN ...]`, `--rebalance OUT` |
+
+Runs actually used (`...139:7739` snap, `...140:7740` branch):
+
+```bash
+CB="uv run --frozen python scripts/lcs/collect_contact_branches.py"
+S='udpm://239.255.76.139:7739?ttl=0'; B='udpm://239.255.76.140:7740?ttl=0'
+GV=data/lcs/start_states/grasp_variants; C=data/lcs/contact
+$CB snap --lcm-url $S --src nominal --episodes 20 --seed 501 --source-out $C/source/nominal
+$CB snap --lcm-url $S --src set2 --episodes 20 --seed 502 --start-states $GV/set2 \
+    --variants gv_01,gv_04,gv_07,gv_10 --source-out $C/source/set2
+$CB snap --lcm-url $S --src set3 --episodes 8 --seed 503 --start-states $GV/set3 \
+    --variants gv_02,gv_05 --snap-dir $C/snapshots_heldout --source-out $C/source/set3_heldout
+$CB select --out $C/snapshots/working_set.json
+$CB select --snap-dir $C/snapshots_heldout --all --out $C/snapshots_heldout/working_set.json
+$CB branch --lcm-url $B --working-set $C/snapshots/working_set.json --out $C/v1/train --seed 601
+$CB branch --lcm-url $B --snap-dir $C/snapshots_heldout \
+    --working-set $C/snapshots_heldout/working_set.json --out $C/v1/heldout --seed 602
+$CB report $C/v1/train $C/v1/heldout --rebalance $C/v1/rebalance.json
+```
+
+Measured 2026-09-28: 48 source episodes (engaged 14, over 11, under 12, slanted 11) gave 98
+train / 18 held-out validated snapshots. Working set 40 (first_contact 10, partial 10, 5 per
+final label). Rollouts: train 80/80 ok, held-out 17/18 ok. Strict contact-frame fraction
+91.2 / 89.0 %, wrap max 143 / 148°. Recovery (engaged end from a failure snapshot): `recover`
+1/15 (held-out 0/6). Held-out causality u_x 0.751 is below the 0.8 gate; it is attributed to
+the held UR lagging under belt load.
 
 ## 5. Perturbation classes and outcome thresholds
 
@@ -474,6 +724,13 @@ to ±10 mm, plus a probe-only UR pitch of ±15 deg about `z x tangent`).
   noise. Every outcome in the band is roll-, so relabelled `over` / `engaged` data with a roll-
   slant is available at this rate.
 - **`combined` (UR-high pitch + roll): dropped** because `ur_high` is infeasible.
+
+### 5.4 Yaw fields
+
+`Perturbation` has two additive fields, `ur_yaw_deg` and `franka_yaw_deg` (default 0). Each
+rotates that arm's perturbed waypoint orientation about world z, after the tilt. `to_dict`
+adds them only when either is non-zero, so older rows are unchanged. The intent ranges above do
+not draw them; `--place3-mode continuous` / `engaged_band` (§4.6) sets them.
 
 ## 6. Frames and conventions
 

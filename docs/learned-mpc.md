@@ -7,7 +7,7 @@ This doc is a day-by-day log of what was tried, what broke, and how it was fixed
 For the wire contract, the params-yaml schema and step-by-step commands, see
 `docs/learned-mpc-reference.md`. Where any of this and the code disagree, the code wins.
 
-## Current status (2026-09-25)
+## Current status (2026-09-28)
 
 **Best controller so far:** `honor_penalize_input_change: true`, `w_r 0.3`,
 `demo_traj.w_p 0.03` (an EE-path cost) on the `v2_decoded_only` model — held-out engaged
@@ -24,11 +24,161 @@ timeouts, `w_p 0`): 3/10 engaged (2 strict) on the matched starts. Every other y
 `systems/parameters/learned_archive/<date>/`.
 
 **Current model:** `v2_decoded_only`, W&B run `nsxihz32`, epoch 300, trained on 464 episodes /
-33,382 train tuples (`data/lcs/v2/split.json`).
+33,382 train tuples (`data/lcs/v2/split.json`). It stays the deployed MPC model after
+2026-09-28.
+
+**v3 (2026-09-28), not adopted:** `v3_mix` (W&B `rt2j3k45`, the v2 recipe on the union of v2 +
+free-space + approach + contact data, 790 episodes / 82,834 tuples, `data/lcs/v3/split.json`)
+is better than v2 open loop on every held-out set (e.g. approach one-step 1.236 vs 8.588 mm)
+and was the eval pick (PICK A). **In closed loop it is worse**: strict 1/6 vs v2's 4/6 on the
+same synthetic-target cells. The stage-2 plan lifts the Franka and turns the UR within v3's
+wider `u` bounds, and the belt rides over the pulley. The cause is the dynamics, not the
+encoder. See 2026-09-27/28.
 
 **Main open issues:** the demo-tracking progress index stalls/deadlocks on a large fraction of
 held-out starts; the goal tolerance does not separate `engaged` from `slanted`; no progress fix
-has been found yet that does not lean on the rejected EE-path cost.
+has been found yet that does not lean on the rejected EE-path cost. Better one-step accuracy
+from more diverse data did not carry over to the closed loop (v3, 2026-09-27/28).
+
+## 2026-09-27/28 — data diversity, v3 training, OOD gates and the closed-loop re-test
+
+**Summary:** v2 (464 insertion episodes, all along one waypoint family) was nearly blind in
+free space to grasp-axis translation, stretch/slack and wrist yaw (displacement gain 0.06-0.28,
+model ≈ recon, ~1 mm static offset), and had seen contact only along the nominal approach. The
+data was diversified three ways: deformation-rich free-space primitives; approaches to the
+large pulley from varied yaw, with continuous `place_3` sampling, post-place contact tails and
+the UR holding the belt; and contact-rich rollouts branched from snapshots, including recovery.
+Two models were trained on the union (A `v3_mix`, B `v3_ft`) and gated open loop (G1-G5).
+A was picked, then re-tested in closed loop on the 2026-09-26 synthetic-target cells.
+**Result: negative.** A beats v2 open loop on every new held-out set, but in closed loop it
+reaches strict 1/6 against v2's 4/6. The deployed model stays `v2_decoded_only`. Collector
+flags: `docs/lcs-data-collection.md` §4.5-4.7. Sources and split: `docs/lcs-dataset.md` §10.
+
+**Tried:**
+- **Deformation-rich free space** (`collect_motion_primitives.py`, new opt-in flags and the
+  families twist / bend / bend_lift / stretch_cycle / franka_sweep / ur_sweep /
+  random_mix_holds / wrist_tilt / hold_only). Per-step cap 3 mm / 25 mrad on both arms: the
+  cap probe met the realised-vs-`u` slope gate at 3 mm, so smaller caps were not run. 6 runs:
+  train 89 ok / 15,689 tuples, held-out 20 ok / 3,692 tuples. Causality gate [0.8, 1.1] met in
+  every table (pooled train 0.949-1.046). Stretch gain max 1.99 %, grasp held, no board
+  contact. 33 train episodes have a stretch lobe (grasp separation +≥ 8 mm), 52 reach ≥ 5 mm
+  non-rigid deformation. Holds: `u == 0` exactly, mean belt drift ≤ 0.93 mm.
+- **Rotated and varied approaches** (`collect_lcs_dataset.py --approach start --place3-mode
+  continuous --tail 4,6 --hold-ur-gripper`). The offline screen passed 182/189 approach
+  settings; sim probes A (approach) 62/62, B (`place_3`) 30/30 and C (tails) 12/12 ok. Usable
+  box: yaw [-30, 30]°, elev [0, 30] mm, offset [-10, 10] mm, tilt [-4, 0]°. 16 start states
+  (train a01-a12, held-out h01-h04). Runs: train 120/120 + top-ups 38/40, held-out 23/24 +
+  top-ups 7/8, ≈ 161 frames per episode. Tails (train 158): lift_repress 44, tension_release 42,
+  groove_slide 41, random_contact 15, press_deeper 10, partial_pullout 6. The contact-frame
+  fraction was 1.0 in every tail. Labels were recorded at `place_3` and at the end.
+- **Contact branching** (`collect_contact_branches.py`, trimmed per D10). 48 new source
+  episodes gave 98 train / 18 held-out validated snapshots. Working set: 40 (first_contact 10,
+  partial 10, 5 per final label). Rollouts: train 80/80 ok (rim_press 9, top_cross 9,
+  pullout_reseat 10, groove_slide 10, recover 15, random_contact 27), held-out 17/18 ok. Strict
+  contact-frame fraction 91.2 % / 89.0 %. Strict contact share of the union's train frames:
+  57.0 % (target 35 %).
+- **Deliberately excluded:** force, stretch and tension features, and force/actuation signals.
+  The hardware has no F/T sensor and the UR10 is position-controlled, so the model gets
+  neither as an input.
+- **Training** (lcs_learning `outputs/sim_belt_v3_20260928/`). Union split: 790 episodes /
+  82,834 tuples (v2 insertion 464 / 33,382, free space 88 / 15,484, approach 158 / 25,969,
+  contact 80 / 7,999). A `v3_mix` is the v2 recipe on the union, 300 epochs, W&B `rt2j3k45`.
+  B `v3_ft` fine-tunes from `nsxihz32` (new `--init-checkpoint`), 120 epochs, W&B `3y5b4zac`.
+  Both exports pass E0-E8 and share the same, wider `u` bounds (UR rz up to 15.4 mrad, where
+  v2 had ±3.5-4.1).
+- **Open-loop gates** (`eval_motion_primitives.py --out` × 21, `summarize_v3.py`). Pooled
+  motion one-step, mm:
+
+  | set | v2 | A `v3_mix` | B `v3_ft` | no-motion |
+  |---|---|---|---|---|
+  | v1 primitives | 1.098 | 0.239 | 0.242 | 0.215 |
+  | v2-big | 2.125 | 0.457 | 0.444 | 0.185 |
+  | v2-big fast | 2.594 | 0.612 | 0.579 | 0.741 |
+  | free-space held-out, nominal | 1.777 | 0.254 | 0.294 | 0.259 |
+  | free-space held-out, set3 | 2.802 | 1.133 | 1.161 | 0.205 |
+  | approach held-out | 8.588 | 1.236 | 1.322 | 0.751 |
+  | contact held-out | 1.841 | 1.100 | 1.109 | 0.249 |
+
+  | gate | rule | v2 | A | B |
+  |---|---|---|---|---|
+  | G1 | v2 insertion test one-step ≤ 0.635 mm | 0.577 PASS | 0.551 PASS | 0.583 PASS |
+  | G2 | displacement gain ≥ 0.90 on every family | min 0.04 FAIL | 0.83 FAIL (1 of 30) | 0.89 FAIL (1 of 30) |
+  | G3 | model < no-motion on ≥ 50 % of motion tuples | FAIL | FAIL (deform 24.8 %) | FAIL (deform 21.1 %) |
+  | G4 | held-out recon ≤ 0.6 mm | FAIL | FAIL (deform 0.564, contact 1.028) | FAIL (0.609, 1.064) |
+  | G5 | approach / contact one-step ≤ 0.8 × v2's | — | PASS (0.14 / 0.61) | PASS (0.15 / 0.62) |
+
+  **PICK = A `v3_mix`**: the mean deform / approach / contact motion one-step is 0.976 mm,
+  against B's 1.020 and v2's 4.201. A and B fail G2 only on v2-big `both_sideways`. G3 and G4
+  fail because of a static encoder offset on unseen starts (set3, h01-h04, set3 snapshots):
+  held-out recon is 3-5× the train-file recon, so one-step ≈ recon. The dynamics-only error is
+  0.14-0.34 mm. On approaches v2 blows up at |yaw| > 20° (13.9 mm), while A stays flat at
+  1.14-1.41 mm across yaw bins.
+- **Videos** (`data/lcs/free_space/videos_v3/`): 13 PICK clips + `all_pick.mp4`, plus 2 v2
+  reference clips (`docs/lcm-simulation.md` §10).
+- **Closed loop** (`data/lcs/mpc_eval/20260928-223352-synthtargets-v3/`). PICK A in the same
+  6 cells as the 2026-09-26 v2 run: the same goal frames re-encoded, and the 2026-09-26 params
+  with only `lcs_file` changed (`u_bound_scale 1`). `learned_lcs_c3_check` passed, as did
+  `check_mpc_harness.py` H0-H6. 1 episode per cell, so these are sensitivities, not rates:
+
+  | target | start | v2 (strict) | v3 `v3_mix` (strict) |
+  |---|---|---|---|
+  | flat_engaged | nominal | engaged (y), wrap 117.0°, h +0.00 | over (n), wrap 0, h +54.4 |
+  | flat_engaged | gv_01 | engaged (n), wrap 82.0°, h +2.80 | engaged (y), wrap 127.7°, h +0.02 |
+  | flat_engaged | gv_05 | engaged (y), wrap 117.2°, h +0.01 | slanted (n), wrap 0, h +10.4 |
+  | urtip | ud+3_r0 | engaged (n), wrap 112.2°, h −2.43 | slanted (n), wrap 0, h +10.9; Franka grasp lost 12.9 s |
+  | urtip6 | ud+6_r0 | engaged (y), wrap 116.3°, h +0.04 | over (n), wrap 0, h +9.3 |
+  | urtip6_high | ud+6_r0 | engaged (y), wrap 127.3°, h +0.58 | over (n), wrap 0, h +11.7 |
+
+  Strict (wrap ≥ 90 and |h| ≤ 1): v3 1/6, v2 4/6. v3 encodes the seated targets about 2×
+  better than v2 (re-encode belt RMSE 0.45-1.12 vs 1.84-2.05 mm), and stage 1 ends as well as
+  v2's (belt RMSE to the `pre_place_2` goal 6.9 vs 6.6 mm).
+
+**Issues / bugs -> resolution:**
+
+| symptom | root cause | fix / status |
+|---|---|---|
+| twist / bend episodes failed the crop rule (0 of 4 ok), even at 0.2× amplitude | the gripper rotations lifted the belt > start + 2 mm | these families add a carrier drop (both arms −z, 0.5× amp) and deform in τ ∈ [0.2, 0.8] |
+| a retry left `random_mix_holds` failing 5× at the same amplitude | scaling the requested amplitude is a no-op where the per-step cap binds | in the new mode a retry scales the capped plan (`row.retry_mul`); the legacy retry is unchanged |
+| twist non-rigid deformation stayed at 2.9-3.0 mm (target 5) | the rot group sat on the 25 mrad cap | `--motion-s-mul twist=2`: rot group scale 1.0, max 6.7 mm; ≥ 5 mm in only 2/7 train episodes (accepted) |
+| `free_space/v1/nominal_random/episode_0010`: Franka 6.2 mm RMS, 29 mm peak | a tracking excursion mid-motion (no OSC warning, grasp ok) | excluded from training (it still enters the export's `u` bounds / z stats) |
+| `uv run` rewrote `uv.lock` | warp-nn git source via the dirty `external/newton` | reverted; use `uv run --frozen` |
+| any UR tangent < 0 at `place_3` timed out 8/8 | the held UR stalls 6-12 mm short of `pre_place_2` | UR box tangent [0, 10] mm (`--place3-box-ur`) |
+| approach tilt +4 / +8° never wraps | the belt lands "under" | usable tilt range [-4, 0]° |
+| engaged share train 20.3 / 22.8 %, held-out 20.0 / 16.7 % (`place_3` / end), under the 30 / 25 % targets | band yield at the approach states is 30 %; the elev-30 / tilt ≈ -4 settings never engage | **accepted as is** (user); near-nominal engagement comes from the v2 insertion data |
+| labels "under" and "outside" below 8 % | "outside" is unreachable while the UR holds the belt | accepted |
+| the literal `first_contact` rule fired ~50 mm above the pulley | `n_neighbour` counts bodies in the radial band only (no height term) | first contact = `n_neighbour ≥ 3 AND h_min ≤ 10 mm`, or wrap > 0 |
+| `recover` seats only 1/15 (held-out 0/6); over/under never recover | failure finals sit ~1-2 mm from the demo EE poses; lifting pulls the partly seated belt out, and it lands on top again | accepted as a coverage fact |
+| contact held-out causality u_x 0.751 (gate 0.8) | the held UR lags along the grasp axis while the belt is loaded on the pulley | accepted as physical, not mislabelling |
+| held-out one-step > copy-last-frame on all three new held-out sets; G3/G4 fail | static encoder offset on unseen starts (held-out recon 0.55-1.3 mm vs 0.18-0.38 on train files) | **open**; the dynamics-only error is 0.14-0.34 mm |
+| `check_prediction_video.py --scan` P2 failed on every PICK video | the check always rebuilt the v2 model | new `--deploy` / `--decoder` |
+| no `groove_slide` / `pullout_reseat` episode in `contact/v1/heldout` | that set holds only random_contact (11) and recover (6) | the video uses a train episode, named `contact_groove_slide_TRAIN`; flagged |
+| v3 closed loop: 5/6 cells end over / slanted, end RMSE 64-119 mm | at stage-2 onset the plan lifts the Franka (+17.5 mm z in 0.5 s; v2 +0.6), turns the UR (rz +77 mrad, later rx +100-126 mrad, inside the wider bounds) and counter-yaws the Franka, so the belt rises to h 21-30 mm and rides over the pulley. The encoder is not the cause: along v2's trajectories v3's d(z_target) falls to 0.7-1.0. The dynamics are: on its own closed-loop states v3 barely beats no-motion early in stage 2 (1.8-2.4 vs 2.7-2.8 mm), and its LCS gives Franka yaw almost no lever on d(z_target) (±0.004 per bound step, v2 −0.093 / +0.064) | **open**; next: v3 with v2's `u` bounds, B `v3_ft` in the same cells, multi-step / closed-loop-aware training |
+
+**Decisions:**
+- D1: keep the crop top at 0.11 m.
+- D2: start small. Free space ≈ 90 train + 22 held-out; approaches 120 + 24 plus engaged-band
+  top-ups (≤ 40 / ≤ 8); contact ≈ 80 + 20. Scale up only if the eval shows a gain.
+- D3: per-step caps 3 mm / 25 mrad on both arms.
+- D4: keep the soft-pulley v2 insertion split (the 0.577 mm reference).
+- D6: 10 % insertion regression margin, so G1 is test one-step ≤ 0.635 mm.
+- D7: the UR holds the belt through `place_3` and the tail (`--hold-ur-gripper`). Because v2
+  episodes released the UR at `place_3`, `outcome_place3` is the label comparable with v2's
+  mix; end labels are reported separately (caveat accepted by the user).
+- D8: contact snapshots come from new source episodes.
+- D9: two training configs, A `v3_mix` and B `v3_ft`. The capacity variant was dropped.
+- D10 (user): trim contact branching to what tails cannot give. Keep mid-descent branching and
+  recovery; drop `lift_repress` and `tension_release`, which the tails cover.
+- D11 (user): per-arm `place_3` wide box depth −6..+20 mm, lateral ±10 mm, roll ±10°,
+  yaw ±15°; 40 % engaged-band share; targets ≥ 30 % / ≥ 25 % engaged, with top-ups.
+- Gates G1-G5 as tabled above. Pick = the lowest mean held-out motion one-step among G1
+  passers.
+- Excluded `nominal_random/episode_0010`; no free-space held-out top-up. Kept every
+  approach `top_up` row. Never train on `contact/source/*` (no point clouds).
+- Accepted (user) the approach engaged shortfall as is, without further top-ups or re-probes.
+  Accepted the contact phase as is.
+- Ran the closed loop with PICK A, since G1 passed. The deployed model stays
+  `v2_decoded_only`. `v3_mix` is not a drop-in replacement despite its better open-loop
+  numbers.
 
 ## 2026-09-26 — stiffer pulley anchors (sim default change)
 

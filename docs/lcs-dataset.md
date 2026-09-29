@@ -265,3 +265,45 @@ extras `sim_action_knot1_minus_measured` and `sim_realised_delta`. Extra `sim_*`
 no stages). See `docs/learned-mpc-reference.md` for the full contract and how to run the harness; the
 demonstration episode itself is collected with `--scenario nominal` (no perturbation, no
 excitation) and lives under `data/lcs/demo/`, never inside a training data dir.
+
+## 10. Sources and the v3 split (2026-09-28)
+
+The v3 training union adds three sources to the v2 insertion data. All are in this format
+(`cmd_delta`, point clouds on); how they were collected: `docs/lcs-data-collection.md` §4.5-4.7.
+
+| source | train | held-out | what |
+|---|---|---|---|
+| v2 insertion (`data/lcs/v2/split.json`) | 464 eps / 33,382 tuples | v2 `test` 60 / 4,369 | the soft-pulley insertion episodes, lists copied verbatim |
+| free space | `free_space/v1/{nominal_families,nominal_random,set2_families,set2_random}`: 88 / 15,484 | `free_space/v1_heldout/{nominal,set3}` → `test_free_space` 20 / 3,692 | deformation-rich primitives, nominal + set2 starts (held-out: nominal + set3) |
+| approach | `approach/v1/train` (120) + `train_topup_1..4` (38): 158 / 25,969 | `approach/v1_heldout` + `v1_heldout_topup_1..2` → `test_approach` 30 / 4,798 | rotated approaches, continuous `place_3`, 4-6 s tails, UR held (held-out: h01-h04) |
+| contact | `contact/v1/train`: 80 / 7,999 | `contact/v1/heldout` → `test_contact` 17 / 1,613 | rollouts branched from contact snapshots (held-out: set3 snapshots) |
+
+Extra per-frame keys of the new sources (the loader ignores them): approach episodes carry
+`sim_n_neighbour`, `sim_in_contact`, `sim_rod_stretch_pct`, `sim_ur_guard_scale`,
+`sim_motion_offset_*`, `sim_outcome_place3`, `sim_place3_frame`, `sim_approach`,
+`sim_place3_sample`, `sim_tail`; contact branches carry `sim_wrap_deg`, `sim_h_median_mm`,
+`sim_slant_deg_t`, `sim_n_neighbour`, `sim_in_contact`, `sim_outcome`, `sim_outcome_start`,
+`sim_family`, `sim_branch` and `sim_meta.branch`; free-space primitives carry `sim_motion_*`
+and `sim_rod_stretch_pct`. `contact/source/*` are the no-point-cloud source episodes of the
+snapshots and are never used for training.
+
+**Split rule** (`data/lcs/v3/build_split.py` → `data/lcs/v3/split.json` + `manifest.json`;
+run from the repo root with `uv run --frozen python data/lcs/v3/build_split.py`):
+
+- `train` = v2 `train` verbatim + every ok episode of the free-space, approach (top-up rows,
+  tag `top_up`, kept) and contact train runs;
+- `val` / `test` = v2's, verbatim;
+- `test_free_space` / `test_approach` / `test_contact` = the held-out runs;
+- excluded: `free_space/v1/nominal_random/episode_0010` (Franka tracking excursion);
+- asserted: no set1 / set3 / demo / h0x start and no set3 snapshot in `train`; all lists
+  disjoint. The build is deterministic, and the v2 lists stay byte-identical.
+
+Train total: 790 episodes / 82,834 tuples. Contact share of the train frames: 72.8 %
+(`n_neighbour >= 3`), 57.0 % strict (plus `h_min <= 10 mm` or wrap > 0).
+
+**Accepted shortfall.** The approach sets reach fewer engaged episodes than targeted
+(≥ 30 % at `place_3`, ≥ 25 % at the end). Train: 20.3 / 22.8 %; held-out: 20.0 / 16.7 %. This
+was accepted as is, without further top-ups; near-nominal engagement comes from the v2
+insertion data. The labels "under" and "outside" also stay under 8 %: "outside" is unreachable
+while the UR holds the belt. The end labels of approach episodes are UR-held, so they are not
+comparable with v2's released endings; `outcome_place3` is.

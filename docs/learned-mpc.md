@@ -7,7 +7,7 @@ This doc is a day-by-day log of what was tried, what broke, and how it was fixed
 For the wire contract, the params-yaml schema and step-by-step commands, see
 `docs/learned-mpc-reference.md`. Where any of this and the code disagree, the code wins.
 
-## Current status (2026-09-28)
+## Current status (2026-09-29)
 
 **Best controller so far:** `honor_penalize_input_change: true`, `w_r 0.3`,
 `demo_traj.w_p 0.03` (an EE-path cost) on the `v2_decoded_only` model — held-out engaged
@@ -21,24 +21,221 @@ collapses engagement to 1/10. So the result above is not adoptable as-is.
 **Kept default (worktree `round_belt_controller_params_learned_eval.yaml`):** the latent-only
 two-fixed-target setting (flat demo frames 13 / 59, both stages run to their 4 s / 6 s
 timeouts, `w_p 0`): 3/10 engaged (2 strict) on the matched starts. Every other yaml is in
-`systems/parameters/learned_archive/<date>/`.
+`systems/parameters/learned_archive/<date>/`. `admm_iter` stays 2: more ADMM iterations make
+the closed loop worse (2026-09-29, E4).
 
 **Current model:** `v2_decoded_only`, W&B run `nsxihz32`, epoch 300, trained on 464 episodes /
 33,382 train tuples (`data/lcs/v2/split.json`). It stays the deployed MPC model after
-2026-09-28.
+2026-09-29: on the 6 synthetic-target cells it is still the best (strict 4/6).
 
 **v3 (2026-09-28), not adopted:** `v3_mix` (W&B `rt2j3k45`, the v2 recipe on the union of v2 +
 free-space + approach + contact data, 790 episodes / 82,834 tuples, `data/lcs/v3/split.json`)
 is better than v2 open loop on every held-out set (e.g. approach one-step 1.236 vs 8.588 mm)
 and was the eval pick (PICK A). **In closed loop it is worse**: strict 1/6 vs v2's 4/6 on the
-same synthetic-target cells. The stage-2 plan lifts the Franka and turns the UR within v3's
-wider `u` bounds, and the belt rides over the pulley. The cause is the dynamics, not the
-encoder. See 2026-09-27/28.
+same synthetic-target cells. The 2026-09-29 diagnosis: prediction accuracy is not the cause.
+The latent distance the MPC minimises is not a task distance (v3's scores a belt riding over
+the pulley about as close to the goal as a seated one), and C3's 2-iteration plans are not
+consistent with the model. See 2026-09-29.
 
-**Main open issues:** the demo-tracking progress index stalls/deadlocks on a large fraction of
-held-out starts; the goal tolerance does not separate `engaged` from `slanted`; no progress fix
-has been found yet that does not lean on the rejected EE-path cost. Better one-step accuracy
-from more diverse data did not carry over to the closed loop (v3, 2026-09-27/28).
+**v4 (2026-09-29), not adopted:** three retrains of the v3_mix recipe with a corrected
+objective (T1 rmse decoded loss; T2 + Δbelt, multistep H7, near-pulley sampling; T3 + a
+latent-metric loss), all with insertion-only `u` bounds. Closed loop on the same 6 cells:
+T1 0/6 strict (calm, rests on top of the pulley), T2 0/6 (the Franka spins), T3 1/6 (spins,
+penetrates the board). T3 fixes the latent ranking offline, but not the closed loop.
+
+**Trainer default (lcs_learning, user decision 2026-09-29):** the decoded next-state loss uses
+the `rmse` form by default (it was MSE in m², effectively off next to the RMSE reconstruction).
+Every other v4 training option stays opt-in and off by default (`docs/learned-mpc-reference.md`
+§5.12).
+
+**Main open issues:** the latent is not task-shaped: whitened latent distance does not rank
+riding-over vs seated states (the fix has to reach the closed loop, not only the offline
+ranking). Rotation spinning is a separate failure: plans that lean on large Franka/UR rotations
+leave the data, where the models are wrong. The demo-tracking progress index stalls/deadlocks
+on a large fraction of held-out starts, and the goal tolerance does not separate `engaged` from
+`slanted` (the v4 over states also fall inside it). Next (none run): orientation-envelope
+safety constraints for the spinning; a steps-to-goal latent, or letting the LCS consistency
+gradient reach the encoder, for the latent geometry.
+
+## 2026-09-29 — why v3_mix controls worse, the v4 retrain and its closed-loop test
+
+**Summary:** A root-cause pass on the 2026-09-28 result (v3_mix predicts better but controls
+worse) found that prediction accuracy is not the cause. The latent distance the MPC minimises
+is not a task distance, and the trainer's decoded next-state loss was effectively off (m² next
+to an RMSE in m). C3's 2-iteration plans are inconsistent with the model, but making them
+consistent (more ADMM iterations) makes the closed loop worse. Three models (v4 T1-T3) were
+retrained with a corrected objective and insertion-only `u` bounds. T3 fixes the latent ranking
+offline; none beats v2 in closed loop (T1 0/6, T2 0/6, T3 1/6 strict vs v2 4/6). Extra tests:
+T1 on ±15°-yawed targets (0/12) and single-stage free-space goals (v3_mix > T1 > v2). The
+deployed model stays `v2_decoded_only`. Diagnosis summary: `data/lcs/diag/20260929-report.md`;
+paths and commands: `docs/learned-mpc-reference.md` §5.12.
+
+**Tried:**
+- **Replay viewer episode mode** (committed): `scripts/replay_viewer.py --episode/--episodes`
+  replays LCS dataset episodes with the one-step LCS predicted belt and a per-episode RMSE plot
+  (`docs/lcm-simulation.md` §10).
+- **Offline model-vs-MPC diagnosis** (`data/lcs/diag/20260929-model-vs-mpc/`, q1-q6, no sim).
+  Ranked findings:
+  1. v3's latent distance d tracks global belt RMSE and ignores belt height (|h| coefficient
+     0.04 vs v2's 0.20). The riding-over state 1 s into stage 2 (h 12-14 mm) has v3 d 2.3-2.5,
+     equal to the seated states of v2's runs; v2 gives it 4.9-5.3. The v3 MPC hits a false
+     minimum.
+  2. On riding-over states every model's 7-step prediction is worse than no-motion (v3 6.9 vs
+     1.4 mm), with ~1 mm/step drift at `u = 0`, so recovery can't be planned.
+  3. v3's MPC used the UR yaw/pitch/roll channels (+2.0σ Urz), the ones v3 models worst (onset
+     cos vs kNN 0.2-0.4); latent-vs-empirical lever ρ 0.02 (v2 0.42).
+  4. States go out of distribution after about 2 s (belt NN 7.9 mm, 30 % beyond the held-out
+     p99 latent kNN).
+  5. The LCS is affine near the pulley in every model. One-step accuracy is not the cause.
+- **Training-code audit** (read-only, `scripts/train_joint_pointnet_lcs.py`). Reconstruction is
+  RMSE (m) but the decoded next-state loss was MSE (m²), both at weight 1.0: its gradient is
+  ~2·RMSE ≈ 6e-4 of reconstruction's, i.e. effectively off. The LCS fit uses detached z
+  (`enable_violation_grad_to_encoder` false), so the latent gets no dynamics or control
+  shaping. There is no Δz/Δbelt loss and `multistep_horizon` is 0 (deploy horizon 7). The
+  exporter's `u` bounds are the 0.5/99.5 % of the pooled data, and R = 1/half_range², so v3's
+  wider UR rotation range was also 10-16× cheaper. v2 and v3 configs differ only in data
+  files; mean |Δbelt| per tuple fell from 2.06 mm (v2) to 1.26 mm (v3).
+- **Sim-response diagnostics E1-E3** (`data/lcs/diag/20260929-sim-response/`): 12 closed-loop
+  re-runs with per-frame snapshots (reproduce Phase 6: v2 4/6, v3 1/6 strict), 600 open-loop
+  probes (E1), 72 plan-vs-zero-u rollouts (E2), and v3 with v2's `u` bounds (E3).
+  - Early in stage 2, v3's metric scores the lifted route and v2's successful route alike
+    (+1.94 vs +1.97 per 7 steps); v2's metric prefers the good one (+1.94 vs +1.20). v3's LCS
+    predicts the lift correctly (h +8.0 predicted / +7.3 actual): this is not model
+    exploitation.
+  - v2's latent carries a strong Franka-yaw term (3-step yaw probe −0.216 vs v3 −0.013, belt
+    RMSE effect ≈ 0) that keeps the arm near the demo pose; v3's does not.
+  - C3 `x_sol` is inconsistent with its own model for both models: the plans claim 3-4× the
+    decrease that rolling `u_sol` through the same LCS gives.
+  - E3: v3 with v2's bounds is still 1/6 strict. The early lift persists (+12-27 mm in 0.5 s);
+    the late drag-off disappears (end RMSE 13-21 vs 60-114 mm).
+- **E4, C3 plan consistency** (`data/lcs/diag/20260929-c3-consistency/`; opt-in
+  `--diag_stage_file` and cost overrides in the worktree's `learned_lcs_c3_check`). Offline
+  on 2235 recorded solve states, more ADMM iterations close the plan-vs-rollout gap (early
+  stage 2, v3: 2.72 at admm 2, 1.36 at 10, 0.65 at 20). In closed loop, paced to the admm-2
+  solve latency, it gets worse:
+
+  | model | admm 2 | admm 5 | admm 10 |
+  |---|---|---|---|
+  | v2 strict | 4/6 | 4/6 (2 grasp losses) | 0/6 (4 grasp losses) |
+  | v3_mix strict | 1/6 | 0/6 | 0/6 (grasp lost on 4/6) |
+
+  At admm 2 the relaxed λ acts as a free drift toward the goal, so plans use small `u`.
+  Consistent plans must earn the decrease with `u`, so they saturate the rotation bounds
+  (u0 rotation channels at a bound: 0-6 % at admm 2, 43-79 % at admm 10), the arm spins
+  off the data (max Franka rotation 113-179°) and the grasp is lost. admm 5 and 10 also miss
+  the 75 ms budget (closed-loop solve median 62-86 / 106-163 ms).
+- **v4 retrain** (lcs_learning `outputs/sim_belt_v4_20260929/`): the v3_mix yaml, data, split,
+  seed and 300 epochs, from scratch, with new opt-in trainer flags. Loss weights come from a
+  grad-norm calibration at v3.
+  - T1 (W&B `1niukyhl`): `--decoded-next-state-loss-form rmse` only.
+  - T2 (`gwz0d9jk`): T1 + Δbelt loss (weight 1), multistep H7 (rmse form, weight 1/7, grads to
+    the encoder, warm-up 10) and near-pulley sampling K 3 (the near label covers 66 % of train
+    tuples, 85.5 % once sampled).
+  - T3 (`1q2gt22n`): T2 + latent-metric loss 0.02.
+
+  All three are exported with insertion-only `u` bounds (`--u-bounds-glob`, equal to v2's
+  exactly); z stats and `goal_tol` still use the full v3 globs (`goal_tol` 5.40 / 5.09 / 5.49).
+  E0-E8 pass for all three. Offline (mm; Q metrics are the mean of 4 targets unless fe):
+
+  | offline | v2 | v3_mix | T1 | T2 | T3 |
+  |---|---|---|---|---|---|
+  | insertion test one-step / h7 (G1 ≤ 0.635) | 0.577 / 1.92 | 0.551 / 1.88 | **0.509** / 1.98 | 0.711 / **1.42** | 0.643 / 1.93 |
+  | free-space / approach / contact one-step | 2.02 / 9.61 / 1.74 | **0.58 / 1.27 / 1.07** | 0.63 / 1.55 / 1.30 | 0.74 / 1.86 / 1.64 | 0.75 / 1.71 / 1.34 |
+  | free-space / approach / contact h7 | 2.58 / 13.0 / 3.92 | **1.03 / 1.95 / 1.79** | 1.06 / 2.36 / 3.13 | 1.08 / 2.13 / 2.16 | 1.68 / 2.34 / 2.15 |
+  | Q4 abs-h coef (fe drivers) | 0.198 | 0.041 | −0.043 | −0.060 | **0.337** |
+  | Q4 d(over 1 s into s2) / d(v2-run) | 2.08 | 0.99 | 0.90 | 1.05 | **1.79** |
+  | Q4 over states inside goal_tol | **0.010** | 0.610 | 0.745 | 0.720 | 0.670 |
+  | Q4 AUC d over>engaged (fe, beltR 0-10) | 0.892 | 0.969 | 0.938 | 0.923 | **1.000** |
+  | Q4 improved over v3_mix (≥ 2 of abs-h, ratio, goal_tol share) | - | - | no (0/3) | no (1/3) | **yes (2/3)** |
+
+  Offline ranking: T3 > T2 ≈ T1. T3 is the only variant whose latent separates riding-over
+  from seated (|h| coefficient above v2's, 1 s ratio 1.79), at the cost of one-step accuracy
+  (0.643, just over G1) and free-space h7. T2 has the best insertion h7 but no geometry gain
+  and an ill-conditioned LCS. T1 alone improves insertion one-step but hurts the held-out sets
+  and the geometry.
+- **v4 closed loop** (`data/lcs/mpc_eval/20260929-v4-retrain/t{1,2,3}/`): the 6 Phase 6 cells,
+  latent goals re-encoded per model, `w_p 0`, `admm_iter 2`, floors unchanged, each model's
+  insertion-only bounds. All 18 runs exit 0, no stale replies:
+
+  | model | strict | engaged | mean RMSE mm | max rot F / UR ° | early F dz mm | min hand z mm | aborts |
+  |---|---|---|---|---|---|---|---|
+  | v2 | 4/6 | 6/6 | 6.2 | 28 / 5 | −0.5 | 223 | 0 |
+  | v3_mix | 1/6 | 1/6 | 79.8 | 136 / 45 | +15.9 | −22 | 1 |
+  | T1 | 0/6 | 0/6 | 13.1 | 26 / 4 | +8.3 | 231 | 0 |
+  | T2 | 0/6 | 0/6 | 132.7 | 178 / 46 | −15.6 | 144 | 0 |
+  | T3 | 1/6 | 1/6 | 90.4 | 124 / 12 | +16.6 | −55 | 1 |
+
+  T1 is calm and never spins, but every cell ends over or slanted (h +8.8 to +13.5 mm) resting
+  on top of the pulley, and its latent reads that as about the goal (end d ≈ 2.0 < goal_tol
+  5.4). T2's Franka spins ~180° and the belt comes off. T3's only success is gv_01; it shows a
+  v3-like early lift and a Franka spin of 111-161°, with the hand below the board top in 3
+  cells (penetration) and one grasp loss. Ranking: v2 > T1 > v3 ≈ T3 > T2.
+- **T1 on yawed targets** (±15° about the large-pulley axis, 12 runs,
+  `data/lcs/mpc_eval/20260929-v4-retrain/t1_yaw/`). New yawed start states and synthetic
+  targets `data/lcs/synthetic_targets/<t>_yaw{p15,m15}/`, built with the same recipes. All 8
+  targets seated and held in QC (achieved yaw +14.8 to +15.1 / −14.4 to −14.9°). Result: strict
+  0/6 at both yaws, as unyawed. +15°: 4 over / 2 slanted, belt RMSE 12.9-15.1 mm. −15°: RMSE
+  6.3-17.2 mm, with a v3-like early lift (F dz +12.6 to +14.2 mm). No board penetration, no
+  aborts.
+- **Free-space single-stage goals** (`data/lcs/mpc_eval/20260929-v4-retrain/t1_freespace/`):
+  one latent goal per free-space family from a held-out episode frame, started from that
+  episode's own start state, 9 s, 1 episode per cell. Results (mean final / min belt RMSE to
+  the goal, mm; mean % of the gap closed final / min; cells within 5 mm):
+
+  | model | final / min | % closed final / min | within 5 mm |
+  |---|---|---|---|
+  | v3_mix | 8.4 / 5.5 | 46 / 66 | 3/6 |
+  | T1 with v3_mix's `u` bounds | 11.4 / 7.3 | 41 / 61 | 2/6 |
+  | T1 | 16.0 / 8.7 | 17 / 51 | 1/6 |
+  | v2 | 23.4 / 10.0 | −55 / 43 | 0/6 |
+
+  None reaches 2 mm. Free space reverses the insertion ranking: v3_mix, trained on free-space
+  data, tracks best. Every model reaches its minimum early (usually 0.7-2 s) and then drifts
+  away for the rest of the 9 s (latent d at the end > its minimum in 18/18). T1 bend_lift and
+  v2 bend_lift/stretch diverge (Franka rotation 63-92°). With v3_mix's bounds, T1 improves on
+  every goal. The bounds are rarely hit (u0 within 1 % of a bound on 1-5 % of solves), so the
+  gain comes from the cheaper input cost R, not from unclipping.
+
+**Issues / bugs -> resolution:**
+
+| symptom | root cause | fix / status |
+|---|---|---|
+| v3_mix predicts better than v2 but controls worse (1/6 vs 4/6) | the whitened latent distance is not a task distance: v3's latent scores a riding-over belt about as close as a seated one, and nothing in training shapes it (reconstruction only, dynamics loss detached, decoded loss effectively off). v2's success partly rests on an incidental Franka-yaw term | retrained with a corrected objective (v4); **open**: T3 fixes the offline ranking, not the closed loop |
+| the decoded next-state loss had no effect on training | MSE in m² next to a reconstruction RMSE in m, both weight 1.0: gradient ≈ 6e-4 of reconstruction's (the multistep loss is m² too) | new `--decoded-next-state-loss-form` / `--multistep-loss-form {mse,rmse}`; `rmse` is the decoded loss's default after the user's decision (below) |
+| C3 plans claim 3-4× the goal-distance decrease their own `u_sol` gives | 2 ADMM iterations with relaxed λ; λ acts as free drift toward the goal | **kept**: more iterations make plans consistent but saturate the rotation bounds and spin the arm (E4). `admm_iter` stays 2 |
+| T2/T3 export failed: "reference z not reproducible 1.9e-06" | float32 batch-order noise scales with \|z\| (~3e-7 × max\|z\|); the T2/T3 latents are ~10× larger than v3's | exporter and `check_latent_encoder.py` E3 tolerances scaled by max(1, max\|z\|), unchanged for \|z\| ≤ 1; re-exported, E0-E8 pass |
+| `learned_lcs_c3_check` fails on T2 ×4 (OSQP IterationLimit, solve 54-73 ms) | the T2 LCS is ill-conditioned: cond(F) 201 vs 7-30 for v2 / v3 / T1 / T3 | **open**; run anyway: T2 spins ~180° in closed loop |
+| `learned_lcs_c3_check` fails on T3 urtip6_high | stage-2 bound violation 1.4e-6 vs tol 1e-9 | tolerance only; run anyway |
+| T1 ends over / slanted in 6/6 cells | the latent still reads the over state as the goal (end d ≈ 2.0 < goal_tol 5.4; 0.745 of over states fall inside goal_tol offline) | **open** — the latent must be task-shaped |
+| T2 / T3 / v3_mix spin the Franka (T2 ~180°, T3 111-161°, v3_mix up to 136°) and lose the belt, the grasp or the board clearance | plans lean on large Franka/UR rotations, where every model is wrong | **open**; proposed: orientation-envelope safety constraints (not run) |
+| urtip −15° yawed target failed tension at the default stepping floor (wrap 81 at step 1) | wrap 81° at step 1, under the default stepping floor | re-ran tension/observe with `--step-min-wrap-deg 75`; verify still requires wrap ≥ 90 |
+| free-space runs reach their minimum in 0.7-2 s, then drift away | not isolated (λ drift or model bias at rest) | **open**; next: compare with a `u = 0` hold |
+
+**Decisions:**
+- Keep `v2_decoded_only` deployed; none of v3_mix, T1, T2, T3 is adopted.
+- Keep `admm_iter` 2. If consistency is revisited, it needs a larger/structured input cost or
+  tighter rotation bounds with it, or a train-time fix so the LCS does not rely on λ drift.
+- (user) The `rmse` form of the decoded next-state loss becomes the lcs_learning trainer's
+  default. The other options stay opt-in and off by default: `--delta-belt-weight`,
+  `--multistep-horizon` / `--multistep-loss-form`, `--sample-weight-near-pulley`,
+  `--latent-metric-weight`, and the exporter's `--u-bounds-glob`. Identity (12 v2 files, 2
+  epochs): new defaults vs HEAD + sqrt, and `--decoded-next-state-loss-form mse` vs HEAD, both
+  max |diff| 0; the exporter without `--u-bounds-glob` reproduces v3_mix's bounds exactly.
+  Configs that enable the decoded loss without the key (v2_decoded_only, v2_multistep,
+  v3_mix, v3_ft, ablation both / decoded_only) now train with rmse on re-run.
+- T2 and T3 ran in closed loop despite their `learned_lcs_c3_check` failures (coordinator).
+
+**Open:**
+- The latent must be task-shaped. The latent-metric loss (T3) fixes the ranking offline, but
+  not in closed loop. Ideas, none run: a latent whose distance tracks steps to the goal; letting
+  the LCS consistency gradient reach the encoder.
+- Rotation spinning is a separate failure: orientation-envelope safety constraints on both
+  arms are proposed, not run.
+- `goal_tol` (engaged p90) grew to 5.1-5.5 for v4 and admits over states; a stricter goal
+  percentile is worth a look.
+- The T2 LCS conditioning (cond(F) 201).
+- Free-space drift after the early minimum; repeats per cell (every cell here is 1 episode,
+  so these are sensitivities, not rates).
 
 ## 2026-09-27/28 — data diversity, v3 training, OOD gates and the closed-loop re-test
 

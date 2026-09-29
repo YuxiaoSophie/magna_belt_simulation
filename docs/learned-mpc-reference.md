@@ -448,6 +448,130 @@ uv run python scripts/replay_viewer.py --recordings $E/recordings \
 
 Result and diagnosis: `docs/learned-mpc.md`, 2026-09-27/28.
 
+### 5.12 Loss-form flags, v4 retrain, diagnostics and extra evals (2026-09-29)
+
+**Trainer flags** (`~/git/lcs_learning/scripts/train_joint_pointnet_lcs.py`; each also works
+as a snake_case config key). Only the decoded loss's form changed default; everything else is
+off unless set:
+
+| flag | default | what |
+|---|---|---|
+| `--decoded-next-state-loss-form {mse,rmse}` | `rmse` (was `mse`) | form of the decoded next-state loss (still gated by `--enable-decoded-next-state-loss`). `mse` is batch MSE in m², ~6e-4 of the reconstruction gradient, i.e. effectively off; `rmse` is in m, the reconstruction's scale |
+| `--multistep-loss-form {mse,rmse}` | `mse` | per-step form of the multistep loss (the m² form has the same scale problem) |
+| `--multistep-horizon K` | `0` (off) | K-step open-loop decoded-belt loss, K ≥ 2 (existing flag; with `--multistep-weight`, `--multistep-warmup-epochs`, `--multistep-grad-to-encoder`) |
+| `--delta-belt-weight W` | `0.0` (off) | RMSE (m) of decode(LCS(z_t, u_t)) − decode(z_t) vs belt_{t+1} − belt_t; grads reach encoder, LCS and decoder |
+| `--sample-weight-near-pulley K` | `1.0` (uniform) | sample tuples with a belt body within `--near-pulley-mm` (default `30`) of the large-pulley seat circle K× as often (seeded `WeightedRandomSampler`) |
+| `--latent-metric-weight W` | `0.0` (off) | aligns the scaled latent step \|Δz\| with a task distance (belt RMSE mm + `--latent-metric-height-coef` (default `1.0`) × \|Δh\| when both states are near the pulley) |
+
+The near-pulley label comes from `RoundBeltTupleDataset`'s opt-in `pulley_labels` (seat
+distance from `sim_belt_xyz` + `sim_pulley_large_pose`, plus `sim_h_median_mm`). The default
+flip to `rmse` changes a run with `--enable-decoded-next-state-loss` and no explicit form; pass
+`--decoded-next-state-loss-form mse` to reproduce v2/v3 training.
+
+**Exporter `--u-bounds-glob`** (repeatable, `export_learned_lcs_deploy.py`): the `u_lb/u_ub`
+percentiles come from these files' actions only; z stats and `goal_tol_whitened` still come
+from `--data-glob`. `report.json` records the bound source under `u_stats.data_dirs`. The v4
+exports use the insertion data only, which reproduces v2's bounds exactly. The exporter's
+encode-recompute tolerance is now 1e-6 · max(1, max|z|).
+
+**Encoder check tolerance** (§5.2): `scripts/checks/check_latent_encoder.py` E3 compares against
+float32 torch references, whose error grows with |z|, so its PGD tolerances (1e-6 and 1e-5)
+are scaled by max(1, max|z|). Nothing changes for |z| ≤ 1; the T2/T3 latents are ~10× larger.
+
+**v4 retrain** (lcs_learning `outputs/sim_belt_v4_20260929/`): `v4_t{1,2,3}.yaml` (the v3_mix
+yaml plus the keys above), `run_train_v4.sh` (T1-T3 in parallel), `run_export_v4.sh <t>`
+(waits for epoch 300, exports on CPU, writes the decoder, runs the encoder check),
+`evaluate_v4.py` → `eval_table.md`, `deploy_t{1,2,3}/`, `calib/` (grad-norm weight
+calibration), `identity/`, `pipeline.log`.
+
+```bash
+cd ~/git/lcs_learning
+D=outputs/sim_belt_v4_20260929
+uv run --frozen python scripts/train_joint_pointnet_lcs.py --config $D/v4_t1.yaml
+bash $D/run_export_v4.sh t1    # --data-glob = the v3 globs, --u-bounds-glob = v2 insertion dirs
+```
+
+**Diagnostics** (`data/lcs/diag/`, each with its own `scripts/`; summary in `20260929-report.md`):
+
+| dir | what |
+|---|---|
+| `20260929-model-vs-mpc/` | offline q1-q6 (effect rollouts, per-channel levers, LCS structure, latent cost vs task labels, coverage), `q*.json`, `figs/`, `cache/` |
+| `20260929-sim-response/` | E1 open-loop probes, E2 plan vs zero-u, E3 v3 with v2's bounds, `capture/` per-frame snapshots |
+| `20260929-c3-consistency/` | E4: 2235 recorded solve states, offline solves per ADMM setting, closed loop per setting (`closed/<setting>_p<pace>/`) |
+| `20260929-v4-offline/` | q1/q2/q4/q5 for v2 / v3_mix / T1-T3, `summary.md` |
+
+E4 uses opt-in flags of the worktree's `learned_lcs_c3_check` (`--diag_stage_file`,
+`--rho_scale`, `--w_g`, `--w_u`, `--g_lambda`, `--g_eta`, `--u_lambda`, `--u_eta`); the default
+behaviour is unchanged. Its params copies are
+`learned_archive/2026-09-29/round_belt_controller_params_learned_eval_{v2,v3}_<t>_admm{5,10}.yaml`.
+
+**v4 closed loop** (`data/lcs/mpc_eval/20260929-v4-retrain/`): `t{1,2,3}/goals/<target>/`
+(re-encoded goals: `scripts/build_goals_v4.py <eval_root> <model>`), run dirs, `recordings/`
+links, `c3check/`; worktree yamls from `scripts/write_yamls_v4.py` in `learned_archive/2026-09-29/`.
+Run the 6 Phase 6 cells with `scripts/run_eval_v4.sh <model>` (port 7739; `run_eval_v4_7741.sh`
+is the same on 7741) and tabulate with `scripts/eval_table_v4x.py` (adds max EE rotation, early
+stage-2 Franka dz and the minimum panda_hand z) → `table_v4.{md,json}`.
+
+**Yawed targets** (±15° about the large-pulley axis). Build the yawed start states, then the
+targets, then goals, yamls and runs:
+
+```bash
+E=data/lcs/mpc_eval/20260929-v4-retrain
+uv run --frozen python scripts/lcs/make_approach_starts.py \
+    --lcm-url 'udpm://239.255.76.141:7741?ttl=0' \
+    --reference data/lcs/start_states/pre_place_1_osc.npz \
+    --out data/lcs/start_states/yaw_targets_20260929/pp1 \
+    --settings 'yawp15=15,0,0,0;yawm15=-15,0,0,0'
+# same with --reference data/lcs/start_states/ur_depth/ud+3_r0_osc.npz (ud3) and ud+6_r0 (ud6)
+bash $E/scripts/build_yaw_targets.sh   # synthetic_targets/<t>_yaw{p15,m15}/ + stage-1 replays
+uv run --frozen python $E/scripts/build_goals_yaw.py $E/t1_yaw t1 yawp15 yawm15
+uv run --frozen python $E/scripts/write_yamls_yaw.py $E/t1_yaw t1 yawp15 yawm15
+bash $E/scripts/run_eval_yaw.sh t1 yawp15 yawm15  # port 7741, outputs in t1_yaw/
+uv run --frozen python $E/scripts/eval_table_yaw.py $E t1 yawp15 yawm15
+```
+
+`make_yaw_target.py` is `make_flat_engaged_state.py` with the collector's approach yaw applied
+to the demo/grid replays; the start state must already carry the same yaw. It caches the train
+latents in a session scratchpad path (`CACHE`); point that at a writable file before reuse.
+
+**Free-space single-stage goals** (`t1_freespace/`): one `z_goal` per family from a held-out
+`free_space/v1_heldout` frame, started from that episode's own start state, 9 s, per model
+(`t1`, `v2`, `v3_mix`):
+
+```bash
+F=data/lcs/mpc_eval/20260929-v4-retrain/t1_freespace
+uv run --frozen python $F/scripts/build_goals_fs.py t1 v2 v3_mix
+uv run --frozen python $F/scripts/write_yamls_fs.py t1 v2 v3_mix
+bash $F/scripts/run_eval_fs.sh t1               # port 7743; optional family list
+uv run --frozen python $F/scripts/eval_table_fs.py table t1 v2 v3_mix
+```
+
+T1 with v3_mix's bounds: `write_v3bounds.py`, then `run_eval_fs_v3bounds.sh` (outputs in
+`t1_v3bounds/`). `bound_sat.py` and `demo_bound_frac.py` give how often u0 sits at a bound and
+how often the goal demos' own actions exceed a model's bounds.
+
+**Replay** (the goal deploys have no sibling `decoder.npz`, so pass `--decoder`):
+
+```bash
+E=data/lcs/mpc_eval/20260929-v4-retrain
+V4=/home/hienbui/git/lcs_learning/outputs/sim_belt_v4_20260929
+L=planned_belt,planned_ee,actions,target_belt
+# v4 closed loop (t1 / t2 / t3; runs <target>__<start>)
+uv run --frozen python scripts/replay_viewer.py --recordings $E/t1/recordings \
+    --run flat_engaged__nominal --port 8081 --decoder $V4/deploy_t1/decoder.npz \
+    --learned-layers $L --target-belt $E/t1/goals/flat_engaged/demo_goals.npz
+# yawed targets
+uv run --frozen python scripts/replay_viewer.py --recordings $E/t1_yaw/recordings \
+    --run flat_engaged_yawp15__nominal --port 8081 --decoder $V4/deploy_t1/decoder.npz \
+    --learned-layers $L --target-belt $E/t1_yaw/goals/flat_engaged_yawp15/demo_goals.npz
+# free space (<model> = t1 | t1_v3bounds | v2 | v3_mix; --decoder = that model's export)
+uv run --frozen python scripts/replay_viewer.py --recordings $E/t1_freespace/t1/recordings \
+    --run twist --port 8081 --decoder $V4/deploy_t1/decoder.npz \
+    --learned-layers $L --target-belt $E/t1_freespace/t1/goals/twist/demo_goals.npz
+```
+
+Results: `docs/learned-mpc.md`, 2026-09-29.
+
 ## 6. Private LCM groups
 
 Every private-URL run in the day log picks its own group so concurrent runs never collide, and

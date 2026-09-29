@@ -139,8 +139,10 @@ def check_e3(ctx: SimpleNamespace) -> str:
     e_fixed = float(np.abs(np.stack(fixed) - r["z_next_pgd_trainfixed"]).max())
     e_pgd = float(np.abs(np.stack(loose) - r["z_next_pgd"]).max())
     e_exact = float(np.abs(np.stack(loose) - r["z_next_exact"]).max())
-    _require(e_fixed <= 1e-6, f"step(25, 0) vs z_next_pgd_trainfixed {e_fixed:.2e} > 1e-6")
-    _require(e_pgd <= 1e-5, f"step(100, 1e-5) vs z_next_pgd {e_pgd:.2e} > 1e-5")
+    s = max(1.0, float(np.abs(r["z"]).max()))  # float32 torch references: error scales with |z|
+    _require(e_fixed <= 1e-6 * s,
+             f"step(25, 0) vs z_next_pgd_trainfixed {e_fixed:.2e} > {1e-6 * s:.1e}")
+    _require(e_pgd <= 1e-5 * s, f"step(100, 1e-5) vs z_next_pgd {e_pgd:.2e} > {1e-5 * s:.1e}")
     _require(e_exact <= 1e-2, f"step(100, 1e-5) vs z_next_exact {e_exact:.2e} > 1e-2")
     _require(lam_min >= 0.0, f"lam < 0 ({lam_min})")
     _require(lcs.whitened_dist(lcs.z_goal) == 0.0, "whitened_dist(z_goal) != 0")

@@ -79,10 +79,13 @@ FAIL_LABELS = ("over", "under", "slanted")
 CLASSES = ("first_contact", "partial", "final_engaged", "final_over", "final_under",
            "final_slanted")
 FAMILIES = ("groove_slide", "pullout_reseat", "rim_press", "top_cross", "recover",
-            "random_contact")
+            "random_contact", "press_down")
 MAX_AMP = {"groove_slide": 15.0, "pullout_reseat": 25.0, "rim_press": 10.0, "rim_tilt": 6.0,
            "top_lift": 10.0, "top_cross": 15.0, "random_mm": 0.6 * 20.0, "random_deg": 0.6 * 5.0}
 AMP_RANGE = (0.4, 1.0)
+# press_down variants (dz_mm, lateral_mm); the lateral sign is drawn per snapshot
+PRESS_DOWN = ((-4.0, 0.0), (-10.0, 0.0), (6.0, 0.0), (-10.0, 3.0))
+PRESS_RAMP_S, PRESS_T_S = 1.5, 4.0
 T_RANGE = (4.0, 8.0)
 SETTLE_S, PRE_HOLD_S, HOLD_S = 0.5, 1.0, 0.5
 CAP = (3.0, 25.0, 3.0, 25.0)
@@ -353,7 +356,7 @@ def demo_poses() -> dict:
     return out
 
 
-def draw_family(fam: str, key: list[int]) -> dict:
+def draw_family(fam: str, key: list[int], variant: int = 0) -> dict:
     rng = np.random.default_rng(key)
     u = rng.uniform(size=8)
     T = T_RANGE[0] + u[0] * (T_RANGE[1] - T_RANGE[0])
@@ -375,6 +378,10 @@ def draw_family(fam: str, key: list[int]) -> dict:
     elif fam == "random_contact":
         par.update(amp_mm=m * MAX_AMP["random_mm"], amp_deg=m * MAX_AMP["random_deg"],
                    holds=1 + int(u[3] < 0.5), shape_seed=[*key, 1])
+    elif fam == "press_down":
+        dz, lat = PRESS_DOWN[variant]
+        par = {"T_s": PRESS_T_S, "amp_mul": None, "variant": variant, "dz_mm": dz,
+               "lateral_mm": sign * lat if lat else 0.0, "ramp_s": PRESS_RAMP_S}
     else:
         raise KeyError(fam)
     return par
@@ -469,6 +476,12 @@ def family_components(fam: str, par: dict, X0: dict, pulley: dict, dt_s: float,
         comps = [c for arm in ("franka", "ur")
                  for c in cmp._random_arm(arm, rng, cmp.RANDOM_T_REF, a_m, a_r)]
         warp, holds = holds_warp(rng, T, par["holds"])
+    elif fam == "press_down":  # Franka ramp to (dz, lateral) and hold there; UR holds
+        w = ramp(0.0, min(1.0, par["ramp_s"] / T))
+        comps = [C("f_z", "franka", "trans", EZ, w, par["dz_mm"] * 1e-3, "franka")]
+        if par["lateral_mm"]:
+            comps.append(C("f_lat", "franka", "trans", G, w, par["lateral_mm"] * 1e-3, "franka"))
+        return comps, T, None, [], True, {"grasp_axis": G.tolist()}
     else:
         raise KeyError(fam)
     return comps, T, warp, holds, False, extra
@@ -754,7 +767,7 @@ def run_branch(args) -> int:
     sindex = json.loads((snap_dir / "index.json").read_text())
     by_id = {r["id"]: r for r in sindex["variants"]}
     ws = json.loads(Path(args.working_set).read_text())
-    plan = [(by_id[p["id"]], p["family"]) for p in ws["plan"]]
+    plan = [(by_id[p["id"]], p["family"], p.get("variant", 0)) for p in ws["plan"]]
     if args.families:
         keep = set(args.families.split(","))
         plan = [x for x in plan if x[1] in keep]
@@ -805,12 +818,15 @@ def run_branch(args) -> int:
         gauge = cmp.RodGauge(sim)
         i = sum(r["status"] == "ok" for r in index["episodes"])
         fam_seen = Counter(r["family"] for r in index["episodes"] if r.get("attempt", 0) == 0)
-        for srow, fam in plan:
+        pd_snaps: dict[str, int] = {}
+        for srow, fam, variant in plan:
             snap = sim_snapshot.load(snap_dir / srow["file"])
             ctx.snap, ctx.start_state = snap, snap_dir / srow["file"]
             key = [args.seed, FAMILIES.index(fam), fam_seen[fam]]
+            if fam == "press_down":  # one key per snapshot: its variants share the draw
+                key[2] = pd_snaps.setdefault(srow["id"], len(pd_snaps))
             fam_seen[fam] += 1
-            par = draw_family(fam, key)
+            par = draw_family(fam, key, variant)
             for attempt, mul in enumerate((1.0, RETRY_MUL)):
                 row = rollout(sim, ctx, i, srow, snap, fam, par, mul, gauge, demo)
                 row["attempt"] = attempt
@@ -937,6 +953,11 @@ def run_report(args) -> int:
                 "slopes": {x["dim"]: round(x["slope"], 4) for x in sl},
                 "u_std": {x["dim"]: round(x["u_std"] * 1e3, 4) for x in sl},
                 "pass": bool(all(0.8 <= x["slope"] <= 1.1 for x in sl))}
+            # families that leave dims still (press_down): gate only the moving dims
+            mov = [x for x in sl if x["u_std"] >= (5e-4 if "_r" in x["dim"] else 5e-5)]
+            qc["causality_motion_rows"]["moving_dims"] = [x["dim"] for x in mov]
+            qc["causality_motion_rows"]["pass_moving_dims"] = bool(
+                mov and all(0.8 <= x["slope"] <= 1.1 for x in mov))
         write_json(run / "qc.json", qc)
         print(json.dumps({k: v for k, v in qc.items() if k not in ("family_event",)},
                          indent=1, default=float))

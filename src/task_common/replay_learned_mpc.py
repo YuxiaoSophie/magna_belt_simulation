@@ -4,7 +4,8 @@ Draws the ``LEARNED_MPC_DEBUG`` message answering the current frame (the latest 
 ``msg.step <= step``): decoded planned belts, planned EE knots, planned actions and the demo's
 fixed target belts (stage goals, or the final frame of a demo-traj run). Files come from ``meta["learned_mpc"]`` unless overridden; a layer
 whose files are missing is disabled with a reason. Every layer defaults off.
-``target_belt`` (opt-in) takes the target belts from a demo_goals/observation npz instead.
+Staged runs take the target belts from the run's recorded demo_goals ``pcd_belt_stage``; runs
+without a usable one fall back to the demo episode's goal frames.
 """
 
 from __future__ import annotations
@@ -86,11 +87,9 @@ def _goal_fields(path: Path) -> dict[str, Any]:
     return out
 
 
-def _target_belts(path: Path) -> np.ndarray:
+def _goal_belts(path: Path) -> np.ndarray:
     with np.load(path, allow_pickle=False) as d:
-        if "pcd_belt_stage" in d.files:
-            return np.asarray(d["pcd_belt_stage"], dtype=np.float32)
-        return np.asarray(d["pcd_belt"], dtype=np.float32)[None]
+        return np.asarray(d["pcd_belt_stage"])
 
 
 def learned_meta(meta: dict) -> dict:
@@ -268,10 +267,8 @@ class LearnedMpcPanel:
 
     def __init__(self, *, deploy: Path | None = None, decoder: Path | None = None,
                  demo_goals: Path | None = None, demo_episode: Path | None = None,
-                 layers: tuple[str, ...] = (), root: str = ROOT,
-                 target_belt: Path | None = None) -> None:
+                 layers: tuple[str, ...] = (), root: str = ROOT) -> None:
         self.root = root
-        self.target_belt = Path(target_belt) if target_belt else None
         self.overrides = {"deploy": deploy, "decoder": decoder, "demo_goals": demo_goals,
                           "demo_episode": demo_episode}
         self.requested = set(parse_layers(",".join(layers)))
@@ -285,6 +282,7 @@ class LearnedMpcPanel:
         self.demo_belts: np.ndarray | None = None
         self.goal_frames: np.ndarray | None = None  # fixed target frames into demo_belts
         self.staged = False
+        self.target_source: str | None = None  # "demo_goals" or "demo_episode"
         self.current: int = -1
         self.handles: dict[str, Any] = {}
         self._drawn: dict[str, tuple] = {}
@@ -354,7 +352,7 @@ class LearnedMpcPanel:
     def on_run_loaded(self, app: ReplayApp, rec: Recording) -> None:
         start = time.perf_counter()
         self.solves, self.current, self._drawn = [], -1, {}
-        self.decoder = self.demo_belts = self.goal_frames = None
+        self.decoder = self.demo_belts = self.goal_frames = self.target_source = None
         self.staged = False
         self.notes = []
         block = learned_meta(rec.meta)
@@ -393,8 +391,12 @@ class LearnedMpcPanel:
             except (OSError, KeyError, ValueError) as exc:
                 why = f"decoder unusable: {exc!r}"
         self.available["planned_belt"] = why
-        if self.target_belt is not None:
-            self.available["target_belt"] = self._use_target_belt()
+        recorded = self._recorded_goals(block)
+        if recorded is None:
+            self.available["target_belt"] = None
+            self.target_source = "demo_goals"
+            self.notes.append(f"target belts: recorded demo_goals ({len(self.demo_belts)} "
+                              f"stage{'s' * (len(self.demo_belts) > 1)})")
             return
         why = self._missing("demo_episode")
         if why is None:
@@ -408,22 +410,39 @@ class LearnedMpcPanel:
                 why = f"demo_episode unusable: {exc!r}"
         if why is None:
             why = self._resolve_goals(block)
+        if why is None:
+            self.target_source = "demo_episode"
+            if recorded != "demo-traj run":
+                self.notes.append(f"target belts: demo frames {self.goal_frames.tolist()} "
+                                  f"({recorded})")
+        else:
+            self.demo_belts = None
+            why = f"{why}; recorded goals: {recorded}"
         self.available["target_belt"] = why
 
-    def _use_target_belt(self) -> str | None:
-        """Goal belts from ``target_belt``: a demo_goals.npz ``pcd_belt_stage`` (n, P, 3), one
-        per stage, or an observation.npz ``pcd_belt`` (P, 3), one fixed goal."""
-        if not self.target_belt.is_file():
-            return f"target_belt missing: {self.target_belt}"
+    def _recorded_goals(self, block: dict) -> str | None:
+        """Goal belts from the run's demo_goals ``pcd_belt_stage`` (n, P, 3), one per stage;
+        returns why they cannot be used. A ``--demo-goals`` override is not sha-checked."""
+        if block.get("demo_traj_yaml"):
+            return "demo-traj run"
+        why = self._missing("demo_goals")
+        if why is not None:
+            return why
+        path, want = self.paths["demo_goals"], block.get("demo_goals_sha256")
+        if (self.overrides.get("demo_goals") is None and want
+                and self._load("sha:demo_goals", _sha256, path) != want):
+            return "demo_goals changed since the run (sha256 differs)"
         try:
-            belts = self._load("target_belt", _target_belts, self.target_belt)
-        except (OSError, KeyError, ValueError) as exc:
-            return f"target_belt unusable: {exc!r}"
+            belts = self._load("goal_belts", _goal_belts, path)
+        except KeyError:
+            return f"no pcd_belt_stage in {path.name}"
+        except (OSError, ValueError) as exc:
+            return f"demo_goals unusable: {exc!r}"
         if belts.ndim != 3 or belts.shape[2] != 3 or not belts.shape[0] * belts.shape[1]:
-            return f"target_belt belts shape {belts.shape}"
+            return f"pcd_belt_stage shape {belts.shape}"
         staged = len(belts) > 1
         if staged and any("stage" not in s.scalars for s in self.solves):
-            return "staged target_belt but the run has no stage scalar"
+            return "staged demo_goals but the run has no stage scalar"
         self.demo_belts, self.staged = belts, staged
         self.goal_frames = np.arange(len(belts), dtype=np.int64)
         return None

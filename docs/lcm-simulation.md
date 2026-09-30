@@ -492,7 +492,7 @@ the repo root; the "extra args" column is what follows the script path.
 | `scripts/checks/check_robotiq_width.py` | the `ROBOTIQ_COMMAND` byte to jaw width map (§2) against a live `RoundBeltLcmSimulation` on a private LCM group: (T0) the 256-entry byte -> driver target table (byte 0 at the open value, 255 at the full-close target, monotone, calibration spanning open to `gripper_drive.stop`), (T1) a 10-byte free-air sweep whose measured pad gap (minimum distance between the two pad collision meshes) is within 1 mm of `open_gap * (1 - byte/255)`, endpoints included, (T2) the `ROBOTIQ_STATUS` position echoes each reached byte to within 3 counts | none |
 | `scripts/checks/check_recording.py` | 10 checks (`R0`-`R9`) against a live, non-realtime `RoundBeltLcmSimulation` recording (`--record`) on a private LCM group: build, a 600-step scripted sequence (a hand command republished unchanged then changed — one `hand_command` event per goal, two Robotiq commands, a deliberate belt trigger), the on-disk files, `Recording.load`, events/signals, `Recording.list_runs`, the recording's per-step overhead against an unrecorded baseline, loading an unfinished copy (chunk discovery) and a copy with a chunk removed (`ValueError`), and run-dir name collisions (§10) | none |
 | `scripts/checks/check_replay_viewer.py` | 11 checks (`V0`-`V10`) against a headless `ReplayApp` (§10) over two recorded runs (a scripted 600-step run and a second, shorter one): run selection, seeking, playback, metrics, events, plots, triads, refusal of a body-label mismatch, per-seek render timing, and synthetic target messages in both runs (target triads vs. `target_world_pose`, a run switch from past the shorter run's end, a failing hook during a GUI run switch), and a 5 s real-time looped playback's rates (redraws/s near `render_fps`, chart updates <= 6/s per chart, no scale resends) | none |
-| `scripts/checks/check_replay_learned_mpc.py` | 6 checks (`X0`-`X5`) of the learned-MPC replay layers (§10) against a headless `ReplayApp` over one learned and one baseline run of the 2026-09-24 replay set and one staged run of `20260925-002801-stages` (read-only, linked into a temp root): (X0) the CLI registers the panel only for learned roots or path flags and drops the removed `readout`/`action_rotation` names, layers default off, action scale defaults to 9, layers are disabled on the baseline run; (X1) at 5 frames the picked solve is the latest with `step <= frame step`, the Franka plan knots match the harness transform (<= 1e-6 m), `planned_ee` holds only the Franka knots and the augmented dots (no paths, no UR knots), the `x_sol` dots match exactly, decoded belts are bit-exact (150 points) and the tube centres match them at every 3rd point, the one green target tube matches `pcd_belt[59]` (staged run: tubes at frames 13 and 59 of `demo_flat`, only the current stage's tube is visible, no ref tubes), each arrow starts at its knot (<= 1e-6 m), points along `u_i` (cos > 0.999999), has length scale x `\|u_i\|` (1e-9 relative), tip at base + scale x `u_i` (<= 1e-6 m) and chains tip to tail at scale 1; (X2) toggling and scale changes keep the handle count; at scales 1 and 20 the tips are exact and the shaft/head sizes are the constants (head-only arrows shrunk to their length); redraw < 50 ms; (X3) missing decoder/demo files disable only their layers; (X5) `--target-belt` observation / per-stage demo_goals belts, default off; (X4) `check_replay_viewer.py` V0-V10 on `--lcm-url` | none (X4: a private LCM group, default `7705`) |
+| `scripts/checks/check_replay_learned_mpc.py` | 6 checks (`X0`-`X5`) of the learned-MPC replay layers (§10) against a headless `ReplayApp` over one learned and one baseline run of the 2026-09-24 replay set and one staged run of `20260925-002801-stages` (read-only, linked into a temp root): (X0) the CLI registers the panel only for learned roots or path flags and drops the removed `readout`/`action_rotation` names, layers default off, action scale defaults to 9, layers are disabled on the baseline run; (X1) at 5 frames the picked solve is the latest with `step <= frame step`, the Franka plan knots match the harness transform (<= 1e-6 m), `planned_ee` holds only the Franka knots and the augmented dots (no paths, no UR knots), the `x_sol` dots match exactly, decoded belts are bit-exact (150 points) and the tube centres match them at every 3rd point, the one green target tube matches `pcd_belt[59]` (staged run: recorded demo_goals tubes, bit-exact frames 13 and 59 of `demo_flat`, only the current stage's tube is visible, no ref tubes), each arrow starts at its knot (<= 1e-6 m), points along `u_i` (cos > 0.999999), has length scale x `\|u_i\|` (1e-9 relative), tip at base + scale x `u_i` (<= 1e-6 m) and chains tip to tail at scale 1; (X2) toggling and scale changes keep the handle count; at scales 1 and 20 the tips are exact and the shaft/head sizes are the constants (head-only arrows shrunk to their length); redraw < 50 ms; (X3) missing decoder/demo files disable only their layers; (X5) target belts from the recorded demo_goals (sha mismatch reported and not drawn, demo-frame fallback without one; `--target-belt` rejected); (X4) `check_replay_viewer.py` V0-V10 on `--lcm-url` | none (X4: a private LCM group, default `7705`) |
 | `scripts/checks/check_sim_snapshot.py` | 6 checks (`S0`-`S5`) that `task_common.sim_snapshot` restores a `RoundBeltLcmSimulation` state, on a private LCM group: (S0) build + settle, (S1) baseline restore-vs-continue noise, (S2) restore fidelity mid-motion (hand opening, Robotiq closing) in the same sim, (S3) the same restore in a second sim built fresh from the saved `.npz`, (S4) refusal of an edited/truncated snapshot (no side effects), (S5) the CUDA graph is dropped and re-captured and step/time bookkeeping is exact after restore | none |
 | `scripts/checks/check_inproc_motion.py` | 6 checks (`M0`-`M5`) of the in-process waypoint motion (no magna, no LCM): (M0) `pre_mpc_motion` waypoints from magna's yaml, world frame, gripper commands, (M1) numpy FK vs the built model's bodies, (M2) IK round trips at every waypoint + the nominal joint trajectory's per-step jump, (M3) the nominal pick holds the belt and is snapshotted, (M4) restore + `pre_place_1 -> place_3` tracking, the grasp held at `pre_place_2` and belt bodies reaching the large pulley, (M5) two restored replays of M4 agree (determinism) | none |
 | `scripts/checks/check_commander.py` | 7 checks (`N0`-`N6`) of the emulated magna waypoint/UR-line commander (`round_belt_task.commander`), no sim, no LCM: (N0) Franka position knots, (N1) orientation knots, (N2) the reach/latch/dwell/advance state machine, (N3) the UR 2-knot line + regeneration rule + `tool0` frame, (N4) bounded excitation, (N5) the `TARGET_CARTESIAN_POSE_TRAJECTORY` LCM message round trip (plus, if a recorded magna run has target messages, its layout), (N6) OU excitation statistics (stationary std, lag-1 autocorrelation, step std, fade ramp) vs uncorrelated white draws | none |
@@ -897,7 +897,7 @@ uv run python scripts/replay_viewer.py --episodes data/lcs/approach/v1_heldout \
 
 `scripts/record_replay_video.py` renders a run to MP4 on the server. Use it when the viewer is
 watched over a slow link. It takes the viewer's run and layer flags (`--recordings --run
---decoder --deploy --demo-goals --demo-episode --target-belt --learned-layers --show-collision
+--decoder --deploy --demo-goals --demo-episode --learned-layers --show-collision
 --point-cloud`), plus `--action-scale` (default 9).
 
 ```bash
@@ -1019,7 +1019,9 @@ uv run python scripts/record_prediction_video.py \
   (`lcp_exact`; unique, since F + F' > 0). That is what `evaluate_v2.py` ran through qpOASES:
   equal to 4e-16 on all 4369 test tuples, and it gives the same pooled one-step RMSE, 0.577 mm.
   `pgd` is the trained 25-iteration PGD, which has no skew part J. `--deploy` / `--decoder`
-  pick the model (default v2 `deploy_v2_decoded_only`).
+  pick the model (default v2 `deploy_v2_decoded_only`). For an export with a state-dependent
+  B(z) head (`bz__*` in `deploy.npz`), both solvers use `B_at(z)` / `d_at(z)` at the current
+  latent (`lcp` agrees with `pgd` within 1e-4); before 2026-09-30 `lcp` used the bare B0.
 - **Timing and output.** Each episode frame is shown for `--repeat` (3) video frames at
   `--speed` (0.5) episode s per video s, i.e. 20 fps. `--still-s` writes PNGs.
   `<out>.npz` is the sidecar: the belts, RMSEs, the predicted-tube vertices sent to the scene,
@@ -1072,16 +1074,17 @@ plan re-sends the 7 planned tubes, about 26 KB (was 102 KB at 150 points x 8 sid
 **Files.** The panel reads `deploy`, `demo_goals` and `demo_episode` from `meta.json`'s
 `learned_mpc` block, and the decoder from `<deploy dir>/decoder.npz`. The flags `--deploy`,
 `--decoder`, `--demo-goals` and `--demo-episode` override them. A missing decoder disables
-Planned belt; a missing demo episode disables Target belt. The goal frames come from the
-deploy's `goal_frames` and `demo_goals.npz`'s `stage_frames` (either falls back to the `#a,b` of
+Planned belt. Target belts come from the run's recorded `demo_goals.npz`: on a staged run whose
+file still matches `demo_goals_sha256` and has `pcd_belt_stage`, one tube per stage (only the
+current stage shown; one stage = one fixed tube). `--demo-goals` replaces that file (not
+sha-checked). A sha mismatch is reported and the file's belts are not used. Otherwise (older
+runs, demo-traj runs) the tubes are demo frames: a missing demo episode disables Target belt,
+and the status says which source was used. The goal frames come from the deploy's `goal_frames` and `demo_goals.npz`'s `stage_frames` (either falls back to the `#a,b` of
 `goal_source`); Target belt is disabled if neither has them, if they disagree, if they fall outside
 the demo, if the goals were taken from another demo episode (sha256), or if `meta.learned_mpc`
 lacks `demo_traj_yaml`. The folder's
 first line gives the reason, and the other layers still work. A file whose sha256 differs from
 the one the recording lists is noted there too (not checked for CLI overrides).
-`--target-belt <npz>` (opt-in; viewer and video) replaces the demo lookup: a `demo_goals.npz`'s
-`pcd_belt_stage` gives one tube per stage (staged as above), an `observation.npz`'s `pcd_belt`
-one fixed tube. Use it for goals that are not demo frames (synthetic targets).
 
 **When it appears.** `scripts/replay_viewer.py` adds the folder only if a run under
 `--recordings` has `learned_mpc.debug_channel` set in its `meta.json`, or a path flag is given.
@@ -1138,8 +1141,10 @@ a browser or touch `recordings/` in the repo. See §8 for what each checks in de
 `LearnedMpcPanel`. X0 checks that the panel registers and is disabled on the baseline run. X1
 checks that the geometry at 5 frames equals the recorded solve, plan, decoder and demo. X2
 checks that toggling keeps the handle count, and times the redraw. X3 checks that missing files
-degrade cleanly. X5 checks `--target-belt` (default off; observation = one tube, demo_goals =
-per-stage tubes on the staged run; a missing file disables only Target belt). X4 runs
+degrade cleanly. X5 checks the target-belt source on edited copies of the staged run: recorded
+synthetic 2-stage and 1-stage demo_goals are drawn as recorded; a sha mismatch is reported and
+not drawn; no demo_goals / no `pcd_belt_stage` fall back to the demo frames; `--target-belt` is
+rejected and a `--demo-goals` override is drawn. X4 runs
 `check_replay_viewer.py` V0-V10 on `--lcm-url` (default
 `udpm://239.255.76.105:7705?ttl=0`); `--skip-x4` skips it.
 `scripts/checks/check_replay_video.py` (no LCM; viser ports `--port` and `--port`+1, default
@@ -1151,8 +1156,10 @@ vertices. V1 renders 10 frames through the CLI, passing the copied json as `--ca
 checks count, size,
 non-blank frames and that consecutive frames differ. V2 checks that a rerun is bit-identical.
 V3 checks that `--compare` gives 2W x H. V4 renders the V1 frames again with `--no-legend`: the
-pixels that differ in every frame must lie in the bottom-right corner. V5: `--target-belt` with
-the run's own goal belts renders V1 bit-exactly, and a 30 mm shifted belt changes the frames.
+pixels that differ in every frame must lie in the bottom-right corner. V5: V1 drew the
+recorded demo_goals; with its sha mismatched or no demo_goals in the meta, the demo-frame
+fallback renders V1 bit-exactly; a 30 mm shifted `--demo-goals` changes the frames;
+`--target-belt` is rejected.
 V6: two `--inset` views keep the frame size, change the inset windows (stacked top-right) but
 not the rest of the frame vs V1, and a rerun is bit-identical. V7 tests the blank-render
 guard. A real WebGL context loss mid-render (DevTools `WEBGL_lose_context`) must give exactly

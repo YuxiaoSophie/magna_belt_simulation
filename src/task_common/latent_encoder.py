@@ -162,7 +162,11 @@ class LatentDecoder:
 
 
 class LearnedLcs:
-    """The exported learned LCS: ``z+ = A z + B u + D lam + d``, ``lam`` from Nesterov PGD."""
+    """The exported learned LCS: ``z+ = A z + B u + D lam + d``, ``lam`` from Nesterov PGD.
+
+    With a state head (``bz__*`` keys) ``B = B(z)`` (and ``d = d(z)`` if ``bz_delta_d``);
+    ``rollout(freeze=True)`` holds ``B(z0)`` over the horizon, as the controller does per solve.
+    """
 
     def __init__(self, d: dict) -> None:
         for k in ("A", "B", "D", "d", "E", "F", "H", "c", "G", "J"):
@@ -185,6 +189,9 @@ class LearnedLcs:
         self.goal_frames = (np.asarray(d["goal_frames"], dtype=np.int64)
                             if "goal_frames" in d else None)
         self._check_shapes()
+        self.has_head = "bz__w1" in d
+        if self.has_head:
+            self._load_head(d)
         self.F_pgd = self.G @ self.G.T + self.stiffness * np.eye(self.n_lam)
         self._step_size = 1.0 / max(float(np.linalg.eigvalsh(self.F_pgd).max()), 1e-6)
 
@@ -202,9 +209,40 @@ class LearnedLcs:
         if np.any(self.z_std <= 0.0):
             raise ValueError("z_std must be > 0")
 
+    def _load_head(self, d: dict) -> None:
+        self.bz_hidden = int(_scalar(d["bz__hidden"]))
+        self.bz_act = str(_scalar(d["bz__act"]))
+        self.bz_delta_d = bool(_scalar(d["bz__delta_d"]))
+        for k in ("w1", "b1", "w2", "b2"):
+            setattr(self, f"bz_{k}", np.asarray(d[f"bz__{k}"], dtype=np.float64))
+        h, nx, nu = self.bz_hidden, self.n_x, self.n_u
+        m = nx * nu + (nx if self.bz_delta_d else 0)
+        want = {"w1": (h, nx), "b1": (h,), "w2": (m, h), "b2": (m,)}
+        for k, shape in want.items():
+            if getattr(self, f"bz_{k}").shape != shape:
+                raise ValueError(f"bz__{k} shape {getattr(self, f'bz_{k}').shape} != {shape}")
+        if self.bz_act != "tanh":
+            raise ValueError(f"bz__act {self.bz_act!r} unsupported")
+
     @classmethod
     def load(cls, deploy_npz) -> LearnedLcs:
         return cls(_load_npz(deploy_npz))
+
+    def head_out(self, z) -> np.ndarray:
+        """``W2 tanh(W1 z + b1) + b2``: ``(M,)`` per z, ``(K, M)`` for ``(K, n_x)``."""
+        z = np.asarray(z, dtype=np.float64)
+        return np.tanh(z @ self.bz_w1.T + self.bz_b1) @ self.bz_w2.T + self.bz_b2
+
+    def B_at(self, z) -> np.ndarray:
+        if not self.has_head:
+            return self.B
+        o = self.head_out(z)
+        return self.B + o[: self.n_x * self.n_u].reshape(self.n_x, self.n_u)
+
+    def d_at(self, z) -> np.ndarray:
+        if not (self.has_head and self.bz_delta_d):
+            return self.d
+        return self.d + self.head_out(z)[self.n_x * self.n_u:]
 
     def solve_lambda(self, z, u, iters: int = 25, tol: float = 0.0) -> np.ndarray:
         """``lcs_model.py`` PGD; ``tol > 0`` stops when ``|lam - lam_old| < tol``."""
@@ -221,24 +259,39 @@ class LearnedLcs:
             t = t_next
         return lam
 
-    def step(self, z, u, iters: int = 25, tol: float = 0.0
+    def step(self, z, u, iters: int = 25, tol: float = 0.0, B=None, d=None
              ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """``(z_next, lam, slack)``; defaults = the trained fixed 25-iteration solver."""
+        """``(z_next, lam, slack)``; defaults = the trained fixed 25-iteration solver.
+
+        ``B``/``d`` default to ``B_at(z)``/``d_at(z)`` (``B``/``d`` without a head).
+        """
         z = np.asarray(z, dtype=np.float64)
         u = np.asarray(u, dtype=np.float64)
         lam = self.solve_lambda(z, u, iters, tol)
-        z_next = self.A @ z + self.B @ u + self.D @ lam + self.d
+        if self.has_head:
+            B = self.B_at(z) if B is None else B
+            d = self.d_at(z) if d is None else d
+        else:
+            B = self.B if B is None else B
+            d = self.d if d is None else d
+        z_next = self.A @ z + B @ u + self.D @ lam + d
         slack = self.F @ lam + self.E @ z + self.H @ u + self.c
         return z_next, lam, slack
 
-    def rollout(self, z0, U, iters: int = 25, tol: float = 0.0
+    def rollout(self, z0, U, iters: int = 25, tol: float = 0.0, freeze: bool = True
                 ) -> tuple[np.ndarray, np.ndarray]:
-        """``(Z (T+1, n_x), Lam (T, n_lam))`` for inputs ``U (T, n_u)``."""
+        """``(Z (T+1, n_x), Lam (T, n_lam))`` for inputs ``U (T, n_u)``.
+
+        ``freeze``: ``B(z0)``/``d(z0)`` for every step (deploy); else re-evaluated per step.
+        """
         U = np.asarray(U, dtype=np.float64).reshape(-1, self.n_u)
         Z = [np.asarray(z0, dtype=np.float64)]
+        B = d = None
+        if freeze and self.has_head:
+            B, d = self.B_at(Z[0]), self.d_at(Z[0])
         lams = []
         for u in U:
-            z_next, lam, _ = self.step(Z[-1], u, iters, tol)
+            z_next, lam, _ = self.step(Z[-1], u, iters, tol, B=B, d=d)
             Z.append(z_next)
             lams.append(lam)
         return np.stack(Z), np.asarray(lams).reshape(len(U), self.n_lam)

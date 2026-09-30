@@ -9,8 +9,9 @@ V1: the CLI renders 10 frames of a learned run with that copied json as ``--came
 non-blank, consecutive frames differ while playing. V2: a rerun gives identical frames.
 V3: ``--compare`` stacks two runs side by side. V4: the colour legend is drawn by default
 (bottom-right) and ``--no-legend`` removes it, leaving the rest of the frame identical.
-V5: ``--target-belt`` (off by default) with the run's own goal belts renders V1 bit-exactly; a
-shifted belt changes the frames. V6: two ``--inset`` views: frame size kept, the inset windows
+V5: target belts come from the run's recorded demo_goals (``--target-belt`` is gone); with that
+file's sha mismatched, or no demo_goals in the meta, the demo-frame fallback renders V1
+bit-exactly; a shifted ``--demo-goals`` changes the frames. V6: two ``--inset`` views: frame size kept, the inset windows
 differ from V1 while the rest of the frame does not, and a rerun is bit-identical.
 V7: the blank-render guard: a real WebGL context loss mid-render (DevTools) restarts Chromium
 and re-renders that frame (same frames as a clean pass); a render that stays blank raises
@@ -24,6 +25,8 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
+import io
 import json
 import re
 import subprocess
@@ -254,30 +257,59 @@ def check_legend(args: argparse.Namespace, tmp: Path, camera: str,
     return f"legend box x {box[0]}-{box[2]}, y {box[1]}-{box[3]}; --no-legend removes it"
 
 
+def _meta_variant(args: argparse.Namespace, root: Path, **learned) -> argparse.Namespace:
+    """``RUN`` under ``root`` with ``meta.learned_mpc`` edited (None deletes a key)."""
+    src, run = (args.recordings / RUN).resolve(), root / RUN
+    run.mkdir(parents=True)
+    for item in src.iterdir():
+        if item.name != "meta.json":
+            (run / item.name).symlink_to(item)
+    meta = json.loads((src / "meta.json").read_text())
+    for key, value in learned.items():
+        if value is None:
+            meta["learned_mpc"].pop(key, None)
+        else:
+            meta["learned_mpc"][key] = value
+    (run / "meta.json").write_text(json.dumps(meta))
+    return argparse.Namespace(**{**vars(args), "recordings": root})
+
+
 def check_target_belt(args: argparse.Namespace, tmp: Path, camera: str,
                       first: np.ndarray) -> str:
-    base = rv.create_parser().parse_args([*common_args(args), "--run", RUN, "--out", "x.mp4"])
-    assert rv.video_hooks(base)[0].target_belt is None, "target_belt set by default"
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            rv.create_parser().parse_args([*common_args(args), "--out", "x.mp4",
+                                           "--target-belt", "auto"])
+        raise AssertionError("--target-belt still accepted")
+    except SystemExit:
+        pass
     meta = json.loads((args.recordings / RUN / "meta.json").read_text())["learned_mpc"]
-    with np.load(meta["deploy"]) as d:
-        goal = np.asarray(d["goal_frames"], dtype=np.int64)
-    belts = np.load(meta["demo_episode"])["pcd_belt"][goal].astype(np.float32)
-    np.savez(tmp / "same.npz", pcd_belt_stage=belts)
-    np.savez(tmp / "shift.npz", pcd_belt_stage=belts + np.float32(0.03))
-    cli = rv.create_parser().parse_args([*common_args(args), "--run", RUN, "--out", "x.mp4",
-                                         "--target-belt", str(tmp / "same.npz")])
-    assert rv.video_hooks(cli)[0].target_belt == tmp / "same.npz", "flag not passed"
-    render(args, tmp / "v5a.mp4", camera, tmp / "v5a.log", ("--target-belt", str(tmp / "same.npz")))
-    same = read_frames(tmp / "v5a.mp4", W, H)
-    worst = int(np.abs(same.astype(np.int16) - first).max())
-    assert worst == 0, f"same belts via --target-belt differ from the meta path: {worst}"
-    render(args, tmp / "v5b.mp4", camera, tmp / "v5b.log",
-           ("--target-belt", str(tmp / "shift.npz")))
-    moved = read_frames(tmp / "v5b.mp4", W, H)
+    with np.load(meta["demo_goals"]) as d:
+        goals, frames = np.asarray(d["pcd_belt_stage"]), np.asarray(d["stage_frames"])
+    demo = np.load(meta["demo_episode"])["pcd_belt"]
+    assert np.array_equal(goals, demo[frames]), "recorded goals != demo frames"
+    assert "target belts: recorded demo_goals" in (tmp / "v1.log").read_text(), \
+        "V1 did not draw the recorded demo_goals"
+    out = []
+    for tag, edits, note in (("v5a", {"demo_goals_sha256": "0" * 64}, "sha256 differs"),
+                             ("v5b", {"demo_goals": None, "demo_goals_sha256": None},
+                              "no demo_goals path")):
+        variant = _meta_variant(args, tmp / tag, **edits)
+        render(variant, tmp / f"{tag}.mp4", camera, tmp / f"{tag}.log")
+        log = (tmp / f"{tag}.log").read_text()
+        assert f"target belts: demo frames {frames.tolist()}" in log and note in log, \
+            f"{tag}: no demo-frame fallback note ({note!r}) in {tmp / f'{tag}.log'}"
+        worst = int(np.abs(read_frames(tmp / f"{tag}.mp4", W, H).astype(np.int16) - first).max())
+        assert worst == 0, f"{tag}: demo-frame fallback differs from the recorded goals: {worst}"
+        out.append(note)
+    np.savez(tmp / "shift.npz", pcd_belt_stage=goals + 0.03, stage_frames=frames)
+    render(args, tmp / "v5c.mp4", camera, tmp / "v5c.log", ("--demo-goals", str(tmp / "shift.npz")))
+    moved = read_frames(tmp / "v5c.mp4", W, H)
     changed = (np.abs(moved.astype(np.int16) - first).max(-1) > 12).mean((1, 2))
-    assert changed.min() > 1e-3, f"shifted target belt not drawn: {changed}"
-    return (f"default off; goals {goal.tolist()} via --target-belt == meta path (bit-exact); "
-            f"+30 mm shift changes {changed.min():.2%}-{changed.max():.2%} of pixels")
+    assert changed.min() > 1e-3, f"shifted demo_goals not drawn: {changed}"
+    return (f"--target-belt rejected; V1 drew the recorded demo_goals (== demo frames "
+            f"{frames.tolist()}); fallback on {' / '.join(out)} bit-exact to V1; +30 mm "
+            f"--demo-goals changes {changed.min():.2%}-{changed.max():.2%} of pixels")
 
 
 def check_insets(args: argparse.Namespace, tmp: Path, camera: str,

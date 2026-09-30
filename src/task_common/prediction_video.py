@@ -104,6 +104,9 @@ class OneStepModel:
         if self.solver == "pgd":
             return np.stack([s.step(a, b)[0] for a, b in zip(z, u, strict=True)])
         lam = lcp_exact(s.F, z @ s.E.T + u @ s.H.T + s.c, self._subsets)
+        if s.has_head:  # state-dependent B(z) / d(z)
+            bu = np.stack([s.B_at(a) @ b for a, b in zip(z, u, strict=True)])
+            return z @ s.A.T + bu + lam @ s.D.T + np.stack([s.d_at(a) for a in z])
         return z @ s.A.T + u @ s.B.T + lam @ s.D.T + s.d
 
     def decode(self, z) -> np.ndarray:

@@ -7,7 +7,7 @@ This doc is a day-by-day log of what was tried, what broke, and how it was fixed
 For the wire contract, the params-yaml schema and step-by-step commands, see
 `docs/learned-mpc-reference.md`. Where any of this and the code disagree, the code wins.
 
-## Current status (2026-09-29)
+## Current status (2026-09-30)
 
 **Best controller so far:** `honor_penalize_input_change: true`, `w_r 0.3`,
 `demo_traj.w_p 0.03` (an EE-path cost) on the `v2_decoded_only` model — held-out engaged
@@ -26,7 +26,7 @@ the closed loop worse (2026-09-29, E4).
 
 **Current model:** `v2_decoded_only`, W&B run `nsxihz32`, epoch 300, trained on 464 episodes /
 33,382 train tuples (`data/lcs/v2/split.json`). It stays the deployed MPC model after
-2026-09-29: on the 6 synthetic-target cells it is still the best (strict 4/6).
+2026-09-30: on the 6 synthetic-target cells it is still the best (strict 4/6).
 
 **v3 (2026-09-28), not adopted:** `v3_mix` (W&B `rt2j3k45`, the v2 recipe on the union of v2 +
 free-space + approach + contact data, 790 episodes / 82,834 tuples, `data/lcs/v3/split.json`)
@@ -60,10 +60,21 @@ in-batch negatives, no action term) inflates the latent scale unless bounded; wi
 (T6a) or pin (T6b) the scale holds, but both fail in closed loop (seat 0/6, yaw 0/12 and 2/12,
 free space ends further from the goal), with spins and the hand below the board.
 
-**Ranking (end of 2026-09-29):** v2 is the only reliable seater (4/6). T1 is safe but rests on
-top of the pulley; T1 + metric A gives 6/12 on yawed targets. v3_mix and T1 with v3_mix's `u`
-bounds lead in free space. T3, T5a, T5b, T6a and T6b are unsafe (spins, penetration, grasp
-loss).
+**v7 state-dependent LCS (2026-09-30), most promising retrain, not adopted:** the T1 recipe
+with a state-dependent input matrix B(z) = B0 + ΔB(z) (a z-only tanh MLP, evaluated once per
+C3 solve and frozen over the horizon). V1 (one-step) fixes T1's riding-over sign: the early
+stage-2 press goes down (Franka dz −4.4 vs +8.3 mm) and no seat cell ends over. Seat 2/6 strict,
+3/6 engaged, RMSE 10.0 mm ("promising", not a pass); but it overshoots to "under" in 2 seat
+cells, fails the yaw set (3/12) with a safety failure at +15° (5 grasp losses, Franka spins,
+hand below the board) and free space (12.7 mm). V2 (+ frozen multistep H7) inflates B and
+destabilises A (ρ(A) 1.264) and was not run in closed loop. All switches are opt-in, off by
+default (`docs/learned-mpc-reference.md` §5.13).
+
+**Ranking (end of 2026-09-30):** v2 is the only reliable seater (4/6). V1 is the first retrain
+that presses down instead of riding over (2/6 strict), but it is unsafe on the +15° yawed
+targets. T1 is safe but rests on top of the pulley; T1 + metric A gives 6/12 on yawed targets.
+v3_mix and T1 with v3_mix's `u` bounds lead in free space. T3, T5a, T5b, T6a and T6b are unsafe
+(spins, penetration, grasp loss).
 
 **Trainer default (lcs_learning, user decision 2026-09-29):** the decoded next-state loss uses
 the `rmse` form by default (it was MSE in m², effectively off next to the RMSE reconstruction).
@@ -76,10 +87,256 @@ ranking). Rotation spinning is a separate failure: plans that lean on large Fran
 leave the data, where the models are wrong. The demo-tracking progress index stalls/deadlocks
 on a large fraction of held-out starts, and the goal tolerance does not separate `engaged` from
 `slanted` (the v4 over states also fall inside it). A task-fitted cost metric does not fix
-seating: at the riding-over states the model's action response is wrong (it prefers Fz+ where
-Fz− lowers the task distance). Next (none run): contact data (press-down from riding-over
-states, branches), then a retrain with a fixed dynamics objective; orientation-envelope safety
-constraints for the spinning.
+seating. B(z) (V1) fixes the press direction but overshoots, and the latent cost still never
+prefers Franka Fz− at the riding-over states. Franka-only pressing does not seat in the sim
+(the UR holds its side up), and the training data has few UR-down steps in contact. The
+C3 plans stay inconsistent with the model (relaxed λ at `admm_iter` 2), and near the seat the
+latent is nearly blind (V1: latent distance 0.52 at 7.7 mm true belt error). Next (none
+run): V1 + metric A; V1b (head warm-up so B0 learns); coordinated-press data (UR down / both
+arms); orientation-envelope safety constraints for the spinning.
+
+## 2026-09-30 — state-dependent LCS B(z), press-down data, V1 closed loop
+
+**Summary:** On 2026-09-29 the model's action response near the pulley was the main
+bottleneck: at T1's riding-over end states the fixed-B LCS's lever is a coin flip (|E|-weighted
+sign agreement 0.39-0.52) and it prefers Fz+ where Fz− lowers the task distance. This day made
+the input matrix state-dependent, B(z) = B0 + ΔB(z), trained in lcs_learning and swapped into
+C3 once per solve. Two variants on the T1 recipe: V1 (one-step) and V2 (+ a 7-step loss with
+the head frozen at z_0, as in deployment). By the offline gate rule the pick is STOP (neither
+passes G1-G6); V1 is the better variant and the first model to pass the onset lever gate G2a.
+V1 in closed loop (on the user's go) fixes T1's riding-over: the press goes down and no seat
+cell ends over. Seat 2/6 strict (T1 0/6), but 2 cells overshoot to "under", the +15° yawed set
+is unsafe (5 grasp losses) and free space is 12.7 mm. A paired ±Fz press-down eval set (48
+rollouts) confirms the lever sign in the sim, but a Franka-only press never seats: the UR holds
+its side up. `v2_decoded_only` stays deployed; V1 is the most promising retrain but is not
+adopted. Plan: `handoffs/PLAN-20260930-state-dependent-lcs.md`; gates:
+`data/lcs/diag/20260930-sdlcs/{gates,pick}.md`; closed loop:
+`data/lcs/mpc_eval/20260930-sdlcs/`; paths and commands: `docs/learned-mpc-reference.md` §5.13.
+
+**Tried:**
+- **State-dependent LCS design.** With z ∈ R^16, u ∈ R^12, λ ∈ R^8:
+
+  ```
+  h(z)  = tanh(W1 z + b1)             W1: 64×16
+  o(z)  = W2 h(z) + b2                W2: 192×64 (+16 rows with d(z))
+  ΔB(z) = reshape(o[:192], 16×12)     row-major: o[i·12 + j] = ΔB[i, j]
+  z'    = A z + (B0 + ΔB(z)) u + D λ + d (+ Δd(z)),  0 ≤ λ ⊥ E z + F λ + H u + c ≥ 0
+  ```
+
+  - z only (never u), so at a fixed z every C3 subproblem is the same QP. λ does not depend
+    on B, so the residual sits outside the PGD solve (trainer) and the LCP solve (exporter).
+  - Zero-init output layer (the model starts as the fixed-B LCS); W1 from its own seeded
+    generator so `lcs_params` init and shuffling match T1. AdamW, weight decay 1e-4, own param
+    group at `lr_lcs`. No norm penalty, no d(z) (flags exist, off).
+  - Deployment: the controller evaluates ΔB at the `LATENT_STATE` z once per solve and calls
+    `C3::UpdateLCS`; the time-invariant LCS is frozen over the 7-step horizon.
+  - **V1** (W&B `grn9fisu`): `v4_t1.yaml` (rmse decoded loss, v3_mix data/split, seed 0, 300
+    epochs) + `--bz-hidden 64`, one-step only.
+  - **V2** (`vo97r4cg`): V1 + multistep H7 (rmse, weight 1/7, warm-up 10, grad to the encoder)
+    with B(z_0) frozen over the window (`--multistep-freeze-bz`, default on).
+- **Everything is opt-in and off by default; identity proven.**
+  - Trainer (`--bz-*`, `--multistep-freeze-bz`): 2 epochs on 12 files vs HEAD `9b7f0c4`,
+    defaults / multistep H3 / `--bz-hidden 64 --bz-lr 0 --bz-weight-decay 0` / HEAD rerun, all
+    weights, `lcs_params` and metrics max |diff| 0.0.
+  - Exporter: the `bz_*` keys appear only when the checkpoint has a head. The v4_t1 re-export
+    equals `deploy_t1/` except `exported_at` (yaml 1 line, deploy.npz 59 arrays,
+    reference_vectors 18/18).
+  - C++ (worktree, `learned_mpc.use_state_dependent_lcs`, absent = false): `learned_lcs_c3_check`
+    HEAD vs new on head-free yamls differs only in the `solve mean` lines; a head yaml with the
+    flag off equals its stripped twin except one log line and the ref-check line; a zero-W2 head
+    on vs off is bitwise identical (17 digits). `bz_ref_check` on the real exports 2.6e-16 (V1)
+    / 2.2e-16 (V2) relative.
+- **Training** (lcs_learning `outputs/sim_belt_v7_20260930/`, epoch 300, val):
+
+  | run | recon mm | decoded mm | ‖ΔB‖/‖B0‖ p50 / p95 | ‖B(z)‖_F p95 | ‖B0‖_F | ρ(A) | s/epoch |
+  |---|---|---|---|---|---|---|---|
+  | T1 | 0.346 | 0.436 | - | (48.3) | 48.3 | 1.012 | 18.7 |
+  | V1 | 0.334 | 0.421 | 8.41 / 10.22 | 67.8 | 6.46 | 1.011 | 13.9 |
+  | V2 | 0.440 | 0.479 | 17.8 / 19.3 | 159.4 | 8.00 | **1.264** | 22.1 |
+
+  - **B0 never learns with a zero-init head.** ‖B0‖_F stays at its random init (5.94-5.96 at
+    epochs 20-43, 6.46 at 300; T1 reaches 48.3): Adam moves each of the head's 12k output weights
+    at lr 1e-3, so the head takes the fast path and carries the mean B. On 975 tuples:
+    ‖B̄‖_F 51.8 (B̄ = B0 + mean ΔB; T1's ‖B‖_F 48.3) and the state-varying part
+    ‖B(z) − B̄‖/‖B̄‖ p50 0.42 / p95 0.88. So the planned G5 ratio ‖ΔB‖/‖B0‖ ≤ 1 measures the
+    B0/head split, not inflation; G5 was revised to ‖B(z) − B̄‖/‖B̄‖ (B̄ over every v3 frame).
+  - **V2 inflates B and destabilises A** once the multistep loss is on (from epoch ~120):
+    ‖B(z)‖ p95 159 (3.3× T1), ρ(A) 1.264 with a peak of 1.53 at epoch 210. Its val h7 (1.15 mm)
+    beats T2's 1.29, likely bought with the inflation.
+- **Freeze mismatch (G7, V1):** h7 decoded RMSE (mm), B frozen at z_0 (deploy) vs re-evaluated
+  per step on the predicted latent (the oracle B(z_k true) equals per-step within 0.02 mm):
+
+  | window | frozen | per-step | gap | B0 only |
+  |---|---|---|---|---|
+  | contact | 2.18 | 2.18 | +0.2 % | 2.48 |
+  | approach, contact frames | 2.48 | 2.35 | +5.2 % | 4.62 |
+  | contact, riding-over | 2.40 | 2.41 | −0.4 % | 2.75 |
+  | approach, riding-over | 2.66 | 2.57 | +3.4 % | 4.76 |
+  | insertion (test) | 2.29 | 1.76 | +23.0 % | 8.11 |
+  | free space | 0.96 | 0.96 | +0.5 % | 1.97 |
+  | approach, free frames | 3.38 | 2.70 | +20.2 % | - |
+
+  Small at contact (≤ 5 %, below the 20 % that would justify V2 there); large on insertion and
+  free motion (states that move far in 7 steps). V2's frozen training closes it (≤ 1.6 %).
+- **Offline gates** (`data/lcs/diag/20260930-sdlcs/`; plan §6 with the coordinator's G5 and G2b
+  adjustments):
+
+  | gate (pass) | v2 | T1 | V1 | V2 |
+  |---|---|---|---|---|
+  | G1 insertion one-step mm (≤ 0.560) | 0.577 | **0.509** | **0.509** | 0.569 |
+  | G2a onset lever agree (≥ 0.80) | 0.764 | 0.750 | **0.814** | 0.742 |
+  | G2b end-state kNN agree (≥ 0.70) | 0.62 | 0.50 | 0.60 | 0.53 |
+  | G2b press pairs dn10 < up6 at k7 / k20 / end (≥ 5/6 at k7, end) | 6 / 6 / 2 | 4 / 5 / 0 | 5 / 6 / 2 | 6 / 6 / 6 |
+  | G2b press pairs dn4 < up6 at k7 / k20 / end | 6 / 6 / 3 | 4 / 5 / 0 | 3 / 5 / 4 | 6 / 6 / 6 |
+  | G2c pred vs measured sign, informative pairs at end | 12/27 | 4/27 | 17/27 | 20/27 |
+  | G3 contact-onset gain (≥ 0.85) / Q5 cl riding-over (< 1) | 0.816 / 2.48 | 0.847 / 2.16 | 0.811 / 2.19 | 0.819 / 2.54 |
+  | G4 insertion e1 / e7 ÷ copy (≤ 0.519 / 0.401) | 0.579 / 0.428 | 0.472 / 0.365 | 0.384 / 0.396 | 0.465 / 0.406 |
+  | G5 ρ(A) / ‖B(z)‖ p95 / ‖B − B̄‖/‖B̄‖ p95 (≤ 1.02 / 96.7 / 1) | 1.029 / 31.9 / 0 | 1.012 / 48.3 / 0 | 1.011 / 66.8 / 0.99 | 1.264 / 159.7 / 0.78 |
+  | G6 C3 check / ref check / solve on÷off (≤ 1.05) | - | - | 4/4 / PASS / 0.54 | 4/4 / PASS / 1.18 |
+  | G8 h7 insertion / contact / free mm (≤ 1.70 / 2.50 / 1.22) | 1.92 / 3.92 / 2.58 | 1.98 / 3.13 / 1.06 | 2.29 / 2.18 / 0.96 | 1.32 / 1.96 / 0.85 |
+
+  - Pick by the rule (V2 if G1-G6 + G8, else V1 if G1-G6, else STOP): **STOP**. V1 fails G2b
+    and G3; V2 fails G1, G2a, G2b, G3, G4, G5 and G6. T1 itself fails G2a, G2b and G3; no model
+    has passed G3 yet.
+  - V1 is the first model to pass G2a with the current cost (offset 0: 0.692 → 0.848). It beats
+    T1 on every lever measure, and contact h7 drops 3.13 → 2.18 mm; the contact-onset gain
+    regresses (0.847 → 0.811).
+  - G6's on÷off compares against a B0-only QP (‖B0‖ 6-8), so it also measures problem
+    difficulty; the head's own cost (head eval + `UpdateLCS`) is 0.60 % (V1) / 0.55 % (V2) of a
+    flag-on solve.
+  - **Which lever lowers D.** At the 6 T1 end states, measured by each model's decoded D over 7
+    held steps, the best channel is UR z− (Uz−): V1 4/6, V2 6/6, T1 6/6, v2 6/6. By the latent
+    cost no model prefers Fz−: Fz− lowers the latent cost in 0/6 states for T1, V1 and V2 (v2
+    1/6) and ranks 16-24 (V1 prefers Fx−, V2 Fy+). This matches the press-down result
+    below.
+- **Press-down eval set** (`data/lcs/contact/press_down/eval/`, 7747, `--record`). New
+  collector family `press_down` (`scripts/lcs/collect_contact_branches.py`): a Franka-only
+  min-jerk ramp over 1.5 s to (dz, lateral) = (−4, 0), (−10, 0), (+6, 0) or (−10, ±3) mm, then
+  held; the UR holds. 12 snapshots (T1's 6 seat-cell end states, re-captured; 3 held-out
+  final_over; 3 held-out first_contact) × 4 = 48/48 ok, 0 grasp losses, 0 board contacts.
+  Labels: task distance D (`mc.d2_task`) to the stage-2 goal belt.
+  - At the T1 end states the sign is right: dn10 lowers D at k7 6/6 and at the end 5/6, dn4
+    lowers it 6/6, up6 raises it 6/6, paired dn10 < up6 6/6 at every k. Mean ΔD per mm: dn10
+    −0.155, up6 +0.28.
+  - **Nothing seats: 0/48 engaged, wrap 0 everywhere.** A 10 mm Franka press lowers h only
+    ~2.5 mm (+12.6 → +10.1) because the UR holds its side up. Pressing with the Franka alone
+    lowers D in the right direction but cannot seat.
+  - first_contact states (D0 ≈ 64 mm) are near-flat (|ΔD| ≤ 0.6). k1/k3 are small-signal (the
+    `u = 0` drift has median 0.09 / p90 0.42 mm).
+  - **Data coverage** (coordinator check on the v3 training data, steps with the belt above the
+    groove, a loose label: h 5-60 mm, wrap < 60°): in the contact data the UR moves down on
+    only 7-10 % of steps (5th percentile −0.5 mm); insertion/approach have 25-35 % UR-down
+    steps. So the data barely shows the coordinated press that seating needs.
+- **V1 closed loop** (`data/lcs/mpc_eval/20260930-sdlcs/v1/`; current cost: `w_p 0`,
+  `admm_iter 2`, no `q_matrix`; V1's insertion-only bounds for seat/yaw, v3_mix's for free
+  space; 1 episode per cell; 7745 / 7746). C3 check 22/22 PASS, `bz_ref_check` max rel 2.6e-16.
+  30 runs, all exit 0, 0 stale replies.
+
+  | model | strict | engaged | mean RMSE mm | max rot F / UR ° | early F dz mm | min hand z mm | aborts | solve p95 ms |
+  |---|---|---|---|---|---|---|---|---|
+  | v2 | 4/6 | 6/6 | 6.2 | 28 / 5 | −0.5 | 223 | 0 | 57 |
+  | T1 | 0/6 | 0/6 | 13.1 | 26 / 4 | +8.3 | 231 | 0 | 75 |
+  | T1 + A | 0/6 | 0/6 | 10.9 | 39 / 8 | +9.4 | 195 | 0 | 76 |
+  | **V1** | **2/6** | **3/6** | **10.0** | 32 / 4 | **−4.4** | 193 | 0 | 83 |
+  | V1 head off | 0/6 | 0/6 | 381.2 | 180 / 50 | +3.2 | 1 | 5 | 98 |
+
+  - **Seat:** nominal and gv_05 seat strictly (wrap 132° / 146°, RMSE 6.0 / 5.2), urtip6_high
+    engages (h −1.8, RMSE 22.1), urtip6 is slanted. No cell rides over any more, but gv_01 and
+    urtip overshoot to "under" (h −8.6 / −8.5). Gate: "promising" (≥ 2/6, RMSE < 13.1), not a
+    pass (≥ 3/6). Safe: Franka rotation ≤ 37°, 0 aborts.
+  - **Yaw (12):** 3/12 strict (T1 0/12, T1 + A 6/12). −15°: 3/6 strict, 4/6 engaged, RMSE
+    11.5, Franka rotation 44-51°. **+15°: 0/6 and a safety failure**: 5 grasp losses, Franka
+    spins 111-167°, 5 cells "under" and gv_05 slanted, panda_hand z down to −40 mm (below the
+    board). Pooled RMSE 23.5 (T1 13.6).
+  - **Free space** (v3_mix bounds): mean final / min 12.7 / 7.3 mm (T1-v3b 11.4 / 7.3, v3_mix
+    8.4 / 5.5); stretch diverges 8.9 → 22.5 mm, final ≤ start in 5/6. FAIL.
+  - **Head off** (the same export with the flag absent, fixed B0): degenerate as expected
+    (‖B0‖_F 6.5, B0 ≈ 0 next to B̄): 5 grasp losses, ~180° Franka spins.
+  - |ΔB|/|B0| in closed loop, median 7.5 (seat) / 8.1 (yaw) / 10.1 (free space). Solve p95
+    median ~83 / 86 / 50 ms (T1 75 / 77 / 26); the V2 export ran on the CPU during seat, yaw
+    and free space, so part of it may be load. Head eval + `UpdateLCS` ~57 µs per solve.
+- **Yawp15 gv_05 plan diagnosis** (`data/lcs/diag/20260930-v1-yawp15-plans/`, offline: each
+  recorded solve re-solved with `learned_lcs_c3_check --diag_stage_file` to recover the planned
+  λ; V1 yawp15 vs V1 seat, V1 yawm15 and T1 yawp15, all gv_05):
+  - **The planned states are inconsistent with the model** because λ is relaxed at
+    `admm_iter` 2 (planned λ +45 % over the exact LCP at late stage 2). At the stage switch
+    the step-1 jumps are ~2 cm. The plan ends ~3.5 cm short of the seated target at the
+    switch, closing to ~8 mm 0.45 s later and ~3 mm by 0.9 s, while the real belt stays
+    ~7.7 mm off and slanted. Late stage 2: decoded plan k7 is 9.1 mm from a static true belt
+    (0.25 mm motion); the plan-vs-rollout gap is 36 % of the k7 error² (76 % in stage 1, 93 %
+    for T1).
+  - **Latent blind zone:** latent goal distance 0.52-0.54 at 7.7 mm true belt error (seat:
+    0.66 at 3.4 mm; train pairs at d 0.4-0.7 are 4.4 mm p50, 6.4 mm p90). Rolled Δd with the
+    plan's u is −0.31 vs a claimed +0.10 (means), so the MPC stalls.
+  - Reconstruction floor 4.2 mm at that state (train p50 0.44 mm, test p95 4.1 mm), but z0 and
+    the planned z are in distribution (kNN5 0.76 / 0.67), so it is not decoder garbage.
+  - **The head is not the cause:** ‖ΔB‖ 46 (train p5), local relative change 0.14, frozen vs
+    per-step B 0.025; T1 without a head plans worse. The model also drifts at rest (`u = 0`
+    rollout 0.49 whitened, seat 0.25).
+- **One-step prediction on yawed held-out approach data** (coordinator check, 24 episodes,
+  mean mm):
+
+  | | V1 | T1 |
+  |---|---|---|
+  | model | 1.54 | 1.66 |
+  | recon floor | 1.50 | 1.63 |
+  | no-motion | 0.66 | 0.66 |
+  | moving frames: model vs no-motion | 1.46 vs 1.97 | 1.51 vs 1.97 |
+
+  The dynamics add little error on top of reconstruction; the encoder offset dominates.
+- **Viewer and tools.**
+  - `prediction_video.OneStepModel.step`, `lcp` path (replay episode mode and prediction
+    videos), used `B`/`d` for head models, i.e. the near-zero B0. It now uses
+    `LearnedLcs.B_at(z)` / `d_at(z)`; checked against the PGD step within 1e-4.
+  - `--target-belt` is removed from `replay_viewer.py` and `record_replay_video.py`. It was an
+    opt-in workaround from 2026-09-27 for synthetic targets whose goal frames are not demo
+    frames, and it made it easy to show the wrong target. Target belts now come from each
+    run's recorded `demo_goals.npz` (`pcd_belt_stage`), checked against the recorded
+    `demo_goals_sha256` (a mismatch is reported and not drawn), with a fallback to the demo
+    frames (`docs/lcm-simulation.md` §10). Demo-traj runs keep the final-demo-frame target.
+  - The viewer shows the absolute sim clock; for the V1 yaw runs MPC starts at 45.12 s.
+
+**Issues / bugs -> resolution:**
+
+| symptom | root cause | fix / status |
+|---|---|---|
+| G5's ‖ΔB‖/‖B0‖ p95 is 10.2 (V1) / 19.4 (V2), far over 1 | B0 stays at its random init (‖B0‖_F ≈ 6) with a zero-init head; the head carries the mean B | G5 revised to ‖B(z) − B̄‖/‖B̄‖ (V1 0.99, passes); **open**: V1b with a head warm-up so B0 learns |
+| V2: ρ(A) 1.264 (peak 1.53), ‖B(z)‖ p95 159 | the frozen multistep loss is met by inflating B from epoch ~120 | not adopted, not run in closed loop; V2b (+ `--bz-reg-weight` or `--bz-lr 1e-4`) proposed |
+| V2 export E3 fails: `step(100, 1e-5)` vs `z_next_pgd` 1.86e-4 > 1.1e-4 on frame 14 | all D·Δλ (head residual 4e-9): numpy f64 and torch f32 PGD early-stop at different iterations on a slowly converging frame; fails head-free too | accepted as a known mismatch; tolerance not loosened; E4-E9 pass |
+| first `check_v1` printed [SKIP] and exited 0 | relative deploy path in the export runner | `realpath -m` before `cd`; re-run, E0-E9 PASS |
+| G6 on÷off 1.18 for V2 (gate ≤ 1.05) | flag off is a different QP (B0 only) | head eval + `UpdateLCS` measured at 0.55-0.60 % of a solve; pick unchanged |
+| V1 overshoots to "under" (2 seat cells, 5/6 +15° cells) | not isolated; the yawp15 gv_05 diagnosis shows plans inconsistent with the model (relaxed λ) and a latent blind to the last ~8 mm | **open** |
+| V1 +15° yaw: 5 grasp losses, Franka spins 111-167°, hand z −40 mm | not isolated | **open**; V1 not adoptable |
+| Franka-only press lowers D but never seats (0/48) | the UR holds its side up; contact data has few UR-down steps (7-10 %) | **open**: coordinated-press data (UR down / both arms) |
+| replay episode mode / prediction videos showed wrong one-step predictions for head models | `OneStepModel.step` (`lcp`) used the fixed `B`/`d`, i.e. B0 | uses `B_at(z)` / `d_at(z)`; matches the PGD step within 1e-4 |
+| the viewer could show the wrong target belt | `--target-belt` was a manual override | removed; recorded demo_goals with a SHA check and a fallback |
+| T1's seat episodes end at 14.55 s, not 16 s | T1 episodes finish early | press-down capture window 14.0-14.6 s, last frame used |
+| `bz_ref_z` has 6 rows, not 4 as planned | one per outcome class on the v3 globs | C++ reads K from the rows |
+
+**Decisions:**
+- Keep `v2_decoded_only` deployed. V1 is the most promising retrain but is not adopted (the
+  +15° safety failure, the "under" overshoot, free space); V2 is not adopted (unstable A).
+- All B(z) switches stay opt-in and off by default: the trainer's `--bz-*` (head off at
+  `--bz-hidden 0`), the exporter's `bz_*` keys (only when the checkpoint has a head), the
+  worktree's `learned_mpc.use_state_dependent_lcs` (absent = false).
+- (coordinator) The V2 E3 failure is accepted as a known PGD early-stop mismatch; the tolerance
+  is not changed.
+- Demo-traj runs keep the final-demo-frame target in the viewer.
+- The `external/newton` pointer was committed at `2bc2f63` (fork `hien/viser-opaque-batched`).
+- c2's identity artifacts and synthetic yamls were moved out of the worktree to
+  `data/lcs/diag/20260930-sdlcs/c2_identity/`; the worktree archive holds only eval yamls.
+
+**Open / next:**
+- **V1 + metric A** (recommended next): V1 fixes the press direction, metric A helped T1 on the
+  yawed targets (6/12).
+- **V1b:** a head warm-up (`--bz-warmup-epochs`) or a lower `--bz-lr`, so B0 learns the mean B
+  and the head only the state dependence.
+- **Coordinated-press data:** press-down branches with the UR down or both arms, since a
+  Franka-only press never seats.
+- A viewer layer for the model rollout of the plan's `u` (next to the planned belts), to see
+  plan-vs-model inconsistency directly.
+- Lower priority: a latent-dimension analysis (the blind zone), V2 + a norm penalty, and an
+  ADMM re-test on V1.
 
 ## 2026-09-29 — why v3_mix controls worse, v4 retrain, cost-metric test, InfoNCE ablation
 

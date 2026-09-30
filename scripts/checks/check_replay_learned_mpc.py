@@ -13,7 +13,11 @@ Run:
 from __future__ import annotations
 
 import argparse
+import contextlib
+import hashlib
 import importlib.util
+import io
+import json
 import shutil
 import subprocess
 import sys
@@ -199,6 +203,7 @@ def check_x0(ctx: SimpleNamespace) -> str:
              and panel.scale_slider.value == 9.0, "action scale not default 9")
     n = len(panel.solves)
     _require(n == len(_debug(app.recording)) and n > 0, f"{n} solves indexed")
+    _require(panel.target_source == "demo_episode", f"demo-traj run: {panel.target_source}")
     status = panel.status.content.splitlines()[0]
     app.select_run(ctx.baseline_name)
     _require(all(panel.available[n] for n in LAYERS) and all(
@@ -295,11 +300,12 @@ def check_x1(ctx: SimpleNamespace) -> str:
 def _check_staged(ctx: SimpleNamespace) -> str:
     app, panel = ctx.app, ctx.panel
     app.select_run(ctx.staged_name)
-    _require(panel.staged and panel.goal_frames.tolist() == STAGED_FRAMES
-             and panel.paths["demo_episode"] == REPO_ROOT / STAGED_DEMO,
-             f"staged goals {panel.goal_frames} from {panel.paths['demo_episode']}")
-    panel.set_layer(app, "target_belt", True)
     demo = np.load(panel.paths["demo_episode"])["pcd_belt"]
+    _require(panel.staged and panel.target_source == "demo_goals"
+             and panel.paths["demo_episode"] == REPO_ROOT / STAGED_DEMO
+             and np.array_equal(panel.demo_belts[panel.goal_frames], demo[STAGED_FRAMES]),
+             f"staged goals {panel.goal_frames} from {panel.target_source}")
+    panel.set_layer(app, "target_belt", True)
     names = [f"target_belt/goal_{i}" for i in range(len(STAGED_FRAMES))]
     seen = set()
     for f in range(0, app.frame_count, 5):
@@ -321,7 +327,8 @@ def _check_staged(ctx: SimpleNamespace) -> str:
     _require(seen == {0, 1}, f"stages seen {seen}")
     _require(not any("/ref_" in n for n in panel.handles), "reference tubes exist")
     panel.set_layer(app, "target_belt", False)
-    return (f"staged run: goals {STAGED_FRAMES} of {STAGED_DEMO}, tubes == pcd_belt, opacity "
+    return (f"staged run: recorded demo_goals == {STAGED_DEMO} frames {STAGED_FRAMES} "
+            "(bit-exact), tubes == pcd_belt, opacity "
             f"follows stage (0 and 1 seen), no ref tubes")
 
 
@@ -423,67 +430,105 @@ def check_x3(ctx: SimpleNamespace) -> str:
             " EE and actions still drawn, no exception")
 
 
-@check("X5 --target-belt: observation (one goal) and demo_goals (per stage) belts")
+def _variant(ctx: SimpleNamespace, name: str, **learned) -> str:
+    """The staged run under ``name`` with ``meta.learned_mpc`` edited (None deletes a key)."""
+    src = (Path(ctx.tmp_root) / ctx.staged_name).resolve()
+    run = Path(ctx.tmp_root) / name
+    run.mkdir()
+    for item in src.iterdir():
+        if item.name != "meta.json":
+            (run / item.name).symlink_to(item)
+    meta = json.loads((src / "meta.json").read_text())
+    for key, value in learned.items():
+        if value is None:
+            meta["learned_mpc"].pop(key, None)
+        else:
+            meta["learned_mpc"][key] = value
+    (run / "meta.json").write_text(json.dumps(meta))
+    return name
+
+
+def _goals_file(path: Path, belts: np.ndarray, frames: list[int]) -> tuple[str, str]:
+    np.savez(path, pcd_belt_stage=belts, stage_frames=np.asarray(frames, dtype=np.int64),
+             n_stages=np.asarray(len(belts)))
+    return str(path), hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@check("X5 target belts: recorded demo_goals, sha mismatch and fallback")
 def check_x5(ctx: SimpleNamespace) -> str:
-    app = ctx.app
-    tmp = Path(ctx.tmp_root)
+    app, tmp = ctx.app, Path(ctx.tmp_root) / "x5"
+    tmp.mkdir()
     cli = _viewer_cli()
-    plain = cli.learned_hooks(cli.create_parser().parse_args(["--recordings",
-                                                              str(ctx.learned_parent)]))
-    _require(plain[0].target_belt is None, "default panel has a target_belt")
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            cli.create_parser().parse_args(["--target-belt", "auto"])
+        _require(False, "--target-belt still accepted")
+    except SystemExit:
+        pass
+    demo = np.load(REPO_ROOT / STAGED_DEMO)["pcd_belt"]
     rng = np.random.default_rng(0)
-    one = (0.3, 0.0, 0.05) + 0.05 * rng.standard_normal((150, 3))
-    two = (0.4, 0.1, 0.05) + 0.05 * rng.standard_normal((2, 150, 3))
-    np.savez(tmp / "obs.npz", pcd_belt=one.astype(np.float32), z_target=np.zeros(16))
-    np.savez(tmp / "goals.npz", pcd_belt_stage=two, n_stages=np.asarray(2))
-    args = cli.create_parser().parse_args(["--recordings", str(ctx.baseline_parent),
-                                           "--target-belt", str(tmp / "obs.npz")])
-    hooks = cli.learned_hooks(args)
-    _require(len(hooks) == 1 and hooks[0].target_belt == tmp / "obs.npz",
-             "--target-belt not passed to the panel")
+    synth = (0.4, 0.1, 0.05) + 0.05 * rng.standard_normal((2, 150, 3))
+    synth_path, synth_sha = _goals_file(tmp / "synth.npz", synth, [13, -1])
+    one_path, one_sha = _goals_file(tmp / "one.npz", synth[1:], [-1])
+    nobelt = tmp / "nobelt.npz"
+    np.savez(nobelt, stage_frames=np.asarray(STAGED_FRAMES))
+    cases = [  # name, meta edits, source, drawn belts (None: layer off), reason / note part
+        ("synth", {"demo_goals": synth_path, "demo_goals_sha256": synth_sha},
+         "demo_goals", synth, "recorded demo_goals (2 stages)"),
+        ("single", {"demo_goals": one_path, "demo_goals_sha256": one_sha},
+         "demo_goals", synth[1:], "recorded demo_goals (1 stage)"),
+        ("synth_sha", {"demo_goals": synth_path, "demo_goals_sha256": "0" * 64},
+         None, None, "sha256 differs"),
+        ("staged_sha", {"demo_goals_sha256": "0" * 64},
+         "demo_episode", demo[STAGED_FRAMES], "sha256 differs"),
+        ("no_goals", {"demo_goals": None, "demo_goals_sha256": None},
+         "demo_episode", demo[STAGED_FRAMES], "no demo_goals path"),
+        ("no_pcd", {"demo_goals": str(nobelt), "demo_goals_sha256": None},
+         "demo_episode", demo[STAGED_FRAMES], "no pcd_belt_stage"),
+    ]
+    panel = LearnedMpcPanel(layers=("target_belt",), root="/replay/learned_mpc_x5")
+    app.add_hook(panel)
     out = []
-    for i, (path, run) in enumerate(((tmp / "obs.npz", ctx.learned_name),
-                                     (tmp / "obs.npz", ctx.staged_name),
-                                     (tmp / "goals.npz", ctx.staged_name))):
-        panel = LearnedMpcPanel(target_belt=path, layers=("target_belt",),
-                                root=f"/replay/learned_mpc_x5_{i}")
-        app.add_hook(panel)
-        app.select_run(run)
-        belts = one[None] if path.name == "obs.npz" else two
-        _require(panel.available["target_belt"] is None, f"{path.name}: {panel.available}")
-        _require(panel.staged == (len(belts) > 1), f"{path.name}: staged {panel.staged}")
+    for name, edits, source, belts, text in cases:
+        app.select_run(_variant(ctx, f"x5_{name}", **edits))
+        why = panel.available["target_belt"]
+        _require(panel.target_source == source, f"{name}: source {panel.target_source}, {why}")
+        _require(text in panel.status.content, f"{name}: {text!r} not in {panel.status.content!r}")
+        if belts is None:
+            _require(why and "sha256 differs" in why
+                     and panel.demo_belts is None, f"{name}: {why}")
+            app.seek(app.frame_count // 2)
+            _require(not _visible(panel, "target_belt"), f"{name}: drawn")
+            out.append(f"{name}: off ({why})")
+            continue
+        _require(why is None and np.array_equal(panel.demo_belts[panel.goal_frames], belts)
+                 and panel.staged == (len(belts) > 1), f"{name}: {why}, staged {panel.staged}")
         seen = set()
-        for f in range(0, app.frame_count, 7):
+        for f in range(0, app.frame_count, 9):
             app.seek(f)
             if panel.current < 0:
-                _require(not _visible(panel, "target_belt"), "drawn before the first solve")
                 continue
             k = int(panel.solves[panel.current].scalars["stage"]) if panel.staged else 0
             seen.add(k)
-            name = f"target_belt/goal_{k}"
-            _require(_visible(panel, "target_belt") == [name],
-                     f"{path.name} frame {f}: {_visible(panel, 'target_belt')}")
-            h = panel.handles[name]
-            _require(np.abs(_centres(h) - _drawn(belts[k].astype(np.float32))).max() <= F32_TOL
-                     and h.opacity == _mesh_opacity(TARGET_ALPHA[0]),
-                     f"{path.name} frame {f}: tube != its belt[{k}]")
-        _require(seen == set(range(len(belts))), f"{path.name} on {run}: goals seen {seen}")
-        out.append(f"{path.name} on {run.split('_')[0]}: goals {sorted(seen)}")
-        panel.set_layer(app, "target_belt", False)
-        app.hooks.remove(panel)
-    panel = LearnedMpcPanel(target_belt=tmp / "none.npz", layers=LAYERS,
-                            root="/replay/learned_mpc_x5_missing")
-    app.add_hook(panel)
-    app.select_run(ctx.learned_name)
-    app.seek(app.frame_count // 2)
-    _require("missing" in (panel.available["target_belt"] or "")
-             and not _visible(panel, "target_belt") and _visible(panel, "planned_ee"),
-             f"missing target_belt: {panel.available}")
-    for name in LAYERS:
-        panel.set_layer(app, name, False)
+            h = panel.handles[f"target_belt/goal_{k}"]
+            _require(_visible(panel, "target_belt") == [f"target_belt/goal_{k}"]
+                     and np.abs(_centres(h) - _drawn(belts[k])).max() <= F32_TOL,
+                     f"{name} frame {f}: tube != belt[{k}]")
+        _require(seen == set(range(len(belts))), f"{name}: goals seen {seen}")
+        out.append(f"{name}: {source}")
+    panel.set_layer(app, "target_belt", False)
     app.hooks.remove(panel)
-    return (f"default off; CLI passes the path; {'; '.join(out)} (tube == belt, current stage "
-            "only, opaque); missing file disables only the target layer")
+    over = LearnedMpcPanel(demo_goals=Path(synth_path), layers=("target_belt",),
+                           root="/replay/learned_mpc_x5_over")
+    app.add_hook(over)
+    app.select_run(ctx.staged_name)
+    _require(over.target_source == "demo_goals"
+             and np.array_equal(over.demo_belts[over.goal_frames], synth),
+             f"--demo-goals override: {over.available['target_belt']}")
+    over.set_layer(app, "target_belt", False)
+    app.hooks.remove(over)
+    return (f"{'; '.join(out)}; --target-belt rejected; --demo-goals override drawn unchecked "
+            "(tube == belt, current stage only)")
 
 
 def _viewer_cli():

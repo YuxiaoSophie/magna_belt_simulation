@@ -113,10 +113,9 @@ def create_parser() -> argparse.ArgumentParser:
     learned = parser.add_argument_group("learned MPC layers", "as in replay_viewer.py")
     learned.add_argument("--deploy", type=Path, default=None)
     learned.add_argument("--decoder", type=Path, default=None)
-    learned.add_argument("--demo-goals", type=Path, default=None)
+    learned.add_argument("--demo-goals", type=Path, default=None,
+                         help="replaces the run's recorded demo_goals.npz (as in replay_viewer.py)")
     learned.add_argument("--demo-episode", type=Path, default=None)
-    learned.add_argument("--target-belt", type=Path, default=None,
-                         help="Target belt: demo_goals.npz (per stage) or observation.npz")
     learned.add_argument("--learned-layers", default="",
                          help=f"comma list from {','.join(LAYERS)}")
     learned.add_argument("--action-scale", type=float, default=ACTION_SCALE_DEFAULT)
@@ -134,7 +133,7 @@ def quiet_websockets() -> None:
 
 def video_hooks(args: argparse.Namespace) -> list[VideoLearnedMpcPanel]:
     paths = {"deploy": args.deploy, "decoder": args.decoder, "demo_goals": args.demo_goals,
-             "demo_episode": args.demo_episode, "target_belt": args.target_belt}
+             "demo_episode": args.demo_episode}
     if not any(paths.values()) and not any_learned_runs(args.recordings):
         return []
     return [VideoLearnedMpcPanel(**paths, layers=parse_layers(args.learned_layers),

@@ -103,12 +103,11 @@ def create_parser() -> argparse.ArgumentParser:
     learned.add_argument("--deploy", type=Path, default=None, help="deploy.npz")
     learned.add_argument("--decoder", type=Path, default=None,
                          help="decoder.npz (default: next to the deploy)")
-    learned.add_argument("--demo-goals", type=Path, default=None, help="demo_goals.npz")
+    learned.add_argument("--demo-goals", type=Path, default=None,
+                         help="demo_goals.npz replacing the run's recorded one (goal frames and, "
+                         "on staged runs, the target belts from pcd_belt_stage; not sha-checked)")
     learned.add_argument("--demo-episode", type=Path, default=None,
                          help="demo episode npz with pcd_belt")
-    learned.add_argument("--target-belt", type=Path, default=None,
-                         help="Target belt from a demo_goals.npz (pcd_belt_stage, per stage) or an "
-                         "observation.npz (pcd_belt, one fixed goal)")
     learned.add_argument("--learned-layers", default="",
                          help=f"comma list to pre-enable, from {','.join(LAYERS)}")
     return parser
@@ -117,7 +116,7 @@ def create_parser() -> argparse.ArgumentParser:
 def learned_hooks(args: argparse.Namespace) -> list[LearnedMpcPanel]:
     """The learned-MPC panel, only if a run under the root has it or a path is given."""
     paths = {"deploy": args.deploy, "decoder": args.decoder, "demo_goals": args.demo_goals,
-             "demo_episode": args.demo_episode, "target_belt": args.target_belt}
+             "demo_episode": args.demo_episode}
     layers = parse_layers(args.learned_layers)
     if not any(paths.values()) and not any_learned_runs(args.recordings):
         if layers:
@@ -131,7 +130,6 @@ def episode_main(args: argparse.Namespace) -> int:
     """``--episode``/``--episodes``: dataset episodes with the one-step prediction layers."""
     extra = [flag for flag, value in (("--run", args.run), ("--demo-goals", args.demo_goals),
                                       ("--demo-episode", args.demo_episode),
-                                      ("--target-belt", args.target_belt),
                                       ("--learned-layers", args.learned_layers)) if value]
     if extra:
         logger.error(f"{', '.join(extra)} do not apply to --episode/--episodes")

@@ -4,7 +4,8 @@
 No sim, no GPU, no LCM traffic. Against an ``lcs_learning`` deploy export: E0 load + dims,
 E1 preprocessing bit-exact, E2 encoder vs the torch reference ``z``, E3 LCS step vs the torch PGD,
 E4 timing, E5 ``LATENT_STATE`` round trip, E6 ``DemoGoals`` on a synthetic file, E7 belt metrics,
-E8 ``LatentDecoder`` vs the torch decodes in ``decoder.npz`` beside the deploy (``[SKIP]`` without it).
+E8 ``LatentDecoder`` vs the torch decodes in ``decoder.npz`` beside the deploy (``[SKIP]`` without it),
+E9 the ``B(z)`` state head vs the export's references (``[SKIP]`` for a fixed-B export).
 ``[SKIP]`` (exit 0) if the deploy export is absent.
 
 Run:
@@ -25,6 +26,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT / "src") not in sys.path:
@@ -171,9 +173,17 @@ def check_e4(ctx: SimpleNamespace) -> str:
     t_step = (time.perf_counter() - t0) / 200 * 1e3
     _require(t_enc < 50.0, f"encode {t_enc:.1f} ms >= 50 ms")
     _require(t_step < 2.0, f"step {t_step:.3f} ms >= 2 ms")
+    head = ""
+    if ctx.lcs.has_head:
+        t0 = time.perf_counter()
+        for _ in range(1000):
+            ctx.lcs.head_out(r["z"][0])
+        t_head = (time.perf_counter() - t0) / 1000 * 1e3
+        _require(t_head < 0.1, f"head_out {t_head:.4f} ms >= 0.1 ms")
+        head = f"; head_out mean {t_head:.4f} ms"
     warn = " [WARN encode >= 20 ms target]" if t_enc >= 20.0 else ""
     return (f"encode mean {t_enc:.2f} ms over 50 ({len(args[0])} pts); step mean "
-            f"{t_step:.3f} ms{warn}")
+            f"{t_step:.3f} ms{head}{warn}")
 
 
 @check("E5 LATENT_STATE round trip")
@@ -302,6 +312,45 @@ def check_e8(ctx: SimpleNamespace) -> str:
     _require(err <= 1e-5 and one <= 1e-5, f"max |decode - torch| {err:.2e} / {one:.2e} > 1e-5 m")
     return (f"K={len(z_ref)} decodes ({dec.num_points} pts) vs torch max {err:.2e} m, "
             f"decode() {one:.2e} m; checkpoint sha matches the deploy")
+
+
+@check("E9 state head")
+def check_e9(ctx: SimpleNamespace) -> str:
+    lcs, r = ctx.lcs, ctx.ref
+    if not lcs.has_head:
+        raise Skip("no bz__* keys (fixed-B export)")
+    B_z = np.stack([lcs.B_at(z) for z in r["z"]])
+    tol_b = 1e-5 * max(1.0, float(np.abs(r["B_z"]).max()))  # float32 torch vs float64 numpy
+    e_b = float(np.abs(B_z - r["B_z"]).max())
+    _require(e_b <= tol_b, f"B_at(z) vs B_z {e_b:.2e} > {tol_b:.1e}")
+    d_z = np.stack([lcs.d_at(z) for z in r["z"]])
+    e_d = float(np.abs(d_z - r["d_z"]).max())
+    _require(e_d <= 1e-5 * max(1.0, float(np.abs(r["d_z"]).max())), f"d_at(z) vs d_z {e_d:.2e}")
+    y = yaml.safe_load((ctx.deploy.parent / "learned_lcs.yaml").read_text())
+    ref_z = np.asarray(y["bz_ref_z"], dtype=np.float64)
+    ref_out = np.asarray(y["bz_ref_out"], dtype=np.float64)
+    for k in ("w1", "b1", "w2", "b2"):
+        same = np.array_equal(np.asarray(y[f"bz_{k}"], dtype=np.float64), getattr(lcs, f"bz_{k}"))
+        _require(same, f"yaml bz_{k} != deploy bz__{k}")
+    e_ref = float(np.abs(lcs.head_out(ref_z) - ref_out).max())
+    e_rel = e_ref / max(float(np.abs(ref_out).max()), 1e-300)
+    _require(e_rel <= 1e-12, f"head_out(bz_ref_z) vs bz_ref_out rel {e_rel:.1e} > 1e-12")
+    n_diff, zero = 0, not np.any(lcs.bz_w2) and not np.any(lcs.bz_b2)
+    for k in range(len(r["z"])):
+        U = np.stack([r["u"][k]] * 3)
+        Zf, _ = lcs.rollout(r["z"][k], U, freeze=True)
+        _require(np.array_equal(Zf[1], lcs.step(r["z"][k], r["u"][k])[0]),
+                 f"frame {k}: rollout(freeze)[1] != step")
+        Zp, _ = lcs.rollout(r["z"][k], U, freeze=False)
+        n_diff += int(not np.array_equal(Zf[2], Zp[2]))
+    _require(zero or n_diff > 0, "rollout(freeze=False) == rollout(freeze=True) at k=2 everywhere")
+    fro = np.linalg.norm(B_z, axis=(1, 2))
+    rel = np.linalg.norm(B_z - lcs.B, axis=(1, 2)) / np.linalg.norm(lcs.B)
+    return (f"H {lcs.bz_hidden} {lcs.bz_act} delta_d {lcs.bz_delta_d}; B_at vs torch {e_b:.1e}, "
+            f"d_at {e_d:.1e}; head_out vs bz_ref_out rel {e_rel:.1e} (K={len(ref_z)}); "
+            f"freeze != per-step at k=2 on {n_diff}/{len(r['z'])}"
+            f"{' [head exactly zero]' if zero else ''}; |B(z)|_F p95 {np.percentile(fro, 95):.4f} "
+            f"(B0 {np.linalg.norm(lcs.B):.4f}), |dB|/|B0| p95 {np.percentile(rel, 95):.3f}")
 
 
 def _quat_z(deg: float) -> list[float]:

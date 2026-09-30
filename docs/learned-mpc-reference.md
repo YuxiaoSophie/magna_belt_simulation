@@ -363,7 +363,8 @@ The four layers (`planned_belt` blue tubes, `planned_ee` Franka knot + augmented
 `actions` length-only arrows default scale 9, `target_belt` green tubes at the fixed goal
 frames) and their exactness guarantees are documented in `docs/lcm-simulation.md` §10 "Learned-
 MPC layers". `--deploy`, `--decoder`, `--demo-goals` and `--demo-episode` override the paths
-`meta.json` recorded; pass `--decoder` explicitly if the run's own deploy dir has no
+`meta.json` recorded; target belts come from the run's recorded `demo_goals.npz`
+(`pcd_belt_stage`); pass `--decoder` explicitly if the run's own deploy dir has no
 `decoder.npz` next to it (only exports run with `--decoder-out` have one).
 
 ### 5.11 Train, gate and re-test a new model (v3, 2026-09-28)
@@ -442,8 +443,7 @@ E=data/lcs/mpc_eval/20260928-223352-synthtargets-v3
 V3=/home/hienbui/git/lcs_learning/outputs/sim_belt_v3_20260928
 uv run python scripts/replay_viewer.py --recordings $E/recordings \
     --run flat_engaged__nominal --port 8081 --decoder $V3/deploy_v3_mix/decoder.npz \
-    --learned-layers planned_belt,planned_ee,actions,target_belt \
-    --target-belt $E/goals/flat_engaged/demo_goals.npz
+    --learned-layers planned_belt,planned_ee,actions,target_belt
 ```
 
 Result and diagnosis: `docs/learned-mpc.md`, 2026-09-27/28.
@@ -559,15 +559,15 @@ L=planned_belt,planned_ee,actions,target_belt
 # v4 closed loop (t1 / t2 / t3; runs <target>__<start>)
 uv run --frozen python scripts/replay_viewer.py --recordings $E/t1/recordings \
     --run flat_engaged__nominal --port 8081 --decoder $V4/deploy_t1/decoder.npz \
-    --learned-layers $L --target-belt $E/t1/goals/flat_engaged/demo_goals.npz
+    --learned-layers $L
 # yawed targets
 uv run --frozen python scripts/replay_viewer.py --recordings $E/t1_yaw/recordings \
     --run flat_engaged_yawp15__nominal --port 8081 --decoder $V4/deploy_t1/decoder.npz \
-    --learned-layers $L --target-belt $E/t1_yaw/goals/flat_engaged_yawp15/demo_goals.npz
+    --learned-layers $L
 # free space (<model> = t1 | t1_v3bounds | v2 | v3_mix; --decoder = that model's export)
 uv run --frozen python scripts/replay_viewer.py --recordings $E/t1_freespace/t1/recordings \
     --run twist --port 8081 --decoder $V4/deploy_t1/decoder.npz \
-    --learned-layers $L --target-belt $E/t1_freespace/t1/goals/twist/demo_goals.npz
+    --learned-layers $L
 ```
 
 **Cost metric (`learned_mpc.use_q_matrix`, worktree, opt-in, default `false`).** With it on, the
@@ -665,21 +665,178 @@ L=planned_belt,planned_ee,actions,target_belt
 # metric runs (<m>_metric<A|B>, seat)
 uv run --frozen python scripts/replay_viewer.py --recordings $M/t1_metricA/recordings \
     --run flat_engaged__nominal --port 8081 --decoder $V4/deploy_t1/decoder.npz \
-    --learned-layers $L --target-belt $M/t1_metricA/goals/flat_engaged/demo_goals.npz
+    --learned-layers $L
 # metric runs, yawed (T1 + A at -15 deg: 5/6 strict)
 uv run --frozen python scripts/replay_viewer.py --recordings $M/t1_metricA_yaw/recordings \
     --run flat_engaged_yawm15__nominal --port 8081 --decoder $V4/deploy_t1/decoder.npz \
-    --learned-layers $L --target-belt $M/t1_metricA_yaw/goals/flat_engaged_yawm15/demo_goals.npz
+    --learned-layers $L
 # v5 seat (t5a | t5b); yaw: $V/<m>/yaw/..., free space: $V/<m>/freespace/... (--run twist)
 uv run --frozen python scripts/replay_viewer.py --recordings $V/t5a/seat/recordings \
     --run flat_engaged__nominal --port 8081 --decoder $V5/deploy_t5a/decoder.npz \
-    --learned-layers $L --target-belt $V/t5a/goals/flat_engaged/demo_goals.npz
+    --learned-layers $L
 uv run --frozen python scripts/replay_viewer.py --recordings $V/t5a/freespace/recordings \
     --run twist --port 8081 --decoder $V5/deploy_t5a/decoder.npz \
-    --learned-layers $L --target-belt $V/t5a/freespace/goals/twist/demo_goals.npz
+    --learned-layers $L
 ```
 
 Results: `docs/learned-mpc.md`, 2026-09-29.
+
+### 5.13 State-dependent LCS B(z): train, export, deploy, gate, press-down data (2026-09-30)
+
+B(z) = B0 + ΔB(z), a z-only tanh MLP whose output is reshaped row-major into a 16×12 ΔB (plus
+an optional 16-vector Δd); design and results in `docs/learned-mpc.md`, 2026-09-30. Every switch
+below is opt-in; with them off the trainer, exporter and C++ path are identical to before.
+
+**Trainer flags** (`~/git/lcs_learning/scripts/train_joint_pointnet_lcs.py`; also snake_case
+config keys; head module `lcs_learning/lcs_state_head.py`):
+
+| flag | default | what |
+|---|---|---|
+| `--bz-hidden H` | `0` (off) | hidden width of the head; > 0 turns B(z) on (V1/V2: 64). Torch LCS solvers only; rejected with casadi and with the InfoNCE losses |
+| `--bz-act` | `tanh` | activation (only `tanh`) |
+| `--bz-delta-d/--no-bz-delta-d` | off | the head also outputs Δd(z) (needs `--bz-hidden`) |
+| `--bz-init {zero,small}` | `zero` | output layer zero (starts as the fixed-B LCS) or N(0, 1e-3) |
+| `--bz-lr LR` | `-1` (= `--lr-lcs`) | head learning rate (own AdamW param group) |
+| `--bz-weight-decay W` | `1e-4` | AdamW weight decay of the head |
+| `--bz-reg-weight W` | `0.0` (off) | mean ‖ΔB(z)‖_F² / ‖B0‖_F² (+ ‖Δd‖² / ‖d‖²) |
+| `--bz-warmup-epochs N` | `0` | epochs after the AE warm-up before the residual is applied |
+| `--multistep-freeze-bz/--no-multistep-freeze-bz` | on | evaluate the head once at z_0 over the multistep window (the deploy freeze); off re-evaluates it at each predicted latent |
+
+The head's first layer is drawn from its own seeded generator, so `lcs_params` init and the
+loader order match a head-free run. Metrics: `train|val/bz_dB_rel_p50|p95` (‖ΔB‖/‖B0‖),
+`bz_B_fro_p95`, `bz_reg`, `train/bz_B0_fro`, `train/rho_A`. Checkpoints gain `bz_state_dict`
+(w1/b1/w2/b2), `bz_hidden`, `bz_delta_d`, `bz_act`. Note: with the zero-init head B0 stays at
+its random init and the head carries the mean B (V1 ‖B0‖_F 6.5 vs T1's ‖B‖_F 48.3), so
+‖ΔB‖/‖B0‖ is not an inflation measure; use ‖B(z)‖_F and ‖B(z) − B̄‖/‖B̄‖.
+
+**v7 configs and scripts** (lcs_learning `outputs/sim_belt_v7_20260930/`): `v7_v1.yaml`
+(`v4_t1.yaml` + `bz_hidden: 64`), `v7_v2.yaml` (+ `multistep_horizon: 7`, `rmse`, weight
+0.142857, warm-up 10, grad to the encoder); `run_train_v7.sh` (V1 ∥ V2), `run_export_v7.sh
+<v1|v2> [ckpt [out]]` (waits for epoch 300; v3 globs for z stats, insertion-only `u` bounds;
+decoder; `check_latent_encoder.py` E0-E9); `evaluate_v7.py` → `eval_results_v7.json`,
+`eval_table_v7.md` (exact-LCP λ + the residual; `rollout` = frozen B(z_0), `perstep`,
+`oracle`, `B0` rows); `summarize_v7.py` → `summary_train.md`; `bz_decompose.py` (B̄ vs
+state-varying part); `identity/`; `ckpt_v{1,2}/`; `deploy_v{1,2}/`; `pipeline.log`.
+
+```bash
+cd ~/git/lcs_learning
+D=outputs/sim_belt_v7_20260930
+uv run --frozen python scripts/train_joint_pointnet_lcs.py --config $D/v7_v1.yaml
+bash $D/run_export_v7.sh v1
+.venv/bin/python $D/evaluate_v7.py
+```
+
+**Exporter** (`export_learned_lcs_deploy.py`; no flag: keys appear only when the checkpoint has
+`bz_state_dict`; head-free exports are byte-identical except `exported_at`). n_x 16, n_u 12,
+M = n_x·n_u (+ n_x with `bz_delta_d`) = 192 (208):
+
+| file | keys |
+|---|---|
+| `learned_lcs.yaml` | `bz_hidden` (int), `bz_act` (`tanh`), `bz_delta_d` (bool), `bz_w1` (H×16 rows), `bz_b1` (H), `bz_w2` (M×H rows), `bz_b2` (M), `bz_ref_z` (K×16), `bz_ref_out` (K×M, float64 `W2 tanh(W1 z + b1) + b2`; K = one per outcome class, 6 on the v3 globs) |
+| `deploy.npz` | `bz__hidden`, `bz__act`, `bz__delta_d`, `bz__w1`, `bz__b1`, `bz__w2`, `bz__b2` (float64) |
+| `reference_vectors.npz` | `B_z` (32×16×12), `d_z` (32×16); `z_next_pgd*` / `z_next_exact` include the residual |
+| `report.json` | `bz_stats`: `dB_rel_p50/p95`, `B_fro_p95`, `B0_fro`, `rho_A`, `hidden`, `delta_d`, `n_frames` |
+
+Layout: `ΔB[i, j] = o[i·12 + j]`, `Δd = o[192:208]`. The numpy `LearnedLcs`
+(`src/task_common/latent_encoder.py`) reads the `bz__*` arrays: `has_head`, `head_out(z)`,
+`B_at(z)`, `d_at(z)`, `step(z, u, B=None, d=None)`, `rollout(z0, U, freeze=True)` (freeze = the
+deploy semantics). `check_latent_encoder.py` E9 checks `B_at` vs the torch reference and
+`head_out` vs `bz_ref_out` (SKIP without a head); E4 times `head_out`.
+
+**C++ switch** (worktree `magna-deploy-learned-lcs`): `learned_mpc.use_state_dependent_lcs:
+true` (absent/false = fixed B0; on needs a head in the LCS file). The controller calls
+`UpdateLearnedLcs` (head at the `LATENT_STATE` z, then `C3::UpdateLCS`) first in each solve;
+the startup banner prints `[learned-mpc] state_dependent_lcs=… hidden=… delta_d=…` and the 1 Hz
+log appends `|dB|/|B0|=` only when the key is set / on. Files: `learned_lcs_params.h`
+(`bz_*` optionals, `HasStateHead()`, `ValidateStateHead()`), `learned_lcs_c3.{h,cc}`
+(`LearnedHeadOutput`, `LearnedB`, `LearnedD`, `MakeLearnedLcsAt`, `UpdateLearnedLcs`),
+`assembly_controller.cc`, `learned_lcs_c3_check.cc`.
+
+`learned_lcs_c3_check` extras (only when the file has a head): `--bz_ref_check` (default true;
+head output vs `bz_ref_out`, prints first, exits 1 on FAIL); per-solve `UpdateLCS` in
+`CheckStage` / `RunDiag` / `RunStageDiag`; the plan and rollout use B(z0) frozen, plus a
+`per-step` rollout column and a `frozen vs per-step at k=N` line; `head_eval_us` /
+`update_lcs_us` and `|dB(z0)|/|B0|` lines.
+
+```bash
+cd ~/git/magna-deploy-learned-lcs
+A=systems/parameters/learned_archive/2026-09-30
+./bazel-bin/systems/controllers/learned_lcs_c3_check \
+  --params $A/round_belt_controller_params_learned_eval_v7_v1_flat_engaged.yaml
+```
+
+**Press-down collector family** (`scripts/lcs/collect_contact_branches.py branch --families
+press_down`): a Franka-only min-jerk ramp over 1.5 s to (dz, lateral) = (−4, 0), (−10, 0),
+(+6, 0), (−10, ±3) mm along the grasp axis, held to 3.975 s; the UR holds. The 4 variants of a
+snapshot share one lateral sign. `report` adds `causality.moving_dims` / `pass_moving_dims`
+(the legacy `pass` is false by construction, since u = 0 on the UR/rotation dims). Eval set
+(`data/lcs/contact/press_down/`, 7747):
+
+| path | what |
+|---|---|
+| `scripts/run_capture_t1.sh` | re-runs T1's 6 seat cells with snapshots at 14.0-14.6 s → `capture_t1/` |
+| `scripts/build_eval_set.py` | validates the T1 end snapshots, adds 3 held-out final_over + 3 first_contact → `snapshots_eval/`, `working_set_eval.json` |
+| `eval/` | 48 episodes, `index.json`, `qc.json`, `recordings/` |
+| `scripts/pairs.py` | task-distance labels and pairs → `eval/pairs.json`, `eval/press_down_report.md` |
+
+```bash
+CB="uv run --frozen python scripts/lcs/collect_contact_branches.py"
+P=data/lcs/contact/press_down
+$CB branch --lcm-url 'udpm://239.255.76.147:7747?ttl=0' --snap-dir $P/snapshots_eval \
+    --working-set $P/working_set_eval.json --out $P/eval --families press_down --record
+uv run --frozen python $P/scripts/pairs.py $P/eval
+```
+
+**Offline gates** (`data/lcs/diag/20260930-sdlcs/scripts/`; models `v2,t1,sdv1,sdv2`):
+`encode.py` (lcs_learning venv, GPU: caches incl. the press-down and T1 end frames),
+`run_q.sh <out_sub> <models>` (q1/q2/q4/q7 + summarize; rollouts freeze B(z0), `SD_ROLL=perstep`
+for per-step), `g2a_onset.py`, `g2_lever_end.py`, `g2_press.py` (G2b press pairs, G2c, channel
+info), `g5_norms.py`, `run_g6.sh <tag> <on_prefix> <off_prefix>` + `g6_parse.py` (C3 check on vs
+off, alternated), `gates.py` → `gates.{md,json}`; the pick is in `pick.md`. Plan diagnosis:
+`data/lcs/diag/20260930-v1-yawp15-plans/scripts/` (`resolve.py` re-solves each recorded state
+with `learned_lcs_c3_check --diag_stage_file` for the planned λ; `analyze.py`, `table.py`,
+`decomp.py`, `plots.py`).
+
+**Closed loop** (`data/lcs/mpc_eval/20260930-sdlcs/scripts/`; outputs in `<model>/`):
+
+```bash
+E=data/lcs/mpc_eval/20260930-sdlcs
+uv run --frozen python $E/scripts/build_goals_v7.py $E/v1 v1
+uv run --frozen python $E/scripts/write_yamls_v7.py $E/v1 v1   # + _headoff_ twins
+bash $E/scripts/run_c3check_v7.sh v1
+bash $E/scripts/run_seat_v7.sh v1                   # 7745; `headoff` → seat_headoff/
+uv run --frozen python $E/scripts/build_goals_yaw_v7.py $E/v1/yaw v1 yawp15 yawm15
+uv run --frozen python $E/scripts/write_yamls_yaw_v7.py $E/v1/yaw v1 yawp15 yawm15
+uv run --frozen python $E/scripts/build_fs_v7.py v1  # v3_mix u bounds
+bash $E/scripts/run_c3check_cl_v7.sh v1
+bash $E/scripts/run_rest_v7.sh v1                   # yaw (7745), fs (7746), head-off seat
+uv run --frozen python $E/scripts/tables_v7.py seat v1 v1_headoff   # also yaw / fs
+```
+
+Worktree yamls: `learned_archive/2026-09-30/round_belt_controller_params_learned_eval_v7_v1_*`
+(+ `learned_lcs/learned_lcs_v7_v1_*`); V2's G6 yamls are under `gate_b/`.
+
+**Replay** (target belts come from each run's recorded demo_goals; no `--target-belt`). The
+viewer's clock is the absolute sim time; in the V1 yaw runs MPC starts at 45.12 s.
+
+```bash
+E=data/lcs/mpc_eval/20260930-sdlcs/v1
+V7=/home/hienbui/git/lcs_learning/outputs/sim_belt_v7_20260930
+L=planned_belt,planned_ee,actions,target_belt
+# seat (runs <target>__<start>); head-off: $E/seat_headoff/recordings
+uv run --frozen python scripts/replay_viewer.py --recordings $E/seat/recordings \
+    --run flat_engaged__gv_05 --port 8081 --decoder $V7/deploy_v1/decoder.npz \
+    --learned-layers $L
+# yawed targets
+uv run --frozen python scripts/replay_viewer.py --recordings $E/yaw/recordings \
+    --run flat_engaged_yawp15__gv_05 --port 8081 --decoder $V7/deploy_v1/decoder.npz \
+    --learned-layers $L
+# free space (--run twist | bend | bend_lift | stretch | wrist_tilt | random_mix)
+uv run --frozen python scripts/replay_viewer.py --recordings $E/freespace/recordings \
+    --run stretch --port 8081 --decoder $V7/deploy_v1/decoder.npz --learned-layers $L
+```
+
+Results: `docs/learned-mpc.md`, 2026-09-30.
 
 ## 6. Private LCM groups
 

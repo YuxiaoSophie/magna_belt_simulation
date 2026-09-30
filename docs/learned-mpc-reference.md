@@ -448,7 +448,7 @@ uv run python scripts/replay_viewer.py --recordings $E/recordings \
 
 Result and diagnosis: `docs/learned-mpc.md`, 2026-09-27/28.
 
-### 5.12 Loss-form flags, v4 retrain, diagnostics and extra evals (2026-09-29)
+### 5.12 Loss-form flags, v4 retrain, diagnostics, extra evals, cost metric, InfoNCE (2026-09-29)
 
 **Trainer flags** (`~/git/lcs_learning/scripts/train_joint_pointnet_lcs.py`; each also works
 as a snake_case config key). Only the decoded loss's form changed default; everything else is
@@ -568,6 +568,105 @@ uv run --frozen python scripts/replay_viewer.py --recordings $E/t1_yaw/recording
 uv run --frozen python scripts/replay_viewer.py --recordings $E/t1_freespace/t1/recordings \
     --run twist --port 8081 --decoder $V4/deploy_t1/decoder.npz \
     --learned-layers $L --target-belt $E/t1_freespace/t1/goals/twist/demo_goals.npz
+```
+
+**Cost metric (`learned_mpc.use_q_matrix`, worktree, opt-in, default `false`).** With it on, the
+LCS yaml's metric M replaces the whitened diag(1/z_std²): Q = w_q·M and the goal distance is
+sqrt(dzᵀ M dz). With it off, or with no metric in the yaml, the path is unchanged (verified with
+`learned_lcs_c3_check`: output identical to the HEAD binary except timing). Files:
+`learned_lcs_params.h`, `learned_lcs_c3.{h,cc}`, `assembly_controller.cc`,
+`learned_lcs_c3_check.cc`.
+
+| LCS yaml key | what |
+|---|---|
+| `q_matrix` | one n×n symmetric metric for every stage (Metric A) |
+| `q_matrix_stage1`, `q_matrix_stage2` | per-stage metrics, both or none; override `q_matrix`; swapped at the stage switch (Metric B, the decoder pullback at each stage goal) |
+| `goal_tol_q` | goal tolerance in that metric (> 0) |
+
+Scripts (`data/lcs/mpc_eval/20260929-metric/scripts/`, each docstring has its run line):
+`build_extra.py` (encode closed-loop states and goals), `fit_a.py` (Metric A, lcs_learning
+venv, CPU), `metrics.py` (normalised current / A / B and `goal_tol_q`), `eval_offline.py` +
+`table_offline.py` → `offline/table_offline.md`, `cl_analysis.py`, `lever_end.py`,
+`write_yamls.py <model> <A|B> <seat|yaw>` (worktree yamls `*_metric{A,B}.yaml` in
+`learned_archive/2026-09-29/`), `run_eval_metric.sh <model> <A|B> <seat|yaw>` (port 7741; out
+`<model>_metric<X>{,_yaw}/`), `run_eval_metric_rep.sh` (the −15° repeat),
+`eval_table_metric.py` → `table_metric{,_yaw}.md`.
+
+```bash
+cd ~/git/lcs_learning
+X=/home/hienbui/git/magna_belt_simulation-main/data/lcs/mpc_eval/20260929-metric/scripts
+CUDA_VISIBLE_DEVICES= uv run --frozen python $X/fit_a.py
+uv run --frozen python $X/metrics.py
+uv run --frozen python $X/write_yamls.py t1 A seat
+cd /home/hienbui/git/magna_belt_simulation-main
+bash $X/run_eval_metric.sh t1 A seat
+uv run --frozen python $X/eval_table_metric.py
+```
+
+**InfoNCE trainer flags** (`train_joint_pointnet_lcs.py`; snake_case config keys too). All off
+by default; with both weights 0 the run is identical to HEAD (weights, LCS params and metrics
+max |diff| 0). The dataset's opt-in `episode_meta` (global tuple `idx`, `frame_obs`,
+`branch_siblings` from `sim_meta` `branch.snapshot`) is loaded only when a weight is > 0.
+
+| flag | default | what |
+|---|---|---|
+| `--nce-state-weight W` | `0.0` (off) | state InfoNCE: LCS(z_t, u_t) vs encode(o_{t+1}), score −‖Δ⊘σ‖²/τ, against in-batch (+ hard) negatives |
+| `--nce-action-weight W` | `0.0` (off) | action InfoNCE: LCS(z_t, u_t) vs LCS(z_t, u_j) for in-batch alternative actions, scored at encode(o_{t+1}) |
+| `--nce-tau T` | `0.1` | temperature on the σ-scaled squared distance |
+| `--nce-hard-neg {none,episode,episode+branch}` | `none` | extra state negatives: a frame 3-10 steps from t+1 in the same episode; `+branch` adds the t+1 frame of a sibling branch from the same snapshot, once the actions diverge |
+| `--nce-action-eps E` | `0.5` | min σ_u-scaled distance of an alternative action to u_t |
+| `--nce-action-max K` | `32` | max alternative actions per tuple |
+| `--nce-sigma {ema,batch}` | `ema` | σ = detached EMA of the batch latent std (diverges; see the day log) or this batch's std with grad (scale-invariant; used for T5a/T5b) |
+
+Negatives within 0.5 mm of the positive (belt RMSE and both EE shifts) are masked. Metrics:
+`train|val/nce_{state,act}_{loss,top1,rank}`, `state_hard_top1`, `state_branch_top1`, `act_n`.
+
+**v5 retrain** (lcs_learning `outputs/sim_belt_v5_20260929/`): `v5_t5{a,b}.yaml` (the v4_t1
+yaml plus `nce_state_weight 0.0065`, τ 0.1, `episode+branch`, `nce_sigma batch`; T5b adds
+`nce_action_weight 0.0065`), `run_train_v5.sh` (both in parallel), `run_export_v5.sh <m>` (as
+v4: v3 globs for z stats, insertion-only `u` bounds), `evaluate_v5.py` →
+`eval_table_v5.md`, `calib/`, `sweep/` (τ sweep; `sweep/ema_failed/`), `debug/`, `identity/`,
+`pgd_vs_exact.py`, `deploy_t5{a,b}/`. Offline diag: `data/lcs/diag/20260929-v5-infonce/`
+(`summary.md`).
+
+```bash
+cd ~/git/lcs_learning
+D=outputs/sim_belt_v5_20260929
+uv run --frozen python scripts/train_joint_pointnet_lcs.py --config $D/v5_t5a.yaml
+bash $D/run_export_v5.sh t5a
+```
+
+**v5 closed loop** (`data/lcs/mpc_eval/20260929-v5-infonce/`): seat goals and yamls from
+`scripts/build_goals_v5.py <eval_root> <model>` and `scripts/write_yamls_v5.py <eval_root>
+<model>`; runs with `cl_scripts/run_seat_v5.sh <m>`, `run_yaw_v5.sh <m> yawp15 yawm15` (after
+`build_goals_yaw_v5.py` / `write_yamls_yaw_v5.py <m>/yaw <m> yawp15 yawm15`) and
+`run_fs_v5.sh <m>` (after `build_fs_v5.py <m>`; v3_mix's `u` bounds), all on port 7741;
+`tables_v5.py <seat|yaw|fs> t5a t5b` → `table_{seat,yaw,freespace}.md`. Outputs in
+`<m>/{seat,yaw,freespace}/` with `recordings/` links.
+
+**Replay, metric and v5 runs:**
+
+```bash
+M=data/lcs/mpc_eval/20260929-metric
+V=data/lcs/mpc_eval/20260929-v5-infonce
+V4=/home/hienbui/git/lcs_learning/outputs/sim_belt_v4_20260929
+V5=/home/hienbui/git/lcs_learning/outputs/sim_belt_v5_20260929
+L=planned_belt,planned_ee,actions,target_belt
+# metric runs (<m>_metric<A|B>, seat)
+uv run --frozen python scripts/replay_viewer.py --recordings $M/t1_metricA/recordings \
+    --run flat_engaged__nominal --port 8081 --decoder $V4/deploy_t1/decoder.npz \
+    --learned-layers $L --target-belt $M/t1_metricA/goals/flat_engaged/demo_goals.npz
+# metric runs, yawed (T1 + A at -15 deg: 5/6 strict)
+uv run --frozen python scripts/replay_viewer.py --recordings $M/t1_metricA_yaw/recordings \
+    --run flat_engaged_yawm15__nominal --port 8081 --decoder $V4/deploy_t1/decoder.npz \
+    --learned-layers $L --target-belt $M/t1_metricA_yaw/goals/flat_engaged_yawm15/demo_goals.npz
+# v5 seat (t5a | t5b); yaw: $V/<m>/yaw/..., free space: $V/<m>/freespace/... (--run twist)
+uv run --frozen python scripts/replay_viewer.py --recordings $V/t5a/seat/recordings \
+    --run flat_engaged__nominal --port 8081 --decoder $V5/deploy_t5a/decoder.npz \
+    --learned-layers $L --target-belt $V/t5a/goals/flat_engaged/demo_goals.npz
+uv run --frozen python scripts/replay_viewer.py --recordings $V/t5a/freespace/recordings \
+    --run twist --port 8081 --decoder $V5/deploy_t5a/decoder.npz \
+    --learned-layers $L --target-belt $V/t5a/freespace/goals/twist/demo_goals.npz
 ```
 
 Results: `docs/learned-mpc.md`, 2026-09-29.

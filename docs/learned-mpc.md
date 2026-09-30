@@ -43,6 +43,22 @@ latent-metric loss), all with insertion-only `u` bounds. Closed loop on the same
 T1 0/6 strict (calm, rests on top of the pulley), T2 0/6 (the Franka spins), T3 1/6 (spins,
 penetrates the board). T3 fixes the latent ranking offline, but not the closed loop.
 
+**Cost metric (2026-09-29), opt-in, not adopted:** replacing the whitened latent cost with a
+task-fitted metric (A: a learned global Q; B: the decoder pullback at the goal) ranks states
+almost perfectly offline (Spearman ≈ 0.99), but seating stays T1 0/6 (A) / 1/6 (B), T3 0/6.
+On yawed targets T1 + A reaches 6/12 (T1 0/12). The metric is not the main bottleneck; the
+model's action response near the pulley is. Worktree switch `learned_mpc.use_q_matrix`,
+default off.
+
+**v5 InfoNCE (2026-09-29), not adopted:** T1 + a state InfoNCE (T5a) and + an action InfoNCE
+(T5b). Both are worse than T1 offline and fail everywhere in closed loop (seat 0/6, yaw 0/12,
+free space ends further from the goal than it started), with spins, grasp losses and the hand
+below the board. T5b's LCS is unstable (ρ(A) 1.30). The trainer options stay off by default.
+
+**Ranking (end of 2026-09-29):** v2 is the only reliable seater (4/6). T1 is safe but rests on
+top of the pulley; T1 + metric A gives 6/12 on yawed targets. v3_mix and T1 with v3_mix's `u`
+bounds lead in free space. T3, T5a and T5b are unsafe (spins, penetration, grasp loss).
+
 **Trainer default (lcs_learning, user decision 2026-09-29):** the decoded next-state loss uses
 the `rmse` form by default (it was MSE in m², effectively off next to the RMSE reconstruction).
 Every other v4 training option stays opt-in and off by default (`docs/learned-mpc-reference.md`
@@ -53,11 +69,13 @@ riding-over vs seated states (the fix has to reach the closed loop, not only the
 ranking). Rotation spinning is a separate failure: plans that lean on large Franka/UR rotations
 leave the data, where the models are wrong. The demo-tracking progress index stalls/deadlocks
 on a large fraction of held-out starts, and the goal tolerance does not separate `engaged` from
-`slanted` (the v4 over states also fall inside it). Next (none run): orientation-envelope
-safety constraints for the spinning; a steps-to-goal latent, or letting the LCS consistency
-gradient reach the encoder, for the latent geometry.
+`slanted` (the v4 over states also fall inside it). A task-fitted cost metric does not fix
+seating: at the riding-over states the model's action response is wrong (it prefers Fz+ where
+Fz− lowers the task distance). Next (none run): contact data (press-down from riding-over
+states, branches), then a retrain with a fixed dynamics objective; orientation-envelope safety
+constraints for the spinning.
 
-## 2026-09-29 — why v3_mix controls worse, the v4 retrain and its closed-loop test
+## 2026-09-29 — why v3_mix controls worse, v4 retrain, cost-metric test, InfoNCE ablation
 
 **Summary:** A root-cause pass on the 2026-09-28 result (v3_mix predicts better but controls
 worse) found that prediction accuracy is not the cause. The latent distance the MPC minimises
@@ -66,8 +84,13 @@ to an RMSE in m). C3's 2-iteration plans are inconsistent with the model, but ma
 consistent (more ADMM iterations) makes the closed loop worse. Three models (v4 T1-T3) were
 retrained with a corrected objective and insertion-only `u` bounds. T3 fixes the latent ranking
 offline; none beats v2 in closed loop (T1 0/6, T2 0/6, T3 1/6 strict vs v2 4/6). Extra tests:
-T1 on ±15°-yawed targets (0/12) and single-stage free-space goals (v3_mix > T1 > v2). The
-deployed model stays `v2_decoded_only`. Diagnosis summary: `data/lcs/diag/20260929-report.md`;
+T1 on ±15°-yawed targets (0/12) and single-stage free-space goals (v3_mix > T1 > v2). Two
+follow-ups: a task-fitted MPC cost metric (A: global Q = LᵀL; B: decoder pullback) ranks
+states at Spearman ≈ 0.99 offline but seats no better (T1 0/6 A, 1/6 B; T3 0/6), though T1 + A
+reaches 6/12 on the yawed targets. So the metric is not the main bottleneck; the model's action
+response near the pulley is. An InfoNCE ablation (v5: T5a state, T5b state + action) is worse
+than T1 offline and unsafe in closed loop (0/6 seat, 0/12 yaw). The deployed model stays
+`v2_decoded_only`. Diagnosis summary: `data/lcs/diag/20260929-report.md`;
 paths and commands: `docs/learned-mpc-reference.md` §5.12.
 
 **Tried:**
@@ -195,6 +218,133 @@ paths and commands: `docs/learned-mpc-reference.md` §5.12.
   v2 bend_lift/stretch diverge (Franka rotation 63-92°). With v3_mix's bounds, T1 improves on
   every goal. The bounds are rarely hit (u0 within 1 % of a bound on 1-5 % of solves), so the
   gain comes from the cheaper input cost R, not from unclipping.
+- **Cost-metric test** (`data/lcs/mpc_eval/20260929-metric/`): does a task-shaped MPC cost fix
+  seating without retraining? Task distance D² = per-point belt RMSE² + β·Δh² (both states
+  within 30 mm of the seat) + γ·Δwrap², β = 2, γ = 25/90². Two metrics for T1 and T3:
+  - **A**, one global learned Q = LᵀL per model, fitted on train-split pairs (120k, near-seat
+    oversampled) and 40k triplets: log-space regression of zᵀQz to D², a ranking hinge, and a
+    ridge toward the current diag(1/z_std²). β swept 0 / 0.5 / 2 / 8; β 2 deployed.
+  - **B**, the decoder pullback Q = JᵀWJ at the goal (J the decoder Jacobian; W up-weights the
+    pulley-axis component of the belt points within 30 mm of the seat, β_z 6.26). It is poorly
+    conditioned: cond 2e3-6e4 (T1) and 5e4-7e5 (T3), vs 95 / 33 for A.
+
+  Each metric is scaled so the median stage-start cost equals the current Q's; `goal_tol_q` is
+  the engaged-final p90 in that metric. Offline (β 2; current Q in brackets):
+
+  | model | metric | held-out pair Spearman vs D | near-seat Spearman | lever sign agreement | cond(Q) |
+  |---|---|---|---|---|---|
+  | T1 | current | [0.920] | 0.952 | 0.750 | 53 |
+  | T1 | A | 0.984 | 0.990 | 0.785 | 95 |
+  | T1 | B | - | 0.973 | 0.789 | 2.1e3-6.3e4 |
+  | T3 | current | [0.922] | 0.962 | 0.777 | 20 |
+  | T3 | A | 0.995 | 0.994 | 0.804 | 33 |
+  | T3 | B | - | 0.970 | 0.844 | 5.0e4-7.2e5 |
+
+  Closed loop (7741, the 6 Phase 6 cells and the 12 ±15° yawed cells, 1 episode each, no stale
+  replies; mean final belt RMSE in mm):
+
+  | model | metric | seat strict | seat RMSE | yaw strict (12) | yaw RMSE | aborts |
+  |---|---|---|---|---|---|---|
+  | T1 | current | 0/6 | 13.1 | 0/12 | 13.6 | 0 |
+  | T1 | A | 0/6 | 10.9 | 6/12 (−15°: 5/6, +15°: 1/6) | 9.9 | 0 |
+  | T1 | B | 1/6 (gv_01) | 17.6 | 3/12 | 22.9 | 0 |
+  | T3 | current | 1/6 | 90.4 | - | - | 1 |
+  | T3 | A | 0/6 | 44.8 | 0/12 | 69.1 | 2 (yaw; hand z −22 mm) |
+  | T3 | B | 0/6 | 43.0 | 0/12 | 42.6 | 0 |
+
+  A repeat of T1 + A at −15° reproduced 5/6. Both metrics roughly halve T3's RMSE (less spin,
+  no penetration), but none seats. Why seating still fails (`offline/cl_analysis.md`,
+  `offline/lever_end.md`):
+  - The true D already rates T1's riding-over end states as 87-94 % done (D² end/onset
+    0.06-0.13), and they stay inside `goal_tol` in every metric. The over-end / v2-success d
+    ratio grows only to 2.6 (A) / 2.3 (B) from 1.7 (true D: 4.4).
+  - At those states the LCS + metric lever is a coin flip (|E|-weighted sign agreement 0.39-
+    0.52). With the current Q, T1's model prefers Fz+ in 6/6 end states, which raises the true
+    D (+0.17 to +0.81 mm); Fz− lowers it in every one. The metric-best step lowers true D in
+    0/6 (current), 2/6 (A), 4/5 (B).
+  - Even the true D evaluated on the model's decoded predictions reaches only 0.69-0.78 sign
+    agreement, and its best step lowers true D in 3/6, 2/6 and 5/5 end states.
+
+  Conclusion: the model's action response near the pulley, not the cost metric, is the main
+  bottleneck. The metric matters at the margin (T1 + A on the yawed cells).
+- **Worktree `learned_mpc.use_q_matrix`** (opt-in, default off): the LCS yaml gains
+  `q_matrix`, `q_matrix_stage1` / `q_matrix_stage2` (both or none; override `q_matrix`) and
+  `goal_tol_q`. Q = w_q·M, goal distance sqrt(dzᵀ M dz), per-stage Q swapped at stage switches.
+  Default path verified: `learned_lcs_c3_check` on v4_t1_flat_engaged and
+  v4_t3_flat_engaged_urtip6 is identical to the HEAD binary except the timing lines.
+- **v5 InfoNCE ablation** (lcs_learning `outputs/sim_belt_v5_20260929/`; diag
+  `data/lcs/diag/20260929-v5-infonce/`; closed loop `data/lcs/mpc_eval/20260929-v5-infonce/`).
+  The v4 T1 recipe (data, split, seed, 300 epochs) plus a contrastive term on the predicted
+  next latent ẑ = LCS(z_t, u_t):
+  - score −‖Δ⊘σ‖²/τ with σ the per-dimension latent std, τ 0.1.
+  - **State term (T5a, T5b):** ẑ vs encode(o_{t+1}) against in-batch negatives, an episode
+    hard negative (a frame 3-10 steps from t+1 in the same episode) and a branch hard negative
+    (the t+1 frame of a sibling branch from the same contact snapshot, only after the whitened
+    actions diverge; 40 sibling pairs in contact/v1/train). Near-duplicate negatives (belt RMSE
+    and both EE shifts < 0.5 mm) are masked.
+  - **Action term (T5b only):** ẑ vs LCS(z_t, u_j) for up to 32 in-batch alternative actions
+    at least 0.5 σ_u away, scored at encode(o_{t+1}).
+  - **Weights** by calibration at T1's epoch 300 (encoder grad = 0.5 × recon's): 0.0065 for
+    both terms. At NCE start the NCE gradient is ~1e5 × recon's, so an early calibration is
+    unusable.
+  - **σ:** the spec's detached EMA σ diverged from scratch at every τ (latent std ran away to
+    393 / 86 at τ 0.03 / 0.1 and collapsed to the 1e-6 clamp at τ 0.3; the decoder went
+    constant by epoch 13-14). State-only on a subset collapsed too, so it is not the action
+    term: the lagging σ lets the encoder set the effective temperature by rescaling z. Fix:
+    opt-in `--nce-sigma batch` (this batch's std, with grad; scale-invariant). τ swept 0.03 /
+    0.1 / 0.3 with batch σ; 0.1 picked (steady climb, best val recon).
+  - Training identity with the NCE weights at 0 vs HEAD: max |diff| 0.
+
+  Offline (`eval_table_v5.md`, `summary.md`; mm):
+
+  | offline | T1 | T3 | T5a | T5b |
+  |---|---|---|---|---|
+  | insertion one-step / h7 | **0.509 / 1.98** | 0.643 / 1.93 | 0.722 / 2.42 | 1.192 / 21.25 |
+  | contact one-step / h7 | 1.295 / 3.13 | 1.344 / **2.15** | 1.393 / 2.36 | 2.289 / 27.78 |
+  | Q4 abs-h coef | −0.043 | **0.337** | −0.133 | −0.007 |
+  | Q4 over states inside goal_tol | 0.745 | 0.670 | **0.293** | 0.296 |
+  | Q4 AUC d over>engaged (beltR 0-10, mean of 4) | 0.932 | **1.000** | 0.729 | 0.825 |
+  | latent e7 ÷ copy7 (insertion) | **0.36** | 0.58 | 0.82 | 1.84 |
+  | ρ(A) / ‖B‖ | 1.01 / 29 | - | 1.008 / 32 | 1.30 / 95 |
+  | C3 check (4 targets) | 4/4 | 3/4 | 3/4 | 4/4 |
+
+  Both lose belt accuracy. Fewer over states fall inside `goal_tol` (0.29 / 0.30 vs 0.745),
+  but the latent ranks over vs engaged worse (AUC 0.73 / 0.83 vs 0.93). T5b's LCS is
+  unstable: ρ(A) 1.30 with 7 eigenvalues outside the unit circle, `u = 0` hold drift 16 mm in 7
+  steps (true 0.11), not a solver artefact (PGD-25 vs exact LCP 3.8e-4). Its whitened ‖B‖ is
+  inflated about 10-18× vs T1: ‖B/z_std‖ 2034 vs 110 (training agent); a separate check on 10
+  contact + insertion files gives Frobenius norms v3_mix 325, T1 225, T5a 405, T5b 2229, and
+  mean latent std 0.15 / 0.27 / 0.18 / 0.08.
+
+  Closed loop (current cost, latent goals only, `w_p 0`, admm 2; seat/yaw with each model's
+  insertion-only bounds, free space with v3_mix's; 1 episode per cell; mean final belt RMSE mm):
+
+  | model | seat strict | seat RMSE | yaw strict | yaw RMSE | free space final / min | aborts seat / yaw / fs | min hand z mm (all runs) |
+  |---|---|---|---|---|---|---|---|
+  | v2 | 4/6 | 6.2 | - | - | 23.4 / 10.0 | 0 / - / 0 | 141 |
+  | T1 | 0/6 | 13.1 | 0/12 | 13.6 | 16.0 / 8.7 | 0 / 0 / 0 | 219 |
+  | T1 + A | 0/6 | 10.9 | 6/12 | 9.9 | - | 0 / 0 / - | 195 |
+  | T5a | 0/6 | 82.9 | 0/12 | 94.9 | 125.9 / 12.4 | 2 / 8 / 2 | −67 |
+  | T5b | 0/6 | 141.1 | 0/12 | 118.6 | 64.7 / 15.1 | 6 / 11 / 3 | −81 |
+
+  (T1 free space with v3_mix's bounds: 11.4 / 7.3; v3_mix 8.4 / 5.5.) Both are unsafe: Franka
+  spins of 70-180°, grasp losses (T5b loses the Franka grasp at 4.7-5.5 s in every seat cell),
+  T5a's finger tip below the plate at +15°, UR IK misses, the hand below the board. Every T5
+  free-space cell ends further from its goal than it started.
+  **Diagnosis:** the action term's negatives are generated by the model itself, so it can win
+  by inflating B (spreading LCS(z, u_j) apart) rather than by predicting better; the per-batch
+  σ removed the scale exploit but left the latent scale free (T5b's latent std shrinks while B
+  grows). **Proposed fixes, not run:** real branch counterfactuals only as action negatives;
+  soft, outcome-aware labels instead of hard negatives; a 7-step and a Δ accuracy anchor; a
+  fixed latent scale (variance floor or a norm layer); a spectral guard on A.
+- **Comparison with Yan et al. 2020 (CFM, arXiv:2003.05436).** CFM scores
+  h = exp(−‖z₁ − z₂‖²) with no τ or normalisation, uses in-batch negatives only (127), has no
+  decoder, and its forward model is an MLP that outputs a linear map applied to z_t; 8-d
+  latent, random pick-and-place data, 1-step sampling MPC over 100 actions. T5a matches its
+  core state loss. Ours adds the action term, σ whitening and τ, the recon / LCS losses, the
+  fixed-B LCS and the 7-step C3 planner. Their ablation found a pure linear forward model worse,
+  which our fixed-B LCS is closer to. Possible next step: a faithful T6 (raw exp(−‖Δ‖²),
+  in-batch negatives only, a modest recon anchor).
 
 **Issues / bugs -> resolution:**
 
@@ -210,6 +360,13 @@ paths and commands: `docs/learned-mpc-reference.md` §5.12.
 | T2 / T3 / v3_mix spin the Franka (T2 ~180°, T3 111-161°, v3_mix up to 136°) and lose the belt, the grasp or the board clearance | plans lean on large Franka/UR rotations, where every model is wrong | **open**; proposed: orientation-envelope safety constraints (not run) |
 | urtip −15° yawed target failed tension at the default stepping floor (wrap 81 at step 1) | wrap 81° at step 1, under the default stepping floor | re-ran tension/observe with `--step-min-wrap-deg 75`; verify still requires wrap ≥ 90 |
 | free-space runs reach their minimum in 0.7-2 s, then drift away | not isolated (λ drift or model bias at rest) | **open**; next: compare with a `u = 0` hold |
+| a task-fitted cost metric (A / B) ranks states at Spearman ≈ 0.99 but seating stays 0/6 / 1/6 | T1's riding-over end states are already 87-94 % done in the true D, and the model's lever there is a coin flip (prefers Fz+, Fz− lowers D) | **open**: needs contact data and a model fix, not a cost fix; `use_q_matrix` kept opt-in |
+| `learned_lcs_c3_check` fails on t3 urtip6_yawm15 metric A | bound violation 3.3e-6 | tolerance only; run anyway |
+| the spec'd InfoNCE (detached EMA σ) diverges at every τ: latent std runs away or collapses, decoder goes constant | the lagging σ lets the encoder set the effective temperature by rescaling z | new opt-in `--nce-sigma batch` (per-batch std with grad); default stays `ema` |
+| T5b's LCS is unstable (ρ(A) 1.30, 7 \|eig\| > 1, 16 mm drift at `u = 0` in 7 steps) | the action term's model-generated negatives are separable by inflating B; the per-batch σ leaves the latent scale free | **open**; fixes proposed, not run (above) |
+| first T5a export flagged `no_input_normalisation False` | the exporter's source grep matched NCE comments / `.std(` in the trainer | comments reworded (math identical, identity re-run 0/0/0); re-exported, old export in `superseded/` |
+| T5a C3 check 3/4 seat, 9/14 yaw/fs; T5b 11/14 | bound-tolerance violations ≤ 6.4e-5, plus OSQP IterationLimit for T5a | run anyway, as T2/T3 |
+| t5a `urtip6_high_yawp15` segfaulted at sim init (exit 139) | not isolated | set aside as `*.crash139`, rerun exit 0 |
 
 **Decisions:**
 - Keep `v2_decoded_only` deployed; none of v3_mix, T1, T2, T3 is adopted.
@@ -224,6 +381,9 @@ paths and commands: `docs/learned-mpc-reference.md` §5.12.
   Configs that enable the decoded loss without the key (v2_decoded_only, v2_multistep,
   v3_mix, v3_ft, ablation both / decoded_only) now train with rmse on re-run.
 - T2 and T3 ran in closed loop despite their `learned_lcs_c3_check` failures (coordinator).
+- Keep `learned_mpc.use_q_matrix` opt-in, default off; no metric-A/B yaml is the default.
+- Do not adopt T5a / T5b. The InfoNCE trainer options stay opt-in and off by default
+  (`docs/learned-mpc-reference.md` §5.12); `--nce-sigma batch` is the only stable setting.
 
 **Open:**
 - The latent must be task-shaped. The latent-metric loss (T3) fixes the ranking offline, but
@@ -236,6 +396,12 @@ paths and commands: `docs/learned-mpc-reference.md` §5.12.
 - The T2 LCS conditioning (cond(F) 201).
 - Free-space drift after the early minimum; repeats per cell (every cell here is 1 episode,
   so these are sensitivities, not rates).
+- The model's action response near the pulley: at riding-over states it prefers Fz+ where Fz−
+  lowers the task distance. Next: contact data (press-down from riding-over states, branches),
+  then a retrain with a fixed dynamics objective.
+- InfoNCE fixes, none run: real branch counterfactuals only, soft outcome-aware labels, a
+  7-step and Δ accuracy anchor, a fixed latent scale, a spectral guard on A; or a faithful CFM
+  T6 (raw exp(−‖Δ‖²), in-batch negatives only, a modest recon anchor).
 
 ## 2026-09-27/28 — data diversity, v3 training, OOD gates and the closed-loop re-test
 

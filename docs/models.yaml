@@ -1,0 +1,2071 @@
+# Model and closed-loop evaluation registry (machine-readable twin of docs/models.md).
+# Kept in docs/ because data/ is gitignored. Numbers are copied from existing tables only;
+# each result carries its source path. BL = the waypoint baseline controller.
+schema_version: 1
+updated: '2026-09-30'
+doc: docs/models.md
+scheme:
+  model_id: V<campaign>[letter]; campaign = lcs_learning outputs/sim_belt_v<N>_<date>/ (V1 = sim_belt_ablation_20260924)
+  tag: <data>-<objective>-<dynamics>
+  eval_label: <ID> · <suite> · <cost> · <limits>
+suites:
+  seat6: flat_engaged x {nominal, gv_01, gv_05}, urtip x ud+3_r0, urtip6 x ud+6_r0, urtip6_high x ud+6_r0 (synthetic seated targets, 2 stages)
+  yaw12: the seat6 starts with the targets yawed +-15 deg about the pulley axis (<target>_yaw{p15,m15})
+  yaw12-m15: the -15 deg half of yaw12 (6 cells)
+  fs6: 'single-stage free-space goals: twist, bend, bend_lift, stretch, wrist_tilt, random_mix (held-out frames, own start)'
+  press48: 'press-down eval set: 12 snapshots x 4 Franka-only presses; not an MPC run'
+  nom: nominal start data/lcs/start_states/pre_place_1_osc.npz, repeated (n_episodes = repeats)
+  gv1: grasp-variant set1 (13 starts, data/lcs/start_states/grasp_variants/set1)
+  gv1-2: set1 screen subset gv_00 + gv_05
+  gv1-10: set1 tuning subset gv_00..gv_09
+  gv1-d10: set1 controller-diagnosis subset gv_01..gv_10
+  gv3: grasp-variant set3 (8 starts)
+  stages10: 'the 10 matched starts of 2026-09-25: nominal + 8 of set1 + 1 of set3 (two-fixed-targets runs)'
+  rec6: 'recorded replay set: nominal + 3 of set1 + 2 of set3'
+  rec4: 'flat recorded set: nominal + 2 of set1 + 1 of set3'
+  eeoff4: EE-offset starts data/lcs/start_states/ee_offsets (ee_f_x+8, ee_f_z+8, ee_ur_y-8, ee_f_rot5)
+  long25: set1 gv_03, one 35 s episode
+costs:
+  Qw: whitened latent Q = w_q diag(1/z_std^2) (default)
+  QA: metric A, learned global Q = L^T L
+  QB: metric B, decoder pullback J^T W J at the goal
+  Qw+wp: Qw + demo_traj.w_p 0.03 EE-path cost (rejected design)
+  '-': waypoint baseline controller, no MPC cost
+limits:
+  ub-ins: u bounds from insertion data only (V2-era data; for V1x the v1 insertion data)
+  ub-pool: u bounds pooled over the v3 union (V3a export bounds)
+  ub-hand: V1b demo export with the 4 non-causal UR dims hand-set (_demo_ubnd.yaml)
+  ub-hand-x0.5: ub-hand with u_bound_scale 0.5
+  admmN: C3 admm_iter N when it is not the current default 2 (or in the E4 sweep)
+models:
+- id: V1a
+  tag: ins1-mse+vg-fixB
+  aliases:
+  - both
+  - ablation both
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_ablation_20260924
+  config: ~/git/lcs_learning/outputs/sim_belt_ablation_20260924/both.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_ablation_20260924/ckpt_both/2026-09-24/5r0a403t/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: 5r0a403t
+  exports: []
+  date: '2026-09-24'
+  parent: null
+  change: 'v1 ablation arm: decoded next-state loss + LCS violation gradient to the encoder'
+  flags:
+    decoded_loss: mse
+    violation_grad_to_encoder: true
+    multistep: null
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce: null
+    latent_std: null
+    bz: null
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v1 insertion data (20260923-210508-ep300-ou, 287 train files, knot1_minus_measured actions)
+  u_bounds: ub-ins (pooled over the v1 insertion data)
+  status: rejected
+  status_note: ablation arm; decoded_only was picked
+  results:
+    offline: 'not in any table (raw: ~/git/lcs_learning/outputs/sim_belt_ablation_20260924/eval_results.json)'
+    closed_loop: null
+- id: V1b
+  tag: ins1-mse-fixB
+  aliases:
+  - decoded_only
+  - decoded_only_epoch0300
+  - the 2026-09-24 model
+  - v1
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_ablation_20260924
+  config: ~/git/lcs_learning/outputs/sim_belt_ablation_20260924/decoded_only.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_ablation_20260924/ckpt_decoded_only/2026-09-24/5afcg1zb/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: 5afcg1zb
+  exports:
+  - '~/git/lcs_learning/outputs/sim_belt_ablation_20260924/ckpt_decoded_only/deploy (goal: mean engaged final)'
+  - '~/git/lcs_learning/outputs/sim_belt_ablation_20260924/ckpt_decoded_only/deploy_demo (goal: old demo frames 0, 59; used in closed loop)'
+  date: '2026-09-24'
+  parent: null
+  change: 'v1 ablation arm: decoded next-state loss only (violation grad off)'
+  flags:
+    decoded_loss: mse
+    violation_grad_to_encoder: false
+    multistep: null
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce: null
+    latent_std: null
+    bz: null
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v1 insertion data (as V1a)
+  u_bounds: ub-ins (v1 data); closed-loop winner used ub-hand (4 UR dims hand-set)
+  status: rejected
+  status_note: deployed 2026-09-24 (first deployment), replaced by V2 on 2026-09-25
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.62 / 2.06 (old data split)
+      source: ~/git/lcs_learning/outputs/sim_belt_v2_20260925/eval_table.md
+    closed_loop:
+      gv1: 11/26 engaged (2 strict) vs baseline 14/26 (winner ubnd_wr30_s0skip_tol2)
+      source: docs/learned-mpc.md 2026-09-24; data/lcs/mpc_eval/20260924-133132-final-learned-set1
+- id: V1c
+  tag: ins1-vg-fixB
+  aliases:
+  - violation_only
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_ablation_20260924
+  config: ~/git/lcs_learning/outputs/sim_belt_ablation_20260924/violation_only.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_ablation_20260924/ckpt_violation_only/2026-09-24/ylcjn8b9/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: ylcjn8b9
+  exports: []
+  date: '2026-09-24'
+  parent: null
+  change: 'v1 ablation arm: violation gradient to the encoder only (decoded loss off)'
+  flags:
+    decoded_loss: null
+    violation_grad_to_encoder: true
+    multistep: null
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce: null
+    latent_std: null
+    bz: null
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v1 insertion data (as V1a)
+  u_bounds: ub-ins (v1 data)
+  status: rejected
+  status_note: ablation arm
+  results:
+    offline: 'not in any table (raw: ~/git/lcs_learning/outputs/sim_belt_ablation_20260924/eval_results.json)'
+    closed_loop: null
+- id: V2
+  tag: ins-mse-fixB
+  aliases:
+  - V2a
+  - v2
+  - v2_decoded_only
+  - v2-decoded_only
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v2_20260925
+  config: ~/git/lcs_learning/outputs/sim_belt_v2_20260925/v2_decoded_only.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v2_20260925/ckpt_v2_decoded_only/2026-09-24/nsxihz32/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: nsxihz32
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v2_20260925/deploy_v2_decoded_only (cmd_delta demo 0, 59; decoder.npz)
+  - ~/git/lcs_learning/outputs/sim_belt_v2_20260925/deploy_v2_flat (flat demo 0, 59)
+  - ~/git/lcs_learning/outputs/sim_belt_v2_20260925/deploy_v2_flat_pp2 (flat demo 13, 59; the live worktree default)
+  date: 2026-09-24/25 (checkpoint dir dated 2026-09-24; campaign folder 20260925)
+  parent: V1b
+  change: re-collected insertion data with cmd_delta actions, pre-hold and UR excitation (464 eps / 33,382 tuples)
+  flags:
+    decoded_loss: mse
+    violation_grad_to_encoder: false
+    multistep: null
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce: null
+    latent_std: null
+    bz: null
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v2 insertion data (data/lcs/v2/split.json)
+  u_bounds: ub-ins
+  status: deployed
+  status_note: 'no letter: the deployed model; V2a is an alias'
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.577 / 1.92
+      source: ~/git/lcs_learning/outputs/sim_belt_v3_20260928/eval_table.md
+    closed_loop:
+      seat6: 4/6 strict, 6/6 engaged, RMSE 6.2
+      fs6: final/min 23.4 / 10.0 mm
+      gv1_gv3_wp: 22/40 engaged vs baseline 14/28 (Qw+wp, rejected design)
+      stages10: 3/10 engaged, 2 strict (live default, both stages to timeout)
+      source: docs/learned-mpc.md; data/lcs/mpc_eval/20260929-v4-retrain/table_v4.md; data/lcs/mpc_eval/20260929-v4-retrain/t1_freespace/table.md
+      seat6_admm: admm5 4/6 strict (2 grasp losses), admm10 0/6 (E4)
+- id: V2b
+  tag: ins-mse+ms7-fixB
+  aliases:
+  - v2_multistep
+  - v2-multistep
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v2_20260925
+  config: ~/git/lcs_learning/outputs/sim_belt_v2_20260925/v2_multistep.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v2_20260925/ckpt_v2_multistep/2026-09-24/5js34zl7/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: 5js34zl7
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v2_20260925/deploy_v2_multistep_cuda_REJECTED_E2 (failed check E2; not used)
+  date: 2026-09-24/25
+  parent: V2
+  change: V2 + 7-step open-loop decoded loss (mse form, weight 1, no warm-up)
+  flags:
+    decoded_loss: mse
+    violation_grad_to_encoder: false
+    multistep:
+      horizon: 7
+      form: mse
+      weight: 1.0
+      warmup: 0
+      grad_to_encoder: true
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce: null
+    latent_std: null
+    bz: null
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v2 insertion data
+  u_bounds: ub-ins
+  status: rejected
+  status_note: failed its pick rule (h7 3.25 vs 1.53 target) after an epoch-11 AE collapse
+  results:
+    offline:
+      insertion_one_step_h7_mm: 2.28 / 3.25
+      source: ~/git/lcs_learning/outputs/sim_belt_v2_20260925/eval_table.md
+    closed_loop: null
+- id: V3a
+  tag: mix-mse-fixB
+  aliases:
+  - v3_mix
+  - v3-mix
+  - PICK A
+  - model A
+  - A
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v3_20260928
+  config: ~/git/lcs_learning/outputs/sim_belt_v3_20260928/v3_mix.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v3_20260928/ckpt_v3_mix/2026-09-28/rt2j3k45/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: rt2j3k45
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v3_20260928/deploy_v3_mix
+  date: '2026-09-28'
+  parent: V2
+  change: V2 recipe from scratch on the v3 union (insertion + free space + approach + contact; 790 eps / 82,834 tuples)
+  flags:
+    decoded_loss: mse
+    violation_grad_to_encoder: false
+    multistep: null
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce: null
+    latent_std: null
+    bz: null
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v3 union (data/lcs/v3/split.json)
+  u_bounds: ub-pool
+  status: rejected
+  status_note: open-loop pick, worse in closed loop
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.551 / 1.88
+      source: ~/git/lcs_learning/outputs/sim_belt_v3_20260928/eval_table.md
+    closed_loop:
+      seat6: 1/6 strict, 1/6 engaged, RMSE 79.8
+      seat6_ub_ins: 1/6 strict (E3)
+      fs6: final/min 8.4 / 5.5 mm (best in free space)
+      source: data/lcs/mpc_eval/20260928-223352-synthtargets-v3/table.md; data/lcs/diag/20260929-sim-response/e3/table.md; data/lcs/mpc_eval/20260929-v4-retrain/t1_freespace/table.md
+      seat6_admm: admm5 0/6, admm10 0/6 (E4)
+- id: V3b
+  tag: mix-mse-fixB
+  aliases:
+  - v3_ft
+  - v3-ft
+  - B
+  finetune: ft from V2 (nsxihz32 epoch 300)
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v3_20260928
+  config: ~/git/lcs_learning/outputs/sim_belt_v3_20260928/v3_ft.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v3_20260928/ckpt_v3_ft/2026-09-28/3y5b4zac/checkpoint_epoch_0120.pt
+  epoch: 120
+  wandb: 3y5b4zac
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v3_20260928/deploy_v3_ft
+  date: '2026-09-28'
+  parent: V2
+  change: V2 epoch 300 fine-tuned on the v3 union (--init-checkpoint, 120 epochs, lr 3e-4, no AE warm-up)
+  flags:
+    decoded_loss: mse
+    violation_grad_to_encoder: false
+    multistep: null
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce: null
+    latent_std: null
+    bz: null
+    init_checkpoint: V2 epoch 300
+    epochs: 120
+    lr: 0.0003
+    seed: 0
+  data: v3 union
+  u_bounds: ub-pool
+  status: rejected
+  status_note: lost the open-loop pick to V3a; never run in closed loop
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.583 / 1.88
+      source: ~/git/lcs_learning/outputs/sim_belt_v3_20260928/eval_table.md
+    closed_loop: null
+- id: V4a
+  tag: mix-rmse-fixB
+  aliases:
+  - T1
+  - t1
+  - v4-t1
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v4_20260929
+  config: ~/git/lcs_learning/outputs/sim_belt_v4_20260929/v4_t1.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v4_20260929/ckpt_t1/2026-09-29/1niukyhl/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: 1niukyhl
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v4_20260929/deploy_t1
+  date: '2026-09-29'
+  parent: V3a
+  change: V3a with the decoded next-state loss in rmse form (the loss-scale fix; now the trainer default)
+  flags:
+    decoded_loss: rmse
+    violation_grad_to_encoder: false
+    multistep: null
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce: null
+    latent_std: null
+    bz: null
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v3 union
+  u_bounds: ub-ins (--u-bounds-glob)
+  status: rejected
+  status_note: base recipe of V5-V7; safe but rests on top of the pulley
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.509 / 1.98
+      source: ~/git/lcs_learning/outputs/sim_belt_v4_20260929/eval_table.md
+    closed_loop:
+      seat6: 0/6 strict, RMSE 13.1
+      yaw12: 0/12, RMSE 13.6
+      fs6: '16.0 / 8.7 mm (ub-pool: 11.4 / 7.3)'
+      seat6_QA: 0/6, RMSE 10.9
+      yaw12_QA: 6/12, RMSE 9.9
+      seat6_QB: 1/6, RMSE 17.6
+      yaw12_QB: 3/12, RMSE 22.9
+      source: data/lcs/mpc_eval/20260929-v4-retrain/{table_v4.md,t1_yaw/table.md,t1_freespace/table.md}; data/lcs/mpc_eval/20260929-metric/table_metric{,_yaw}.md
+- id: V4b
+  tag: mix-rmse+db+ms7+np3-fixB
+  aliases:
+  - T2
+  - t2
+  - v4-t2
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v4_20260929
+  config: ~/git/lcs_learning/outputs/sim_belt_v4_20260929/v4_t2.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v4_20260929/ckpt_t2/2026-09-29/gwz0d9jk/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: gwz0d9jk
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v4_20260929/deploy_t2
+  date: '2026-09-29'
+  parent: V4a
+  change: V4a + delta-belt loss 1 + multistep H7 (rmse, weight 1/7, warm-up 10) + near-pulley sampling x3
+  flags:
+    decoded_loss: rmse
+    violation_grad_to_encoder: false
+    multistep:
+      horizon: 7
+      form: rmse
+      weight: 0.142857
+      warmup: 10
+      grad_to_encoder: true
+    delta_belt: 1.0
+    near_pulley: 3.0
+    latent_metric: 0.0
+    nce: null
+    latent_std: null
+    bz: null
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v3 union
+  u_bounds: ub-ins
+  status: rejected
+  status_note: ill-conditioned LCS (cond(F) 201); Franka spins
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.711 / 1.42
+      source: ~/git/lcs_learning/outputs/sim_belt_v4_20260929/eval_table.md
+    closed_loop:
+      seat6: 0/6 strict, RMSE 132.7
+      source: data/lcs/mpc_eval/20260929-v4-retrain/table_v4.md
+- id: V4c
+  tag: mix-rmse+db+ms7+np3+lm-fixB
+  aliases:
+  - T3
+  - t3
+  - v4-t3
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v4_20260929
+  config: ~/git/lcs_learning/outputs/sim_belt_v4_20260929/v4_t3.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v4_20260929/ckpt_t3/2026-09-29/1q2gt22n/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: 1q2gt22n
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v4_20260929/deploy_t3
+  date: '2026-09-29'
+  parent: V4b
+  change: V4b + latent-metric loss 0.02 (latent step ~ belt RMSE + height term)
+  flags:
+    decoded_loss: rmse
+    violation_grad_to_encoder: false
+    multistep:
+      horizon: 7
+      form: rmse
+      weight: 0.142857
+      warmup: 10
+      grad_to_encoder: true
+    delta_belt: 1.0
+    near_pulley: 3.0
+    latent_metric: 0.02
+    nce: null
+    latent_std: null
+    bz: null
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v3 union
+  u_bounds: ub-ins
+  status: rejected
+  status_note: fixes the latent ranking offline, not the closed loop
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.643 / 1.93
+      source: ~/git/lcs_learning/outputs/sim_belt_v4_20260929/eval_table.md
+    closed_loop:
+      seat6: 1/6 strict, RMSE 90.4
+      seat6_QA: 0/6, RMSE 44.8
+      yaw12_QA: 0/12, RMSE 69.1
+      seat6_QB: 0/6, RMSE 43.0
+      yaw12_QB: 0/12, RMSE 42.6
+      source: data/lcs/mpc_eval/20260929-v4-retrain/table_v4.md; data/lcs/mpc_eval/20260929-metric/table_metric{,_yaw}.md
+- id: V5a
+  tag: mix-rmse+nceS-fixB
+  aliases:
+  - T5a
+  - t5a
+  - v5-t5a
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v5_20260929
+  config: ~/git/lcs_learning/outputs/sim_belt_v5_20260929/v5_t5a.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v5_20260929/ckpt_t5a/2026-09-29/a4liiwsl/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: a4liiwsl
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v5_20260929/deploy_t5a
+  - ~/git/lcs_learning/outputs/sim_belt_v5_20260929/superseded/deploy_t5a (first export, flagged; superseded)
+  date: '2026-09-29'
+  parent: V4a
+  change: V4a + state InfoNCE (0.0065, tau 0.1, episode+branch hard negatives, batch sigma)
+  flags:
+    decoded_loss: rmse
+    violation_grad_to_encoder: false
+    multistep: null
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce:
+      state_weight: 0.0065
+      action_weight: 0.0
+      tau: 0.1
+      hard_neg: episode+branch
+      sigma: batch
+    latent_std: null
+    bz: null
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v3 union
+  u_bounds: ub-ins
+  status: rejected
+  status_note: unsafe in closed loop
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.722 / 2.42
+      source: ~/git/lcs_learning/outputs/sim_belt_v5_20260929/eval_table_v5.md
+    closed_loop:
+      seat6: 0/6, RMSE 82.9
+      yaw12: 0/12, RMSE 94.9
+      fs6: 125.9 / 12.4 mm (ub-pool)
+      source: data/lcs/mpc_eval/20260929-v5-infonce/table_{seat,yaw,freespace}.md
+- id: V5b
+  tag: mix-rmse+nceS+nceA-fixB
+  aliases:
+  - T5b
+  - t5b
+  - v5-t5b
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v5_20260929
+  config: ~/git/lcs_learning/outputs/sim_belt_v5_20260929/v5_t5b.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v5_20260929/ckpt_t5b/2026-09-29/mkgsga96/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: mkgsga96
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v5_20260929/deploy_t5b
+  date: '2026-09-29'
+  parent: V5a
+  change: V5a + action InfoNCE (0.0065, in-batch alternative actions)
+  flags:
+    decoded_loss: rmse
+    violation_grad_to_encoder: false
+    multistep: null
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce:
+      state_weight: 0.0065
+      action_weight: 0.0065
+      tau: 0.1
+      hard_neg: episode+branch
+      sigma: batch
+    latent_std: null
+    bz: null
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v3 union
+  u_bounds: ub-ins
+  status: rejected
+  status_note: unstable LCS (rho(A) 1.30)
+  results:
+    offline:
+      insertion_one_step_h7_mm: 1.192 / 21.25
+      source: ~/git/lcs_learning/outputs/sim_belt_v5_20260929/eval_table_v5.md
+    closed_loop:
+      seat6: 0/6, RMSE 141.1
+      yaw12: 0/12, RMSE 118.6
+      fs6: 64.7 / 15.1 mm (ub-pool)
+      source: data/lcs/mpc_eval/20260929-v5-infonce/table_{seat,yaw,freespace}.md
+- id: V6
+  tag: mix-rmse+cfm-fixB
+  aliases:
+  - T6
+  - t6
+  - v6-t6
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v6_20260929
+  config: ~/git/lcs_learning/outputs/sim_belt_v6_20260929/v6_t6.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v6_20260929/ckpt_t6/2026-09-30/29na8zty/checkpoint_epoch_0020.pt
+  epoch: 20 (last saved; stopped at 25)
+  wandb: 29na8zty
+  exports: []
+  date: 2026-09-29/30
+  parent: V4a
+  change: V4a + CFM-form state InfoNCE (sigma 1, tau 1, in-batch only), no latent-scale bound
+  flags:
+    decoded_loss: rmse
+    violation_grad_to_encoder: false
+    multistep: null
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce:
+      state_weight: 0.0071
+      action_weight: 0.0
+      tau: 1.0
+      hard_neg: none
+      sigma: none
+    latent_std: null
+    bz: null
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v3 union
+  u_bounds: '-'
+  status: stopped
+  status_note: latent std 0.18 -> 3.10 by epoch 25; no letter by the agreed mapping
+  results:
+    offline: null
+    closed_loop: null
+- id: V6a
+  tag: mix-rmse+cfm-band-fixB
+  aliases:
+  - T6a
+  - t6a
+  - t6a_w1
+  - v6-t6a_w1
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v6_20260929
+  config: ~/git/lcs_learning/outputs/sim_belt_v6_20260929/v6_t6a_w1.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v6_20260929/ckpt_t6a_w1/2026-09-30/04ium1ly/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: 04ium1ly
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v6_20260929/deploy_t6a
+  date: 2026-09-29/30
+  parent: V6
+  change: V6 + latent-std band 0.18-0.35, weight 1
+  flags:
+    decoded_loss: rmse
+    violation_grad_to_encoder: false
+    multistep: null
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce:
+      state_weight: 0.0071
+      action_weight: 0.0
+      tau: 1.0
+      hard_neg: none
+      sigma: none
+    latent_std:
+      weight: 1.0
+      band:
+      - 0.18
+      - 0.35
+    bz: null
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v3 union
+  u_bounds: ub-ins
+  status: rejected
+  status_note: unsafe in closed loop
+  side_runs:
+  - name: t6a_w10
+    config: ~/git/lcs_learning/outputs/sim_belt_v6_20260929/v6_t6a_w10.yaml
+    wandb: trafqf0l
+    status: stopped
+    note: band, weight 10; stopped at epoch 30 (weight 1 already held sigma)
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.825 / 3.62
+      source: ~/git/lcs_learning/outputs/sim_belt_v6_20260929/eval_table_v6.md
+    closed_loop:
+      seat6: 0/6, RMSE 95.8
+      yaw12: 0/12, RMSE 109.9
+      fs6: 69.8 mm final (ub-pool)
+      source: data/lcs/mpc_eval/20260929-v6-cfm/table_{seat,yaw,freespace}.md
+- id: V6b
+  tag: mix-rmse+cfm-pin-fixB
+  aliases:
+  - T6b
+  - t6b
+  - t6b_w10_r2
+  - v6-t6b_w10-r2
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v6_20260929
+  config: ~/git/lcs_learning/outputs/sim_belt_v6_20260929/v6_t6b_w10_r2.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v6_20260929/ckpt_t6b_w10_r2/2026-09-30/w3cqrq86/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: w3cqrq86
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v6_20260929/deploy_t6b
+  date: 2026-09-29/30
+  parent: V6
+  change: V6 + latent-std pin 0.35, weight 10 (retrain r2)
+  flags:
+    decoded_loss: rmse
+    violation_grad_to_encoder: false
+    multistep: null
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce:
+      state_weight: 0.0071
+      action_weight: 0.0
+      tau: 1.0
+      hard_neg: none
+      sigma: none
+    latent_std:
+      weight: 10.0
+      pin: 0.35
+    bz: null
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v3 union
+  u_bounds: ub-ins
+  status: rejected
+  status_note: unsafe in closed loop
+  side_runs:
+  - name: t6b_w1
+    config: ~/git/lcs_learning/outputs/sim_belt_v6_20260929/v6_t6b_w1.yaml
+    wandb: 6n5j9jvb
+    status: stopped
+    note: pin, weight 1; stopped at epoch 30 (sigma drifted to 0.38)
+  - name: t6b_w10
+    config: ~/git/lcs_learning/outputs/sim_belt_v6_20260929/v6_t6b_w10.yaml
+    wandb: q25alk7k
+    status: stopped
+    note: segfault (exit 139) at epoch 216; retrained as r2
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.834 / 3.13
+      source: ~/git/lcs_learning/outputs/sim_belt_v6_20260929/eval_table_v6.md
+    closed_loop:
+      seat6: 0/6, RMSE 80.7
+      yaw12: 2/12, RMSE 66.4
+      fs6: 65.6 mm final (ub-pool)
+      source: data/lcs/mpc_eval/20260929-v6-cfm/table_{seat,yaw,freespace}.md
+- id: V7a
+  tag: mix-rmse-Bz
+  aliases:
+  - V1 (2026-09-30 name)
+  - v7 V1
+  - sdv1
+  - v7-v1
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v7_20260930
+  config: ~/git/lcs_learning/outputs/sim_belt_v7_20260930/v7_v1.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v7_20260930/ckpt_v1/2026-09-30/grn9fisu/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: grn9fisu
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v7_20260930/deploy_v1
+  date: '2026-09-30'
+  parent: V4a
+  change: V4a + state-dependent B(z) = B0 + dB(z) (z-only tanh MLP, H 64, zero-init)
+  flags:
+    decoded_loss: rmse
+    violation_grad_to_encoder: false
+    multistep: null
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce: null
+    latent_std: null
+    bz:
+      hidden: 64
+      act: tanh
+      init: zero
+      lr: 0.001
+      weight_decay: 0.0001
+      reg: 0.0
+      warmup: 0
+      delta_d: false
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v3 union
+  u_bounds: ub-ins
+  status: candidate
+  status_note: most promising retrain, not adopted (+15 deg yaw safety failure, "under" overshoot, free space)
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.509 / 2.29
+      source: ~/git/lcs_learning/outputs/sim_belt_v7_20260930/eval_table_v7.md
+    closed_loop:
+      seat6: 2/6 strict, 3/6 engaged, RMSE 10.0
+      yaw12: 3/12, RMSE 23.5 (pooled)
+      fs6: 12.7 / 7.3 mm (ub-pool)
+      seat6_head_off: 0/6, RMSE 381.2
+      source: data/lcs/mpc_eval/20260930-sdlcs/table_{seat,yaw,freespace}.md; data/lcs/mpc_eval/20260930-sdlcs/verdict.md
+- id: V7b
+  tag: mix-rmse+ms7-Bz+frz
+  aliases:
+  - V2 (2026-09-30 name)
+  - v7 V2
+  - sdv2
+  - v7-v2
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v7_20260930
+  config: ~/git/lcs_learning/outputs/sim_belt_v7_20260930/v7_v2.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v7_20260930/ckpt_v2/2026-09-30/vo97r4cg/checkpoint_epoch_0300.pt
+  epoch: 300
+  wandb: vo97r4cg
+  exports:
+  - '~/git/lcs_learning/outputs/sim_belt_v7_20260930/deploy_v2 (check E3 fails: accepted PGD early-stop mismatch)'
+  date: '2026-09-30'
+  parent: V7a
+  change: V7a + multistep H7 (rmse, weight 1/7, warm-up 10) with B(z_0) frozen over the window
+  flags:
+    decoded_loss: rmse
+    violation_grad_to_encoder: false
+    multistep:
+      horizon: 7
+      form: rmse
+      weight: 0.142857
+      warmup: 10
+      grad_to_encoder: true
+      freeze_bz: true
+    delta_belt: 0.0
+    near_pulley: 1.0
+    latent_metric: 0.0
+    nce: null
+    latent_std: null
+    bz:
+      hidden: 64
+      act: tanh
+      init: zero
+      lr: 0.001
+      weight_decay: 0.0001
+      reg: 0.0
+      warmup: 0
+      delta_d: false
+    init_checkpoint: null
+    epochs: 300
+    lr: 0.001
+    seed: 0
+  data: v3 union
+  u_bounds: ub-ins
+  status: rejected
+  status_note: inflates B, rho(A) 1.264; not run in closed loop
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.569 / 1.32
+      source: ~/git/lcs_learning/outputs/sim_belt_v7_20260930/eval_table_v7.md
+    closed_loop: null
+evals:
+- label: BL · nom · - · -
+  model: BL
+  suite: nom
+  cost: '-'
+  limits: '-'
+  path: data/lcs/mpc_eval/20260924-124753-baseline-nominal
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 1
+  n_episodes: 2
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: waypoint baseline
+- label: V1b · nom · Qw · ub-ins admm3
+  model: V1b
+  suite: nom
+  cost: Qw
+  limits: ub-ins admm3
+  path: data/lcs/mpc_eval/20260924-124821-learned-nominal
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 1
+  n_episodes: 2
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: v1 defaults, w_r 0.1, 2 stages, demo 0/59
+- label: V1b · nom · Qw · ub-ins admm3
+  model: V1b
+  suite: nom
+  cost: Qw
+  limits: ub-ins admm3
+  path: data/lcs/mpc_eval/20260924-130800-learned-default-nominal
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 1
+  n_episodes: 3
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: v1 defaults
+- label: BL · gv1 · - · -
+  model: BL
+  suite: gv1
+  cost: '-'
+  limits: '-'
+  path: data/lcs/mpc_eval/20260924-131014-baseline-set1
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 13
+  n_episodes: 26
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: baseline set1 x2 (14/26)
+- label: BL · nom · - · -
+  model: BL
+  suite: nom
+  cost: '-'
+  limits: '-'
+  path: data/lcs/mpc_eval/20260924-131302-baseline-nominal
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 1
+  n_episodes: 3
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: waypoint baseline
+- label: V1b · gv1 · Qw · ub-ins admm3
+  model: V1b
+  suite: gv1
+  cost: Qw
+  limits: ub-ins admm3
+  path: data/lcs/mpc_eval/20260924-131328-learned-default-set1
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 13
+  n_episodes: 13
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: 'v1 defaults: 0/13, 13 aborts'
+- label: V1b · gv1-2 · Qw · ub-ins admm3
+  model: V1b
+  suite: gv1-2
+  cost: Qw
+  limits: ub-ins admm3
+  path: data/lcs/mpc_eval/20260924-131721-screen-wr10
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 2
+  n_episodes: 2
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: screen wr10
+- label: V1b · gv1-2 · Qw · ub-ins admm3
+  model: V1b
+  suite: gv1-2
+  cost: Qw
+  limits: ub-ins admm3
+  path: data/lcs/mpc_eval/20260924-131753-screen-wr100
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 2
+  n_episodes: 2
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: screen wr100
+- label: V1b · gv1-2 · Qw · ub-hand admm3
+  model: V1b
+  suite: gv1-2
+  cost: Qw
+  limits: ub-hand admm3
+  path: data/lcs/mpc_eval/20260924-131828-screen-ubnd
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 2
+  n_episodes: 2
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: screen ubnd
+- label: V1b · gv1-2 · Qw · ub-ins admm3
+  model: V1b
+  suite: gv1-2
+  cost: Qw
+  limits: ub-ins admm3
+  path: data/lcs/mpc_eval/20260924-131931-screen-wr100_s0skip
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 2
+  n_episodes: 2
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: screen wr100_s0skip
+- label: V1b · gv1-2 · Qw · ub-hand admm3
+  model: V1b
+  suite: gv1-2
+  cost: Qw
+  limits: ub-hand admm3
+  path: data/lcs/mpc_eval/20260924-131947-screen-ubnd_wr30_s0skip
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 2
+  n_episodes: 2
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: screen ubnd_wr30_s0skip
+- label: V1b · gv1-2 · Qw · ub-hand admm3
+  model: V1b
+  suite: gv1-2
+  cost: Qw
+  limits: ub-hand admm3
+  path: data/lcs/mpc_eval/20260924-132059-screen-ubnd_wr30_s0skip_tol2
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 2
+  n_episodes: 2
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: screen ubnd_wr30_s0skip_tol2
+- label: V1b · gv1-2 · Qw · ub-hand-x0.5 admm3
+  model: V1b
+  suite: gv1-2
+  cost: Qw
+  limits: ub-hand-x0.5 admm3
+  path: data/lcs/mpc_eval/20260924-132116-screen-ubnd_wr30_s0skip_ub05
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 2
+  n_episodes: 2
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: screen ubnd_wr30_s0skip_ub05
+- label: V1b · gv1-10 · Qw · ub-ins admm3
+  model: V1b
+  suite: gv1-10
+  cost: Qw
+  limits: ub-ins admm3
+  path: data/lcs/mpc_eval/20260924-132203-tune-wr100
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 10
+  n_episodes: 10
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: tune wr100
+- label: V1b · gv1-10 · Qw · ub-hand admm3
+  model: V1b
+  suite: gv1-10
+  cost: Qw
+  limits: ub-hand admm3
+  path: data/lcs/mpc_eval/20260924-132429-tune-ubnd
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 10
+  n_episodes: 10
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: tune ubnd
+- label: V1b · gv1-10 · Qw · ub-hand admm3
+  model: V1b
+  suite: gv1-10
+  cost: Qw
+  limits: ub-hand admm3
+  path: data/lcs/mpc_eval/20260924-132709-tune-ubnd_wr30_s0skip
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 10
+  n_episodes: 10
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: tune ubnd_wr30_s0skip
+- label: V1b · gv1-10 · Qw · ub-hand admm3
+  model: V1b
+  suite: gv1-10
+  cost: Qw
+  limits: ub-hand admm3
+  path: data/lcs/mpc_eval/20260924-132800-tune-ubnd_wr30_s0skip_tol2
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 10
+  n_episodes: 10
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: tune ubnd_wr30_s0skip_tol2
+- label: V1b · gv1-10 · Qw · ub-ins admm3
+  model: V1b
+  suite: gv1-10
+  cost: Qw
+  limits: ub-ins admm3
+  path: data/lcs/mpc_eval/20260924-132851-tune-wr100_s0skip
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 10
+  n_episodes: 10
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: tune wr100_s0skip
+- label: V1b · gv1-10 · Qw · ub-hand-x0.5 admm3
+  model: V1b
+  suite: gv1-10
+  cost: Qw
+  limits: ub-hand-x0.5 admm3
+  path: data/lcs/mpc_eval/20260924-132943-tune-ubnd_wr30_s0skip_ub05
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 10
+  n_episodes: 10
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: tune ubnd_wr30_s0skip_ub05
+- label: V1b · gv1 · Qw · ub-hand admm3
+  model: V1b
+  suite: gv1
+  cost: Qw
+  limits: ub-hand admm3
+  path: data/lcs/mpc_eval/20260924-133132-final-learned-set1
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 13
+  n_episodes: 26
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: '09-24 winner ubnd_wr30_s0skip_tol2: 11/26 (2 strict) vs BL 14/26'
+- label: V1b · nom · Qw · ub-hand admm3
+  model: V1b
+  suite: nom
+  cost: Qw
+  limits: ub-hand admm3
+  path: data/lcs/mpc_eval/20260924-133342-final-learned-nominal
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 1
+  n_episodes: 3
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: 09-24 winner
+- label: V1b · gv1-10 · Qw · ub-hand admm3
+  model: V1b
+  suite: gv1-10
+  cost: Qw
+  limits: ub-hand admm3
+  path: data/lcs/mpc_eval/20260924-163529-exp-eez
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 10
+  n_episodes: 10
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: height floors eez
+- label: V1b · gv1-10 · Qw · ub-hand admm3
+  model: V1b
+  suite: gv1-10
+  cost: Qw
+  limits: ub-hand admm3
+  path: data/lcs/mpc_eval/20260924-163633-exp-eez_noexact
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 10
+  n_episodes: 10
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: height floors eez_noexact
+- label: V1b · gv1-10 · Qw · ub-hand admm3
+  model: V1b
+  suite: gv1-10
+  cost: Qw
+  limits: ub-hand admm3
+  path: data/lcs/mpc_eval/20260924-164211-exp-eez_ur13
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 10
+  n_episodes: 10
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: height floors eez_ur13
+- label: V1b · gv1-10 · Qw · ub-hand admm3
+  model: V1b
+  suite: gv1-10
+  cost: Qw
+  limits: ub-hand admm3
+  path: data/lcs/mpc_eval/20260924-164322-exp-eez_franka_free
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 10
+  n_episodes: 10
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: height floors eez_franka_free
+- label: V1b · gv1-10 · Qw · ub-hand admm3
+  model: V1b
+  suite: gv1-10
+  cost: Qw
+  limits: ub-hand admm3
+  path: data/lcs/mpc_eval/20260924-165113-exp-eez_ur13_traj_time
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 10
+  n_episodes: 10
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: height floors eez_ur13_traj_time (demo-traj ref)
+- label: V1b · gv1-10 · Qw · ub-hand admm3
+  model: V1b
+  suite: gv1-10
+  cost: Qw
+  limits: ub-hand admm3
+  path: data/lcs/mpc_eval/20260924-165323-exp-eez_ur13_traj_progress
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 10
+  n_episodes: 10
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: height floors eez_ur13_traj_progress (demo-traj ref)
+- label: V1b · gv1-10 · Qw · ub-hand admm2
+  model: V1b
+  suite: gv1-10
+  cost: Qw
+  limits: ub-hand admm2
+  path: data/lcs/mpc_eval/20260924-165712-exp-eez_ur13_traj_progress_admm2
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 10
+  n_episodes: 10
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: height floors eez_ur13_traj_progress_admm2 (demo-traj ref)
+- label: V1b · gv1-10 · Qw · ub-hand admm1
+  model: V1b
+  suite: gv1-10
+  cost: Qw
+  limits: ub-hand admm1
+  path: data/lcs/mpc_eval/20260924-170028-exp-eez_ur13_traj_progress_admm1
+  date: '2026-09-24'
+  log_day: '2026-09-24'
+  n_cells: 10
+  n_episodes: 10
+  table: systems/parameters/learned_archive/README.md (worktree)
+  note: height floors eez_ur13_traj_progress_admm1 (demo-traj ref)
+- label: V2 · nom · Qw · ub-ins
+  model: V2
+  suite: nom
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-200235-deploy-v2-smoke
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 1
+  n_episodes: 2
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: v2 smoke, demo-traj progress, w_r 30
+- label: V2 · nom · Qw · ub-ins
+  model: V2
+  suite: nom
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-200601-deploy-v2-stages-smoke
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 1
+  n_episodes: 2
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: v2 smoke, 2 fixed stages
+- label: BL · gv1 · - · -
+  model: BL
+  suite: gv1
+  cost: '-'
+  limits: '-'
+  path: data/lcs/mpc_eval/20260924-201659-evalv2-baseline-set1
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 13
+  n_episodes: 13
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: eval-v2 baseline
+- label: BL · gv3 · - · -
+  model: BL
+  suite: gv3
+  cost: '-'
+  limits: '-'
+  path: data/lcs/mpc_eval/20260924-201842-evalv2-baseline-set3
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 8
+  n_episodes: 16
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: eval-v2 baseline
+- label: BL · nom · - · -
+  model: BL
+  suite: nom
+  cost: '-'
+  limits: '-'
+  path: data/lcs/mpc_eval/20260924-202029-evalv2-baseline-nominal
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 1
+  n_episodes: 3
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: eval-v2 baseline
+- label: V2 · gv1 · Qw · ub-ins
+  model: V2
+  suite: gv1
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-202056-evalv2-v2full-set1
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 13
+  n_episodes: 26
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: 'v2 full (traj progress, w_r 30, penalty bug): 0/40 held-out'
+- label: V2 · nom · Qw · ub-ins
+  model: V2
+  suite: nom
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-202855-evalv2-v2full-nominal
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 1
+  n_episodes: 3
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: v2 full
+- label: V2 · gv1 · Qw · ub-ins
+  model: V2
+  suite: gv1
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-202954-evalv2-abl-v2stages-set1
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 13
+  n_episodes: 13
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: 'ablation: 2 fixed stages, 0/13'
+- label: V1b · gv1 · Qw · ub-hand admm2
+  model: V1b
+  suite: gv1
+  cost: Qw
+  limits: ub-hand admm2
+  path: data/lcs/mpc_eval/20260924-203301-evalv2-abl-oldmodel-phase0-set1
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 13
+  n_episodes: 13
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: 'ablation: V1b + traj progress admm2'
+- label: V2 · gv3 · Qw · ub-ins
+  model: V2
+  suite: gv3
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-203612-evalv2-v2full-set3
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 8
+  n_episodes: 16
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: v2 full
+- label: V2 · gv1-d10 · Qw · ub-ins
+  model: V2
+  suite: gv1-d10
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-211039-ctrldiag-honor_wr0p3
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 10
+  n_episodes: 10
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: honor penalize_input_change, w_r 0.3
+- label: V2 · gv1-d10 · Qw+wp · ub-ins
+  model: V2
+  suite: gv1-d10
+  cost: Qw+wp
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-211342-ctrldiag-honor_wr0p3_wp0p03
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 10
+  n_episodes: 10
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: 'Phase-B winner: 6/10 vs BL 4/10'
+- label: V2 · gv1-d10 · Qw · ub-ins
+  model: V2
+  suite: gv1-d10
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-211646-ctrldiag-penalty_wr0p3
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 10
+  n_episodes: 10
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: w_r 0.3, penalty bug on
+- label: V2 · gv1 · Qw+wp · ub-ins
+  model: V2
+  suite: gv1
+  cost: Qw+wp
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-212141-evalv2honor-set1
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 13
+  n_episodes: 26
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: eval-v2-honor (22/40 held-out with set3)
+- label: V2 · gv3 · Qw+wp · ub-ins
+  model: V2
+  suite: gv3
+  cost: Qw+wp
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-212906-evalv2honor-set3
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 8
+  n_episodes: 16
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: eval-v2-honor
+- label: V2 · nom · Qw+wp · ub-ins
+  model: V2
+  suite: nom
+  cost: Qw+wp
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-213353-evalv2honor-nominal
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 1
+  n_episodes: 3
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: eval-v2-honor
+- label: BL · rec6 · - · -
+  model: BL
+  suite: rec6
+  cost: '-'
+  limits: '-'
+  path: data/lcs/mpc_eval/20260924-223112-replayset-baseline
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 6
+  n_episodes: 6
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: recorded replay set (nominal/set1/set3 subdirs)
+- label: V2 · rec6 · Qw+wp · ub-ins
+  model: V2
+  suite: rec6
+  cost: Qw+wp
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-223112-replayset-learned
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 6
+  n_episodes: 9
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: honor wp + debug channel, recorded
+- label: BL · gv1 · - · -
+  model: BL
+  suite: gv1
+  cost: '-'
+  limits: '-'
+  path: data/lcs/mpc_eval/20260924-234527-flateval-baseline-set1
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 12
+  n_episodes: 12
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: flat-hold-eval baseline (flat demo)
+- label: BL · gv1 · - · -
+  model: BL
+  suite: gv1
+  cost: '-'
+  limits: '-'
+  path: data/lcs/mpc_eval/20260924-234527-flateval-baseline-set1-rerun
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 5
+  n_episodes: 5
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: flat-hold-eval baseline re-run gv_04-08
+- label: V2 · nom · Qw+wp · ub-ins
+  model: V2
+  suite: nom
+  cost: Qw+wp
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-234527-flateval-learned-nominal
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 1
+  n_episodes: 3
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: flat-hold-eval, deploy_v2_flat
+- label: V2 · gv1 · Qw+wp · ub-ins
+  model: V2
+  suite: gv1
+  cost: Qw+wp
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-234527-flateval-learned-set1
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 12
+  n_episodes: 24
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: flat-hold-eval; index.json episodes rebuilt 2026-09-30 from the npz (outcomes only)
+- label: V2 · gv3 · Qw+wp · ub-ins
+  model: V2
+  suite: gv3
+  cost: Qw+wp
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-234527-flateval-learned-set3
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 8
+  n_episodes: 8
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: flat-hold-eval, deploy_v2_flat
+- label: BL · rec4 · - · -
+  model: BL
+  suite: rec4
+  cost: '-'
+  limits: '-'
+  path: data/lcs/mpc_eval/20260924-234527-flatrec-baseline
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 4
+  n_episodes: 4
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: flat recorded set
+- label: V2 · rec4 · Qw+wp · ub-ins
+  model: V2
+  suite: rec4
+  cost: Qw+wp
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260924-234527-flatrec-learned
+  date: '2026-09-24'
+  log_day: '2026-09-25'
+  n_cells: 4
+  n_episodes: 4
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: flat recorded set, debug channel
+- label: V2 · stages10 · Qw · ub-ins
+  model: V2
+  suite: stages10
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260925-002801-stages
+  date: '2026-09-25'
+  log_day: '2026-09-25'
+  n_cells: 10
+  n_episodes: 10
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: 'two-fixed-targets (deploy_v2_flat_pp2): 1/10'
+- label: V2 · stages10 · Qw · ub-ins
+  model: V2
+  suite: stages10
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260925-002801-stages-s1timeout
+  date: '2026-09-25'
+  log_day: '2026-09-25'
+  n_cells: 10
+  n_episodes: 10
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: 'final stage runs to timeout: 2/10'
+- label: V2 · stages10 · Qw · ub-ins
+  model: V2
+  suite: stages10
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260925-002801-stages-timeout
+  date: '2026-09-25'
+  log_day: '2026-09-25'
+  n_cells: 10
+  n_episodes: 10
+  table: docs/learned-mpc.md 2026-09-25; learned_archive/README.md
+  note: 'both stages to timeout = live default: 3/10 (2 strict)'
+- label: V2 · eeoff4 · Qw · ub-ins
+  model: V2
+  suite: eeoff4
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260925-203831-eeoff/learned
+  date: '2026-09-25'
+  log_day: '2026-09-25'
+  n_cells: 4
+  n_episodes: 4
+  table: handoffs/archive/RUN-STATE-2026-09-27-mpc-eval-videos-part5.md
+  note: EE-offset starts, live params
+- label: BL · eeoff4 · - · -
+  model: BL
+  suite: eeoff4
+  cost: '-'
+  limits: '-'
+  path: data/lcs/mpc_eval/20260925-203831-eeoff/baseline
+  date: '2026-09-25'
+  log_day: '2026-09-25'
+  n_cells: 4
+  n_episodes: 4
+  table: handoffs/archive/RUN-STATE-2026-09-27-mpc-eval-videos-part5.md
+  note: EE-offset starts
+- label: V2 · long25 · Qw · ub-ins
+  model: V2
+  suite: long25
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260925-long25-gv03
+  date: '2026-09-25'
+  log_day: '2026-09-25'
+  n_cells: 1
+  n_episodes: 1
+  table: '-'
+  note: gv_03, 35 s episode, long25 params
+- label: V2 · seat6 · Qw · ub-ins
+  model: V2
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260926-231837-synthtargets
+  date: '2026-09-26'
+  log_day: '2026-09-26'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260926-231837-synthtargets/table.json
+  note: 'first seat6 run: 4/6 strict'
+- label: V3a · seat6 · Qw · ub-pool
+  model: V3a
+  suite: seat6
+  cost: Qw
+  limits: ub-pool
+  path: data/lcs/mpc_eval/20260928-223352-synthtargets-v3
+  date: '2026-09-28'
+  log_day: '2026-09-28'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260928-223352-synthtargets-v3/table.md
+  note: 'PICK A closed loop: 1/6 strict'
+- label: V2 · seat6 · Qw · ub-ins admm2
+  model: V2
+  suite: seat6
+  cost: Qw
+  limits: ub-ins admm2
+  path: data/lcs/diag/20260929-c3-consistency/closed/admm2_p10/v2
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 3
+  n_episodes: 3
+  table: data/lcs/diag/20260929-c3-consistency/closed/table.md
+  note: E4, paced p10 (3 of 6 cells)
+- label: V3a · seat6 · Qw · ub-pool admm2
+  model: V3a
+  suite: seat6
+  cost: Qw
+  limits: ub-pool admm2
+  path: data/lcs/diag/20260929-c3-consistency/closed/admm2_p10/v3
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 3
+  n_episodes: 3
+  table: data/lcs/diag/20260929-c3-consistency/closed/table.md
+  note: E4, paced p10 (3 of 6 cells)
+- label: V2 · seat6 · Qw · ub-ins admm5
+  model: V2
+  suite: seat6
+  cost: Qw
+  limits: ub-ins admm5
+  path: data/lcs/diag/20260929-c3-consistency/closed/admm5_p5/v2
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/diag/20260929-c3-consistency/closed/table.md
+  note: E4, paced p5
+- label: V3a · seat6 · Qw · ub-pool admm5
+  model: V3a
+  suite: seat6
+  cost: Qw
+  limits: ub-pool admm5
+  path: data/lcs/diag/20260929-c3-consistency/closed/admm5_p5/v3
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/diag/20260929-c3-consistency/closed/table.md
+  note: E4, paced p5
+- label: V2 · seat6 · Qw · ub-ins admm10
+  model: V2
+  suite: seat6
+  cost: Qw
+  limits: ub-ins admm10
+  path: data/lcs/diag/20260929-c3-consistency/closed/admm10_p10/v2
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/diag/20260929-c3-consistency/closed/table.md
+  note: E4, paced p10
+- label: V3a · seat6 · Qw · ub-pool admm10
+  model: V3a
+  suite: seat6
+  cost: Qw
+  limits: ub-pool admm10
+  path: data/lcs/diag/20260929-c3-consistency/closed/admm10_p10/v3
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/diag/20260929-c3-consistency/closed/table.md
+  note: E4, paced p10
+- label: V2 · seat6 · Qw · ub-ins
+  model: V2
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/diag/20260929-sim-response/capture/v2
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/diag/20260929-sim-response/e3/table.md
+  note: re-run with per-frame snapshots ("rerun" rows)
+- label: V3a · seat6 · Qw · ub-pool
+  model: V3a
+  suite: seat6
+  cost: Qw
+  limits: ub-pool
+  path: data/lcs/diag/20260929-sim-response/capture/v3
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/diag/20260929-sim-response/e3/table.md
+  note: re-run with per-frame snapshots ("rerun" rows)
+- label: V3a · seat6 · Qw · ub-ins
+  model: V3a
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/diag/20260929-sim-response/e3
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/diag/20260929-sim-response/e3/table.md
+  note: 'E3: V3a with V2''s u bounds'
+- label: V4a · seat6 · Qw · ub-ins
+  model: V4a
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-v4-retrain/t1
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v4-retrain/table_v4.md
+- label: V4b · seat6 · Qw · ub-ins
+  model: V4b
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-v4-retrain/t2
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v4-retrain/table_v4.md
+- label: V4c · seat6 · Qw · ub-ins
+  model: V4c
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-v4-retrain/t3
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v4-retrain/table_v4.md
+- label: V4a · yaw12 · Qw · ub-ins
+  model: V4a
+  suite: yaw12
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-v4-retrain/t1_yaw
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20260929-v4-retrain/t1_yaw/table.md
+- label: V4a · fs6 · Qw · ub-ins
+  model: V4a
+  suite: fs6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-v4-retrain/t1_freespace/t1
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v4-retrain/t1_freespace/table.md
+- label: V4a · fs6 · Qw · ub-pool
+  model: V4a
+  suite: fs6
+  cost: Qw
+  limits: ub-pool
+  path: data/lcs/mpc_eval/20260929-v4-retrain/t1_freespace/t1_v3bounds
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v4-retrain/t1_freespace/table.md
+  note: '"T1-v3b"'
+- label: V2 · fs6 · Qw · ub-ins
+  model: V2
+  suite: fs6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-v4-retrain/t1_freespace/v2
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v4-retrain/t1_freespace/table.md
+- label: V3a · fs6 · Qw · ub-pool
+  model: V3a
+  suite: fs6
+  cost: Qw
+  limits: ub-pool
+  path: data/lcs/mpc_eval/20260929-v4-retrain/t1_freespace/v3_mix
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v4-retrain/t1_freespace/table.md
+- label: V4a · seat6 · QA · ub-ins
+  model: V4a
+  suite: seat6
+  cost: QA
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-metric/t1_metricA
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-metric/table_metric.md
+- label: V4a · yaw12 · QA · ub-ins
+  model: V4a
+  suite: yaw12
+  cost: QA
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-metric/t1_metricA_yaw
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20260929-metric/table_metric_yaw.md
+- label: V4a · seat6 · QB · ub-ins
+  model: V4a
+  suite: seat6
+  cost: QB
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-metric/t1_metricB
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-metric/table_metric.md
+- label: V4a · yaw12 · QB · ub-ins
+  model: V4a
+  suite: yaw12
+  cost: QB
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-metric/t1_metricB_yaw
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20260929-metric/table_metric_yaw.md
+- label: V4c · seat6 · QA · ub-ins
+  model: V4c
+  suite: seat6
+  cost: QA
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-metric/t3_metricA
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-metric/table_metric.md
+- label: V4c · yaw12 · QA · ub-ins
+  model: V4c
+  suite: yaw12
+  cost: QA
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-metric/t3_metricA_yaw
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20260929-metric/table_metric_yaw.md
+- label: V4c · seat6 · QB · ub-ins
+  model: V4c
+  suite: seat6
+  cost: QB
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-metric/t3_metricB
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-metric/table_metric.md
+- label: V4c · yaw12 · QB · ub-ins
+  model: V4c
+  suite: yaw12
+  cost: QB
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-metric/t3_metricB_yaw
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20260929-metric/table_metric_yaw.md
+- label: V4a · yaw12-m15 · QA · ub-ins
+  model: V4a
+  suite: yaw12-m15
+  cost: QA
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-metric/t1_metricA_yaw_rep
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-metric/table_metric_yaw.md
+  note: repeat of the -15 deg half
+- label: V5a · seat6 · Qw · ub-ins
+  model: V5a
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-v5-infonce/t5a/seat
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v5-infonce/table_seat.md
+- label: V5a · yaw12 · Qw · ub-ins
+  model: V5a
+  suite: yaw12
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-v5-infonce/t5a/yaw
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20260929-v5-infonce/table_yaw.md
+  note: urtip6_high_yawp15.crash139 set aside, re-run
+- label: V5a · fs6 · Qw · ub-pool
+  model: V5a
+  suite: fs6
+  cost: Qw
+  limits: ub-pool
+  path: data/lcs/mpc_eval/20260929-v5-infonce/t5a/freespace
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v5-infonce/table_freespace.md
+- label: V5b · seat6 · Qw · ub-ins
+  model: V5b
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-v5-infonce/t5b/seat
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v5-infonce/table_seat.md
+- label: V5b · yaw12 · Qw · ub-ins
+  model: V5b
+  suite: yaw12
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-v5-infonce/t5b/yaw
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20260929-v5-infonce/table_yaw.md
+- label: V5b · fs6 · Qw · ub-pool
+  model: V5b
+  suite: fs6
+  cost: Qw
+  limits: ub-pool
+  path: data/lcs/mpc_eval/20260929-v5-infonce/t5b/freespace
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v5-infonce/table_freespace.md
+- label: V6a · seat6 · Qw · ub-ins
+  model: V6a
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-v6-cfm/t6a/seat
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v6-cfm/table_seat.md
+- label: V6a · yaw12 · Qw · ub-ins
+  model: V6a
+  suite: yaw12
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-v6-cfm/t6a/yaw
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20260929-v6-cfm/table_yaw.md
+- label: V6a · fs6 · Qw · ub-pool
+  model: V6a
+  suite: fs6
+  cost: Qw
+  limits: ub-pool
+  path: data/lcs/mpc_eval/20260929-v6-cfm/t6a/freespace
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v6-cfm/table_freespace.md
+- label: V6b · seat6 · Qw · ub-ins
+  model: V6b
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-v6-cfm/t6b/seat
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v6-cfm/table_seat.md
+- label: V6b · yaw12 · Qw · ub-ins
+  model: V6b
+  suite: yaw12
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260929-v6-cfm/t6b/yaw
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20260929-v6-cfm/table_yaw.md
+- label: V6b · fs6 · Qw · ub-pool
+  model: V6b
+  suite: fs6
+  cost: Qw
+  limits: ub-pool
+  path: data/lcs/mpc_eval/20260929-v6-cfm/t6b/freespace
+  date: '2026-09-29'
+  log_day: '2026-09-29'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260929-v6-cfm/table_freespace.md
+- label: V7a · seat6 · Qw · ub-ins
+  model: V7a
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260930-sdlcs/v1/seat
+  date: '2026-09-30'
+  log_day: '2026-09-30'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260930-sdlcs/table_seat.md
+  note: verdict.md
+- label: V7a · seat6 · Qw · ub-ins
+  model: V7a
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260930-sdlcs/v1/seat_headoff
+  date: '2026-09-30'
+  log_day: '2026-09-30'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260930-sdlcs/table_seat.md
+  note: head off (use_state_dependent_lcs absent = fixed B0)
+- label: V7a · yaw12 · Qw · ub-ins
+  model: V7a
+  suite: yaw12
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20260930-sdlcs/v1/yaw
+  date: '2026-09-30'
+  log_day: '2026-09-30'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20260930-sdlcs/table_yaw.md
+- label: V7a · fs6 · Qw · ub-pool
+  model: V7a
+  suite: fs6
+  cost: Qw
+  limits: ub-pool
+  path: data/lcs/mpc_eval/20260930-sdlcs/v1/freespace
+  date: '2026-09-30'
+  log_day: '2026-09-30'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20260930-sdlcs/table_freespace.md
+- label: '- · press48 · D · -'
+  model: null
+  suite: press48
+  cost: D (task distance labels)
+  limits: '-'
+  path: data/lcs/contact/press_down/eval
+  date: '2026-09-30'
+  log_day: '2026-09-30'
+  n_cells: 12
+  n_episodes: 48
+  table: data/lcs/contact/press_down/eval/press_down_report.md
+  note: open-loop Franka-only press-down set (12 snapshots x 4 variants); model-free, used by gate G2b

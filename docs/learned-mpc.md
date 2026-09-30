@@ -10,22 +10,27 @@ For the wire contract, the params-yaml schema and step-by-step commands, see
 ## Glossary
 
 **Model versions** (lcs_learning `outputs/<run>/`; each `deploy_<m>/` holds deploy.npz,
-decoder.npz, learned_lcs.yaml):
+decoder.npz, learned_lcs.yaml). IDs are `V<campaign>[letter]`; the full registry (tags,
+checkpoints, W&B ids, every closed-loop eval with its label) is `docs/models.md` /
+`docs/models.yaml`. Older sections use the old names:
 
-| name | run dir | what it is |
-|---|---|---|
-| v2 (`v2_decoded_only`) | `sim_belt_v2_20260925` | insertion data only (464 eps); the deployed model |
-| v3_mix (PICK A, "model A") | `sim_belt_v3_20260928` | v2 recipe on v2 + free-space + approach + contact data (790 eps) |
-| v3_ft (B) | `sim_belt_v3_20260928` | v2 epoch 300 fine-tuned on the v3 data (`--init-checkpoint`, 120 epochs, lr 3e-4) |
-| T1 | `sim_belt_v4_20260929` | v3_mix data + decoded next-state loss as RMSE (the loss-scale fix; now the default) |
-| T2 | same | T1 + Δbelt loss + multistep H7 (rmse) + near-pulley ×3 sampling |
-| T3 | same | T2 + latent-metric loss (latent distance ≈ belt RMSE + height term) |
-| T5a / T5b | `sim_belt_v5_20260929` | T1 + state InfoNCE (whitened, τ 0.1, hard negatives) / + action InfoNCE |
-| T6 / T6a / T6b | `sim_belt_v6_20260929` | T1 + CFM-form InfoNCE (σ 1, τ 1, in-batch only): unbounded / std band 0.18-0.35 / std pin 0.35 |
-| V1 / V2 | `sim_belt_v7_20260930` | T1 + state-dependent B(z) = B0 + ΔB(z); V1 one-step, V2 + multistep H7 with B frozen at z0 |
+| ID | old name | run dir | what it is |
+|---|---|---|---|
+| V1a / V1b / V1c | both / `decoded_only` / violation_only | `sim_belt_ablation_20260924` | v1 insertion data; V1b was deployed 2026-09-24 |
+| V2 (alias V2a) | v2 (`v2_decoded_only`) | `sim_belt_v2_20260925` | insertion data only (464 eps); the deployed model |
+| V2b | `v2_multistep` | same | V2 + multistep H7 (mse); failed its pick rule, not used |
+| V3a | v3_mix (PICK A, "model A") | `sim_belt_v3_20260928` | v2 recipe on v2 + free-space + approach + contact data (790 eps) |
+| V3b | v3_ft (B) | same | v2 epoch 300 fine-tuned on the v3 data (`--init-checkpoint`, 120 epochs, lr 3e-4) |
+| V4a | T1 | `sim_belt_v4_20260929` | v3_mix data + decoded next-state loss as RMSE (the loss-scale fix; now the default) |
+| V4b | T2 | same | T1 + Δbelt loss + multistep H7 (rmse) + near-pulley ×3 sampling |
+| V4c | T3 | same | T2 + latent-metric loss (latent distance ≈ belt RMSE + height term) |
+| V5a / V5b | T5a / T5b | `sim_belt_v5_20260929` | T1 + state InfoNCE (whitened, τ 0.1, hard negatives) / + action InfoNCE |
+| V6 / V6a / V6b | T6 / T6a / T6b | `sim_belt_v6_20260929` | T1 + CFM-form InfoNCE (σ 1, τ 1, in-batch only): unbounded / std band 0.18-0.35 / std pin 0.35 |
+| V7a / V7b | V1 / V2 (2026-09-30) | `sim_belt_v7_20260930` | T1 + state-dependent B(z) = B0 + ΔB(z); V7a one-step, V7b + multistep H7 with B frozen at z0 |
 
-T-models use insertion-only `u` bounds (`--u-bounds-glob`); v3_mix's bounds are pooled over all
-data. "-v3b" (e.g. T1-v3b) = the same model run with v3_mix's `u` bounds.
+In the 2026-09-30 section, "V1" / "V2" mean V7a / V7b, not the V1 / V2 campaigns.
+V4-V7 use insertion-only `u` bounds (`--u-bounds-glob`); V3a's bounds are pooled over all
+data. "-v3b" (e.g. T1-v3b) = the same model run with v3_mix's `u` bounds (label `ub-pool`).
 
 **Costs:**
 - **current cost:** Σ (z − z_g)ᵀ Q (z − z_g) + uᵀRu with Q = w_q·diag(1/z_std²) (whitened latent)
@@ -82,7 +87,7 @@ data. "-v3b" (e.g. T1-v3b) = the same model run with v3_mix's `u` bounds.
 ## Current status (2026-09-30)
 
 **Best controller so far:** `honor_penalize_input_change: true`, `w_r 0.3`,
-`demo_traj.w_p 0.03` (an EE-path cost) on the `v2_decoded_only` model — held-out engaged
+`demo_traj.w_p 0.03` (an EE-path cost) on the `v2_decoded_only` (V2) model — held-out engaged
 22/40 = 0.55 vs the waypoint baseline's 14/28 = 0.50 (`eval-v2-honor`; the 95% CIs overlap, so
 this is "on par," not a demonstrated win). The same ranking holds against a flat, UR-held
 target (`flat-hold-eval`: matched 6/10 vs 3/10; held-out 17/32 vs 6/13). **The user has
@@ -96,24 +101,25 @@ timeouts, `w_p 0`): 3/10 engaged (2 strict) on the matched starts. Every other y
 `systems/parameters/learned_archive/<date>/`. `admm_iter` stays 2: more ADMM iterations make
 the closed loop worse (2026-09-29, E4).
 
-**Current model:** `v2_decoded_only`, W&B run `nsxihz32`, epoch 300, trained on 464 episodes /
-33,382 train tuples (`data/lcs/v2/split.json`). It stays the deployed MPC model after
+**Current model:** `v2_decoded_only` (V2), W&B run `nsxihz32`, epoch 300, trained on 464
+episodes / 33,382 train tuples (`data/lcs/v2/split.json`). It stays the deployed MPC model after
 2026-09-30: on the 6 synthetic-target cells it is still the best (strict 4/6).
 
-**v3 (2026-09-28), not adopted:** `v3_mix` (W&B `rt2j3k45`, the v2 recipe on the union of v2 +
-free-space + approach + contact data, 790 episodes / 82,834 tuples, `data/lcs/v3/split.json`)
-is better than v2 open loop on every held-out set (e.g. approach one-step 1.236 vs 8.588 mm)
-and was the eval pick (PICK A). **In closed loop it is worse**: strict 1/6 vs v2's 4/6 on the
-same synthetic-target cells. The 2026-09-29 diagnosis: prediction accuracy is not the cause.
-The latent distance the MPC minimises is not a task distance (v3's scores a belt riding over
-the pulley about as close to the goal as a seated one), and C3's 2-iteration plans are not
-consistent with the model. See 2026-09-29.
+**v3 (2026-09-28), not adopted:** `v3_mix` (V3a; W&B `rt2j3k45`, the v2 recipe on the union
+of v2 + free-space + approach + contact data, 790 episodes / 82,834 tuples,
+`data/lcs/v3/split.json`) is better than v2 open loop on every held-out set (e.g. approach
+one-step 1.236 vs 8.588 mm) and was the eval pick (PICK A). **In closed loop it is worse**:
+strict 1/6 vs v2's 4/6 on the same synthetic-target cells. The 2026-09-29 diagnosis:
+prediction accuracy is not the cause. The latent distance the MPC minimises is not a task
+distance (v3's scores a belt riding over the pulley about as close to the goal as a seated
+one), and C3's 2-iteration plans are not consistent with the model. See 2026-09-29.
 
 **v4 (2026-09-29), not adopted:** three retrains of the v3_mix recipe with a corrected
-objective (T1 rmse decoded loss; T2 + Δbelt, multistep H7, near-pulley sampling; T3 + a
-latent-metric loss), all with insertion-only `u` bounds. Closed loop on the same 6 cells:
-T1 0/6 strict (calm, rests on top of the pulley), T2 0/6 (the Franka spins), T3 1/6 (spins,
-penetrates the board). T3 fixes the latent ranking offline, but not the closed loop.
+objective (T1 = V4a: rmse decoded loss; T2 = V4b: + Δbelt, multistep H7, near-pulley
+sampling; T3 = V4c: + a latent-metric loss), all with insertion-only `u` bounds. Closed loop
+on the same 6 cells: T1 0/6 strict (calm, rests on top of the pulley), T2 0/6 (the Franka
+spins), T3 1/6 (spins, penetrates the board). T3 fixes the latent ranking offline, but not
+the closed loop.
 
 **Cost metric (2026-09-29), opt-in, not adopted:** replacing the whitened latent cost with a
 task-fitted metric (A: a learned global Q; B: the decoder pullback at the goal) ranks states
@@ -122,23 +128,24 @@ On yawed targets T1 + A reaches 6/12 (T1 0/12). The metric is not the main bottl
 model's action response near the pulley is. Worktree switch `learned_mpc.use_q_matrix`,
 default off.
 
-**v5 InfoNCE (2026-09-29), not adopted:** T1 + a state InfoNCE (T5a) and + an action InfoNCE
-(T5b). Both are worse than T1 offline and fail everywhere in closed loop (seat 0/6, yaw 0/12,
-free space ends further from the goal than it started), with spins, grasp losses and the hand
-below the board. T5b's LCS is unstable (ρ(A) 1.30). The trainer options stay off by default.
+**v5 InfoNCE (2026-09-29), not adopted:** T1 + a state InfoNCE (T5a = V5a) and + an action
+InfoNCE (T5b = V5b). Both are worse than T1 offline and fail everywhere in closed loop (seat
+0/6, yaw 0/12, free space ends further from the goal than it started), with spins, grasp losses
+and the hand below the board. T5b's LCS is unstable (ρ(A) 1.30). The trainer options stay off
+by default.
 
 **v6 CFM InfoNCE (2026-09-29/30), not adopted:** the CFM loss on raw latents (σ = 1, τ = 1,
 in-batch negatives, no action term) inflates the latent scale unless bounded; with a std band
-(T6a) or pin (T6b) the scale holds, but both fail in closed loop (seat 0/6, yaw 0/12 and 2/12,
-free space ends further from the goal), with spins and the hand below the board.
+(T6a = V6a) or pin (T6b = V6b) the scale holds, but both fail in closed loop (seat 0/6, yaw
+0/12 and 2/12, free space ends further from the goal), with spins and the hand below the board.
 
 **v7 state-dependent LCS (2026-09-30), most promising retrain, not adopted:** the T1 recipe
 with a state-dependent input matrix B(z) = B0 + ΔB(z) (a z-only tanh MLP, evaluated once per
-C3 solve and frozen over the horizon). V1 (one-step) fixes T1's riding-over sign: the early
+C3 solve and frozen over the horizon). V1 (V7a, one-step) fixes T1's riding-over sign: the early
 stage-2 press goes down (Franka dz −4.4 vs +8.3 mm) and no seat cell ends over. Seat 2/6 strict,
 3/6 engaged, RMSE 10.0 mm ("promising", not a pass); but it overshoots to "under" in 2 seat
 cells, fails the yaw set (3/12) with a safety failure at +15° (5 grasp losses, Franka spins,
-hand below the board) and free space (12.7 mm). V2 (+ frozen multistep H7) inflates B and
+hand below the board) and free space (12.7 mm). V2 (V7b, + frozen multistep H7) inflates B and
 destabilises A (ρ(A) 1.264) and was not run in closed loop. All switches are opt-in, off by
 default (`docs/learned-mpc-reference.md` §5.13).
 
@@ -167,15 +174,17 @@ latent is nearly blind (V1: latent distance 0.52 at 7.7 mm true belt error). Nex
 run): V1 + metric A; V1b (head warm-up so B0 learns); coordinated-press data (UR down / both
 arms); orientation-envelope safety constraints for the spinning.
 
-## 2026-09-30 — state-dependent LCS B(z), press-down data, V1 closed loop
+## 2026-09-30 — state-dependent LCS B(z), press-down data, V1 (V7a) closed loop
 
 **Summary:** On 2026-09-29 the model's action response near the pulley was the main
-bottleneck: at T1's riding-over end states the fixed-B LCS's lever is a coin flip (|E|-weighted
-sign agreement 0.39-0.52) and it prefers Fz+ where Fz− lowers the task distance. This day made
-the input matrix state-dependent, B(z) = B0 + ΔB(z), trained in lcs_learning and swapped into
-C3 once per solve. Two variants on the T1 recipe: V1 (one-step) and V2 (+ a 7-step loss with
-the head frozen at z_0, as in deployment). By the offline gate rule the pick is STOP (neither
-passes G1-G6); V1 is the better variant and the first model to pass the onset lever gate G2a.
+bottleneck: at T1's (V4a's) riding-over end states the fixed-B LCS's lever is a coin flip
+(|E|-weighted sign agreement 0.39-0.52) and it prefers Fz+ where Fz− lowers the task distance.
+This day made the input matrix state-dependent, B(z) = B0 + ΔB(z), trained in lcs_learning
+and swapped into C3 once per solve. Two variants on the T1 recipe: V1 (= V7a, one-step) and V2
+(= V7b, + a 7-step loss with the head frozen at z_0, as in deployment). In this section V1 /
+V2 always mean V7a / V7b; the deployed model (ID V2) is written v2 or `v2_decoded_only`. By
+the offline gate rule the pick is STOP (neither passes G1-G6); V1 is the better variant and
+the first model to pass the onset lever gate G2a.
 V1 in closed loop (on the user's go) fixes T1's riding-over: the press goes down and no seat
 cell ends over. Seat 2/6 strict (T1 0/6), but 2 cells overshoot to "under", the +15° yawed set
 is unsafe (5 grasp losses) and free space is 12.7 mm. A paired ±Fz press-down eval set (48
@@ -412,20 +421,20 @@ adopted. Plan: `handoffs/PLAN-20260930-state-dependent-lcs.md`; gates:
 
 ## 2026-09-29 — why v3_mix controls worse, v4 retrain, cost-metric test, InfoNCE ablation
 
-**Summary:** A root-cause pass on the 2026-09-28 result (v3_mix predicts better but controls
-worse) found that prediction accuracy is not the cause. The latent distance the MPC minimises
-is not a task distance, and the trainer's decoded next-state loss was effectively off (m² next
-to an RMSE in m). C3's 2-iteration plans are inconsistent with the model, but making them
-consistent (more ADMM iterations) makes the closed loop worse. Three models (v4 T1-T3) were
-retrained with a corrected objective and insertion-only `u` bounds. T3 fixes the latent ranking
-offline; none beats v2 in closed loop (T1 0/6, T2 0/6, T3 1/6 strict vs v2 4/6). Extra tests:
-T1 on ±15°-yawed targets (0/12) and single-stage free-space goals (v3_mix > T1 > v2). Two
-follow-ups: a task-fitted MPC cost metric (A: global Q = LᵀL; B: decoder pullback) ranks
-states at Spearman ≈ 0.99 offline but seats no better (T1 0/6 A, 1/6 B; T3 0/6), though T1 + A
-reaches 6/12 on the yawed targets. So the metric is not the main bottleneck; the model's action
-response near the pulley is. An InfoNCE ablation (v5: T5a state, T5b state + action) is worse
-than T1 offline and unsafe in closed loop (0/6 seat, 0/12 yaw). The deployed model stays
-`v2_decoded_only`. Diagnosis summary: `data/lcs/diag/20260929-report.md`;
+**Summary:** A root-cause pass on the 2026-09-28 result (v3_mix (V3a) predicts better but
+controls worse) found that prediction accuracy is not the cause. The latent distance the MPC
+minimises is not a task distance, and the trainer's decoded next-state loss was effectively off
+(m² next to an RMSE in m). C3's 2-iteration plans are inconsistent with the model, but making
+them consistent (more ADMM iterations) makes the closed loop worse. Three models (v4 T1-T3 =
+V4a-V4c) were retrained with a corrected objective and insertion-only `u` bounds. T3 fixes the
+latent ranking offline; none beats v2 in closed loop (T1 0/6, T2 0/6, T3 1/6 strict vs v2 4/6).
+Extra tests: T1 on ±15°-yawed targets (0/12) and single-stage free-space goals (v3_mix > T1 >
+v2). Two follow-ups: a task-fitted MPC cost metric (A: global Q = LᵀL; B: decoder pullback)
+ranks states at Spearman ≈ 0.99 offline but seats no better (T1 0/6 A, 1/6 B; T3 0/6), though
+T1 + A reaches 6/12 on the yawed targets. So the metric is not the main bottleneck; the model's
+action response near the pulley is. An InfoNCE ablation (v5: T5a = V5a state, T5b = V5b state
++ action) is worse than T1 offline and unsafe in closed loop (0/6 seat, 0/12 yaw). The deployed
+model stays `v2_decoded_only` (V2). Diagnosis summary: `data/lcs/diag/20260929-report.md`;
 paths and commands: `docs/learned-mpc-reference.md` §5.12.
 
 **Tried:**
@@ -680,8 +689,8 @@ paths and commands: `docs/learned-mpc-reference.md` §5.12.
   fixed-B LCS and the 7-step C3 planner. Their ablation found a pure linear forward model worse,
   which our fixed-B LCS is closer to. Possible next step: a faithful T6 (raw exp(−‖Δ‖²),
   in-batch negatives only, a modest recon anchor).
-- **v6 CFM-faithful InfoNCE (T6, T6a, T6b; run overnight into 2026-09-30)** (lcs_learning
-  `outputs/sim_belt_v6_20260929/`; diag `data/lcs/diag/20260929-v6-cfm/`; closed loop
+- **v6 CFM-faithful InfoNCE (T6, T6a, T6b = V6, V6a, V6b; run overnight into 2026-09-30)**
+  (lcs_learning `outputs/sim_belt_v6_20260929/`; diag `data/lcs/diag/20260929-v6-cfm/`; closed loop
   `data/lcs/mpc_eval/20260929-v6-cfm/`). T1 + state InfoNCE with `--nce-sigma none` (σ ≡ 1),
   τ 1, in-batch negatives only, action weight 0; state weight 7.1e-3 (NCE encoder gradient
   0.5× recon at T1 epoch 300).

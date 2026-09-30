@@ -367,7 +367,7 @@ MPC layers". `--deploy`, `--decoder`, `--demo-goals` and `--demo-episode` overri
 (`pcd_belt_stage`); pass `--decoder` explicitly if the run's own deploy dir has no
 `decoder.npz` next to it (only exports run with `--decoder-out` have one).
 
-### 5.11 Train, gate and re-test a new model (v3, 2026-09-28)
+### 5.11 Train, gate and re-test a new model (v3 = V3a/V3b, 2026-09-28)
 
 **Train** (in `~/git/lcs_learning`). `scripts/train_joint_pointnet_lcs.py --init-checkpoint
 PATH` (or `init_checkpoint:` in the config) starts from a trained checkpoint. It copies the AE
@@ -375,9 +375,9 @@ weights and `lcs_params`, keeps fresh optimizers/schedulers and skips `lcs_warm_
 refuses a checkpoint whose architecture differs (num_points, proprio/control/latent/feature
 dims, point-cloud source, belt points, `n_lam`, stiffness). Without the flag, training is
 bit-identical to before. The v3 run lives in `outputs/sim_belt_v3_20260928/`: `v3_mix.yaml`
-(A, the v2 recipe on the union), `v3_ft.yaml` (B, `init_checkpoint` = `nsxihz32` epoch 300),
-`make_split_v3.py`, `run_v3.sh` (smokes → A ∥ B → `evaluate_v3.py` → `eval_table.md` → CPU
-exports + decoders → E0-E8), `eval_results.json`. The training split is
+(A = V3a, the v2 recipe on the union), `v3_ft.yaml` (B = V3b, `init_checkpoint` = `nsxihz32`
+(V2) epoch 300), `make_split_v3.py`, `run_v3.sh` (smokes → A ∥ B → `evaluate_v3.py` →
+`eval_table.md` → CPU exports + decoders → E0-E8), `eval_results.json`. The training split is
 `data/lcs/v3/split.json` (`docs/lcs-dataset.md` §10).
 
 **Exports:** `deploy_v3_mix/` and `deploy_v3_ft/`, each with `deploy.npz`, `learned_lcs.yaml`
@@ -478,11 +478,11 @@ encode-recompute tolerance is now 1e-6 · max(1, max|z|).
 float32 torch references, whose error grows with |z|, so its PGD tolerances (1e-6 and 1e-5)
 are scaled by max(1, max|z|). Nothing changes for |z| ≤ 1; the T2/T3 latents are ~10× larger.
 
-**v4 retrain** (lcs_learning `outputs/sim_belt_v4_20260929/`): `v4_t{1,2,3}.yaml` (the v3_mix
-yaml plus the keys above), `run_train_v4.sh` (T1-T3 in parallel), `run_export_v4.sh <t>`
-(waits for epoch 300, exports on CPU, writes the decoder, runs the encoder check),
-`evaluate_v4.py` → `eval_table.md`, `deploy_t{1,2,3}/`, `calib/` (grad-norm weight
-calibration), `identity/`, `pipeline.log`.
+**v4 retrain** (lcs_learning `outputs/sim_belt_v4_20260929/`; T1-T3 = V4a-V4c):
+`v4_t{1,2,3}.yaml` (the v3_mix yaml plus the keys above), `run_train_v4.sh` (T1-T3 in
+parallel), `run_export_v4.sh <t>` (waits for epoch 300, exports on CPU, writes the decoder,
+runs the encoder check), `evaluate_v4.py` → `eval_table.md`, `deploy_t{1,2,3}/`, `calib/`
+(grad-norm weight calibration), `identity/`, `pipeline.log`.
 
 ```bash
 cd ~/git/lcs_learning
@@ -624,14 +624,16 @@ max |diff| 0). The dataset's opt-in `episode_meta` (global tuple `idx`, `frame_o
 Negatives within 0.5 mm of the positive (belt RMSE and both EE shifts) are masked. Metrics:
 `train|val/nce_{state,act}_{loss,top1,rank}`, `state_hard_top1`, `state_branch_top1`, `act_n`.
 
-**v6 retrain** (lcs_learning `outputs/sim_belt_v6_20260929/`): `v6_t6a_w1.yaml` /
+**v6 retrain** (lcs_learning `outputs/sim_belt_v6_20260929/`; T6 / T6a / T6b = V6 / V6a /
+V6b): `v6_t6a_w1.yaml` /
 `v6_t6b_w10_r2.yaml` (v4_t1 + `nce_state_weight 0.0071`, τ 1, `nce_sigma none`, hard negatives
 `none`, plus the band / pin), `evaluate_v6.py`, `spectral.py`, `make_table_v6.py` →
 `eval_table_v6.md`; watchdog `watch_scale_v2.py`. Closed loop:
 `data/lcs/mpc_eval/20260929-v6-cfm/cl_scripts/` → `table_{seat,yaw,freespace}.md`; recordings
 under `<t6a|t6b>/{seat,yaw,freespace}/recordings` (replay as for v5 with `deploy_t6a|t6b`).
 
-**v5 retrain** (lcs_learning `outputs/sim_belt_v5_20260929/`): `v5_t5{a,b}.yaml` (the v4_t1
+**v5 retrain** (lcs_learning `outputs/sim_belt_v5_20260929/`; T5a / T5b = V5a / V5b):
+`v5_t5{a,b}.yaml` (the v4_t1
 yaml plus `nce_state_weight 0.0065`, τ 0.1, `episode+branch`, `nce_sigma batch`; T5b adds
 `nce_action_weight 0.0065`), `run_train_v5.sh` (both in parallel), `run_export_v5.sh <m>` (as
 v4: v3 globs for z stats, insertion-only `u` bounds), `evaluate_v5.py` →
@@ -681,7 +683,7 @@ uv run --frozen python scripts/replay_viewer.py --recordings $V/t5a/freespace/re
 
 Results: `docs/learned-mpc.md`, 2026-09-29.
 
-### 5.13 State-dependent LCS B(z): train, export, deploy, gate, press-down data (2026-09-30)
+### 5.13 State-dependent LCS B(z): train, export, deploy, gate, press-down data (2026-09-30; V7)
 
 B(z) = B0 + ΔB(z), a z-only tanh MLP whose output is reshaped row-major into a 16×12 ΔB (plus
 an optional 16-vector Δd); design and results in `docs/learned-mpc.md`, 2026-09-30. Every switch
@@ -692,7 +694,7 @@ config keys; head module `lcs_learning/lcs_state_head.py`):
 
 | flag | default | what |
 |---|---|---|
-| `--bz-hidden H` | `0` (off) | hidden width of the head; > 0 turns B(z) on (V1/V2: 64). Torch LCS solvers only; rejected with casadi and with the InfoNCE losses |
+| `--bz-hidden H` | `0` (off) | hidden width of the head; > 0 turns B(z) on (V1/V2 = V7a/V7b: 64). Torch LCS solvers only; rejected with casadi and with the InfoNCE losses |
 | `--bz-act` | `tanh` | activation (only `tanh`) |
 | `--bz-delta-d/--no-bz-delta-d` | off | the head also outputs Δd(z) (needs `--bz-hidden`) |
 | `--bz-init {zero,small}` | `zero` | output layer zero (starts as the fixed-B LCS) or N(0, 1e-3) |
@@ -709,7 +711,8 @@ loader order match a head-free run. Metrics: `train|val/bz_dB_rel_p50|p95` (‖�
 its random init and the head carries the mean B (V1 ‖B0‖_F 6.5 vs T1's ‖B‖_F 48.3), so
 ‖ΔB‖/‖B0‖ is not an inflation measure; use ‖B(z)‖_F and ‖B(z) − B̄‖/‖B̄‖.
 
-**v7 configs and scripts** (lcs_learning `outputs/sim_belt_v7_20260930/`): `v7_v1.yaml`
+**v7 configs and scripts** (lcs_learning `outputs/sim_belt_v7_20260930/`; V1 / V2 of this
+section are V7a / V7b in `docs/models.md`): `v7_v1.yaml`
 (`v4_t1.yaml` + `bz_hidden: 64`), `v7_v2.yaml` (+ `multistep_horizon: 7`, `rmse`, weight
 0.142857, warm-up 10, grad to the encoder); `run_train_v7.sh` (V1 ∥ V2), `run_export_v7.sh
 <v1|v2> [ckpt [out]]` (waits for epoch 300; v3 globs for z stats, insertion-only `u` bounds;

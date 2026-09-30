@@ -7,6 +7,78 @@ This doc is a day-by-day log of what was tried, what broke, and how it was fixed
 For the wire contract, the params-yaml schema and step-by-step commands, see
 `docs/learned-mpc-reference.md`. Where any of this and the code disagree, the code wins.
 
+## Glossary
+
+**Model versions** (lcs_learning `outputs/<run>/`; each `deploy_<m>/` holds deploy.npz,
+decoder.npz, learned_lcs.yaml):
+
+| name | run dir | what it is |
+|---|---|---|
+| v2 (`v2_decoded_only`) | `sim_belt_v2_20260925` | insertion data only (464 eps); the deployed model |
+| v3_mix (PICK A, "model A") | `sim_belt_v3_20260928` | v2 recipe on v2 + free-space + approach + contact data (790 eps) |
+| v3_ft (B) | `sim_belt_v3_20260928` | v2 epoch 300 fine-tuned on the v3 data (`--init-checkpoint`, 120 epochs, lr 3e-4) |
+| T1 | `sim_belt_v4_20260929` | v3_mix data + decoded next-state loss as RMSE (the loss-scale fix; now the default) |
+| T2 | same | T1 + Δbelt loss + multistep H7 (rmse) + near-pulley ×3 sampling |
+| T3 | same | T2 + latent-metric loss (latent distance ≈ belt RMSE + height term) |
+| T5a / T5b | `sim_belt_v5_20260929` | T1 + state InfoNCE (whitened, τ 0.1, hard negatives) / + action InfoNCE |
+| T6 / T6a / T6b | `sim_belt_v6_20260929` | T1 + CFM-form InfoNCE (σ 1, τ 1, in-batch only): unbounded / std band 0.18-0.35 / std pin 0.35 |
+| V1 / V2 | `sim_belt_v7_20260930` | T1 + state-dependent B(z) = B0 + ΔB(z); V1 one-step, V2 + multistep H7 with B frozen at z0 |
+
+T-models use insertion-only `u` bounds (`--u-bounds-glob`); v3_mix's bounds are pooled over all
+data. "-v3b" (e.g. T1-v3b) = the same model run with v3_mix's `u` bounds.
+
+**Costs:**
+- **current cost:** Σ (z − z_g)ᵀ Q (z − z_g) + uᵀRu with Q = w_q·diag(1/z_std²) (whitened latent)
+  and R = w_r·diag(1/half_range²) from the `u` bounds.
+- **metric A:** one global learned Q = LᵀL per model, fitted so the quadratic matches
+  D² = belt RMSE² + β·Δh² (both states near the seat) + γ·Δwrap², β = 2 (2026-09-29).
+- **metric B:** decoder pullback Q = JᵀWJ at the goal latent (J = decoder Jacobian, W up-weights
+  the vertical error of near-seat points); no fitting.
+- Both are loaded by the opt-in `learned_mpc.use_q_matrix`.
+
+**Task measures:**
+- **wrap:** largest arc (deg) of belt bodies seated in the large pulley's groove (|h| ≤ 4 mm and
+  radial offset ≤ 5 mm).
+- **h:** median height (mm) of belt bodies near the seat, relative to the groove plane.
+- **outcome** (`src/round_belt_task/outcome.py`): *engaged* wrap ≥ 60°; *slanted* wrap ≥ 15° or
+  a height spread > 8 mm with a seated body; *over* h > +5 mm; *under* h < −5 mm; *outside*
+  fewer than 2 bodies near the seat; else *other*.
+- **strict:** engaged with wrap ≥ 90° and |h| ≤ 1 mm.
+- **D:** task distance to the target belt (belt RMSE plus height/wrap terms as in metric A);
+  **d** or "latent distance": the whitened ‖z − z_g‖ the MPC sees; **goal_tol**: p90 of d over
+  engaged final frames (exported).
+- **belt RMSE:** per-point RMSE over the 150 belt points, mm (some diag tables use the
+  per-coordinate form, √3 smaller; tables say which).
+
+**Evaluation sets:**
+- **seat cells (6):** flat_engaged × {nominal, gv_01, gv_05}, flat_engaged_urtip × ud+3_r0,
+  flat_engaged_urtip6 × ud+6_r0, flat_engaged_urtip6_high × ud+6_r0 (target × start state).
+- **yaw cells (12):** the same 6 starts with the targets rotated ±15° about the pulley axis
+  (`<target>_yaw{p15,m15}`).
+- **free-space goals (6):** held-out free-space frames (twist, bend, bend_lift, stretch,
+  wrist_tilt, random_mix), single-stage, from each episode's own start state.
+- **stage 1 / stage 2:** the pre-seat goal (demo frame 13) and the seated goal.
+
+**Controller terms:**
+- **B0 / ΔB(z):** the fixed part and the network part of the state-dependent input matrix; the
+  head is evaluated once per solve and frozen over the 7-step horizon.
+- **λ:** LCS complementarity (contact) variables. C3+ runs `admm_iter` 2 ADMM iterations, so the
+  planned λ is only loosely complementary; planned states can differ from the model's own
+  rollout of the planned actions.
+- **no-motion / copy baseline:** predicting the belt does not move; a model should beat it.
+
+**Offline gates** (2026-09-30, `data/lcs/diag/20260930-sdlcs/gates.md`):
+- G1: insertion one-step error.
+- G2a/G2b/G2c: action-direction agreement at stage-2 onset / at T1's failure states (press-down
+  pairs) / predicted vs measured sign.
+- G3: contact-region action gain.
+- G4: latent consistency.
+- G5: stability (ρ(A)) and B size.
+- G6: C3 check and solve cost.
+- G7: frozen-vs-per-step B mismatch.
+- G8: 7-step error.
+- The 2026-09-29 diagnostics Q1-Q7 are the same kinds of checks (`data/lcs/diag/20260929-*`).
+
 ## Current status (2026-09-30)
 
 **Best controller so far:** `honor_penalize_input_change: true`, `w_r 0.3`,

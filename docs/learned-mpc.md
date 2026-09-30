@@ -55,9 +55,15 @@ default off.
 free space ends further from the goal than it started), with spins, grasp losses and the hand
 below the board. T5b's LCS is unstable (ρ(A) 1.30). The trainer options stay off by default.
 
+**v6 CFM InfoNCE (2026-09-29/30), not adopted:** the CFM loss on raw latents (σ = 1, τ = 1,
+in-batch negatives, no action term) inflates the latent scale unless bounded; with a std band
+(T6a) or pin (T6b) the scale holds, but both fail in closed loop (seat 0/6, yaw 0/12 and 2/12,
+free space ends further from the goal), with spins and the hand below the board.
+
 **Ranking (end of 2026-09-29):** v2 is the only reliable seater (4/6). T1 is safe but rests on
 top of the pulley; T1 + metric A gives 6/12 on yawed targets. v3_mix and T1 with v3_mix's `u`
-bounds lead in free space. T3, T5a and T5b are unsafe (spins, penetration, grasp loss).
+bounds lead in free space. T3, T5a, T5b, T6a and T6b are unsafe (spins, penetration, grasp
+loss).
 
 **Trainer default (lcs_learning, user decision 2026-09-29):** the decoded next-state loss uses
 the `rmse` form by default (it was MSE in m², effectively off next to the RMSE reconstruction).
@@ -345,6 +351,41 @@ paths and commands: `docs/learned-mpc-reference.md` §5.12.
   fixed-B LCS and the 7-step C3 planner. Their ablation found a pure linear forward model worse,
   which our fixed-B LCS is closer to. Possible next step: a faithful T6 (raw exp(−‖Δ‖²),
   in-batch negatives only, a modest recon anchor).
+- **v6 CFM-faithful InfoNCE (T6, T6a, T6b; run overnight into 2026-09-30)** (lcs_learning
+  `outputs/sim_belt_v6_20260929/`; diag `data/lcs/diag/20260929-v6-cfm/`; closed loop
+  `data/lcs/mpc_eval/20260929-v6-cfm/`). T1 + state InfoNCE with `--nce-sigma none` (σ ≡ 1),
+  τ 1, in-batch negatives only, action weight 0; state weight 7.1e-3 (NCE encoder gradient
+  0.5× recon at T1 epoch 300).
+  - **T6 (unbounded)** stopped at epoch 25: the mean latent std went 0.18 (epoch 10) → 0.88
+    (epoch 11) → 3.10 (epoch 25), still rising; LCS violation 100× T1's at the same epoch.
+    Raw exp(−‖Δ‖²) keeps lowering the loss as every latent is scaled up (the softmax sharpens),
+    so nothing bounds ‖z‖. A floor alone cannot stop growth.
+  - **Bounded:** opt-in `--latent-std-weight` with `--latent-std-band LO,HI` or
+    `--latent-std-pin F` on the per-dim batch std of z. T6a: band 0.18-0.35, weight 1 (σ held
+    ≈ 0.33 to epoch 300). T6b: pin 0.35, weight 10 (weight 1 drifted to 0.38; σ held ≈ 0.354;
+    the first weight-10 run segfaulted at epoch 216 with no traceback and was retrained).
+
+  | offline | T1 | T5a | T6a | T6b |
+  |---|---|---|---|---|
+  | insertion one-step / h7 mm | 0.509 / 1.98 | 0.722 / 2.42 | 0.825 / 3.62 | 0.834 / 3.13 |
+  | contact one-step / h7 mm | 1.295 / 3.13 | 1.393 / 2.36 | 1.711 / 4.60 | 1.627 / 3.05 |
+  | Q4 \|h\| coef / over inside goal_tol | −0.043 / 0.745 | −0.133 / 0.293 | 0.225 / 0.187 | 0.014 / 0.229 |
+  | latent e7 ÷ copy7 (insertion) | 0.36 | 0.82 | 1.19 | 1.01 |
+  | ρ(A) (# \|eig\| > 1) | 1.012 (3) | 1.008 (2) | 1.067 (11) | 1.060 (10) |
+  | whitened ‖B/z_σ‖₂ | 110 | 275 | 147 | 145 |
+  | C3 check (4 seat targets) | 4/4 | 3/4 | 3/4 | 4/4 |
+
+  | closed loop | seat strict | seat RMSE mm | yaw strict | yaw RMSE mm | free space final mm | aborts seat / yaw / fs | min hand z mm (seat) |
+  |---|---|---|---|---|---|---|---|
+  | T1 | 0/6 | 13.1 | 0/12 | 13.6 | 16.0 (11.4 with v3_mix bounds) | 0 / 0 / 0 | 231 |
+  | T6a | 0/6 | 95.8 | 0/12 | 109.9 | 69.8 | 5 / 11 / 5 | 25 |
+  | T6b | 0/6 | 80.7 | 2/12 | 66.4 | 65.6 | 6 / 11 / 4 | −22 |
+
+  The bound fixes the scale and T6a even ranks height (|h| coef 0.225), but latent consistency
+  is worse than copy at 7 steps, A has 10-11 eigenvalues above 1, and the closed loop is unsafe
+  like T5a/T5b (Franka rotation up to 99° / 156° in seat cells). T6b's 2 yaw seats come from
+  otherwise violent runs. Across five InfoNCE variants, contrastive latent shaping has not
+  helped this LCS + C3 setup.
 
 **Issues / bugs -> resolution:**
 
@@ -384,6 +425,8 @@ paths and commands: `docs/learned-mpc-reference.md` §5.12.
 - Keep `learned_mpc.use_q_matrix` opt-in, default off; no metric-A/B yaml is the default.
 - Do not adopt T5a / T5b. The InfoNCE trainer options stay opt-in and off by default
   (`docs/learned-mpc-reference.md` §5.12); `--nce-sigma batch` is the only stable setting.
+- Do not adopt T6a / T6b. `--nce-sigma none` needs `--latent-std-weight` with a band or pin;
+  the latent-std regulariser stays off by default.
 
 **Open:**
 - The latent must be task-shaped. The latent-metric loss (T3) fixes the ranking offline, but
@@ -400,8 +443,9 @@ paths and commands: `docs/learned-mpc-reference.md` §5.12.
   lowers the task distance. Next: contact data (press-down from riding-over states, branches),
   then a retrain with a fixed dynamics objective.
 - InfoNCE fixes, none run: real branch counterfactuals only, soft outcome-aware labels, a
-  7-step and Δ accuracy anchor, a fixed latent scale, a spectral guard on A; or a faithful CFM
-  T6 (raw exp(−‖Δ‖²), in-batch negatives only, a modest recon anchor).
+  7-step and Δ accuracy anchor, a spectral guard on A. The faithful CFM loss with a bounded
+  latent scale (T6a/T6b) was run and failed; next is a state-dependent LCS (B(z)), planned in
+  `handoffs/PLAN-20260930-state-dependent-lcs.md`.
 
 ## 2026-09-27/28 — data diversity, v3 training, OOD gates and the closed-loop re-test
 

@@ -616,10 +616,20 @@ max |diff| 0). The dataset's opt-in `episode_meta` (global tuple `idx`, `frame_o
 | `--nce-hard-neg {none,episode,episode+branch}` | `none` | extra state negatives: a frame 3-10 steps from t+1 in the same episode; `+branch` adds the t+1 frame of a sibling branch from the same snapshot, once the actions diverge |
 | `--nce-action-eps E` | `0.5` | min σ_u-scaled distance of an alternative action to u_t |
 | `--nce-action-max K` | `32` | max alternative actions per tuple |
-| `--nce-sigma {ema,batch}` | `ema` | σ = detached EMA of the batch latent std (diverges; see the day log) or this batch's std with grad (scale-invariant; used for T5a/T5b) |
+| `--nce-sigma {ema,batch,none}` | `ema` | σ = detached EMA of the batch latent std (diverges; see the day log), this batch's std with grad (scale-invariant; used for T5a/T5b), or 1 (raw squared L2, the CFM form; needs the latent-std regulariser) |
+| `--latent-std-weight W` | `0.0` (off) | weight of the per-dim batch-std regulariser on z (with grad) |
+| `--latent-std-band LO,HI` | unset | mean(relu(LO − σ_d)) + mean(relu(σ_d − HI)); T6a used 0.18,0.35 with W 1 |
+| `--latent-std-pin F` | unset | mean((σ_d − F)²), exclusive with the band; T6b used 0.35 with W 10 |
 
 Negatives within 0.5 mm of the positive (belt RMSE and both EE shifts) are masked. Metrics:
 `train|val/nce_{state,act}_{loss,top1,rank}`, `state_hard_top1`, `state_branch_top1`, `act_n`.
+
+**v6 retrain** (lcs_learning `outputs/sim_belt_v6_20260929/`): `v6_t6a_w1.yaml` /
+`v6_t6b_w10_r2.yaml` (v4_t1 + `nce_state_weight 0.0071`, τ 1, `nce_sigma none`, hard negatives
+`none`, plus the band / pin), `evaluate_v6.py`, `spectral.py`, `make_table_v6.py` →
+`eval_table_v6.md`; watchdog `watch_scale_v2.py`. Closed loop:
+`data/lcs/mpc_eval/20260929-v6-cfm/cl_scripts/` → `table_{seat,yaw,freespace}.md`; recordings
+under `<t6a|t6b>/{seat,yaw,freespace}/recordings` (replay as for v5 with `deploy_t6a|t6b`).
 
 **v5 retrain** (lcs_learning `outputs/sim_belt_v5_20260929/`): `v5_t5{a,b}.yaml` (the v4_t1
 yaml plus `nce_state_weight 0.0065`, τ 0.1, `episode+branch`, `nce_sigma batch`; T5b adds

@@ -84,8 +84,11 @@ class LatentEncoder:
             raise ValueError(f"encoder weights do not match the dims (fused {fused})")
 
     @classmethod
-    def load(cls, deploy_npz) -> LatentEncoder:
-        return cls(_load_npz(deploy_npz))
+    def load(cls, deploy_npz) -> LatentEncoder | BeltMlpEncoder:
+        weights = _load_npz(deploy_npz)
+        if "encoder_type" in weights and str(_scalar(weights["encoder_type"])) == "belt_mlp":
+            return BeltMlpEncoder(weights)
+        return cls(weights)
 
     def preprocess(self, pc_raw) -> np.ndarray:
         return resize_points_ordered(pc_raw, self.num_points)
@@ -124,6 +127,55 @@ class LatentEncoder:
         prop = np.stack([p for p, _ in ins])
         belt = np.stack([b for _, b in ins])
         return self._fuse(self.pc_global(pcs), prop, belt).astype(np.float64)
+
+
+_erf = np.frompyfunc(math.erf, 1, 1)
+
+
+class BeltMlpEncoder:
+    """Belt points only (no cloud, no proprio): ``(belt150 - pulley_xyz)`` flattened, normalised,
+    then [Linear, LayerNorm, GELU] x 3 + Linear (``deploy.npz`` with ``encoder_type`` belt_mlp)."""
+
+    def __init__(self, weights: dict) -> None:
+        self.belt_num_points = int(_scalar(weights["encoder_belt_num_points"]))
+        self.num_points = self.belt_num_points
+        self.proprio_dim = STATE_DIM
+        self._origin = weights["encoder_origin_xyz"].astype(np.float32)
+        self._mu = weights["encoder_in_mean"].astype(np.float32)
+        self._sd = weights["encoder_in_std"].astype(np.float32)
+        self._eps = float(_scalar(weights["encoder_ln_epsilon"]))
+        n = int(_scalar(weights["encoder_n_linear"]))
+        self._lin = [(weights[f"{_ENC}lin{i}__weight"].T.astype(np.float32),
+                      weights[f"{_ENC}lin{i}__bias"].astype(np.float32)) for i in range(n)]
+        self._ln = [(weights[f"{_ENC}ln{i}__weight"].astype(np.float32),
+                     weights[f"{_ENC}ln{i}__bias"].astype(np.float32)) for i in range(n - 1)]
+        self.latent_dim = int(self._lin[-1][1].shape[0])
+        if self._lin[0][0].shape[0] != 3 * self.belt_num_points:
+            raise ValueError("belt_mlp input width != 3 x belt points")
+
+    def preprocess(self, pc_raw) -> np.ndarray:
+        return np.asarray(pc_raw, dtype=np.float32)
+
+    def _mlp(self, x: np.ndarray) -> np.ndarray:
+        for i, (w, b) in enumerate(self._lin):
+            x = x @ w + b
+            if i < len(self._ln):
+                g, beta = self._ln[i]
+                mu = x.mean(-1, keepdims=True)
+                var = x.var(-1, keepdims=True)
+                x = (x - mu) / np.sqrt(var + self._eps) * g + beta
+                x = 0.5 * x * (1.0 + _erf(x / math.sqrt(2.0)).astype(np.float32))  # exact GELU
+        return x
+
+    def _belt(self, belt) -> np.ndarray:
+        b = resize_points_ordered(belt, self.belt_num_points) - self._origin
+        return (b.reshape(-1) - self._mu) / self._sd
+
+    def encode(self, pc_raw, prop40, belt150) -> np.ndarray:
+        return self._mlp(self._belt(belt150)[None])[0].astype(np.float64)
+
+    def encode_batch(self, pc_list, props, belts) -> np.ndarray:
+        return self._mlp(np.stack([self._belt(b) for b in belts])).astype(np.float64)
 
 
 class LatentDecoder:

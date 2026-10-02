@@ -38,7 +38,13 @@ the campaign has a single model. Exceptions and mappings:
 | | `lm` | latent-metric loss |
 | | `nceS` / `nceA` | state / action InfoNCE (σ-whitened, τ 0.1) |
 | | `cfm` / `cfm-band` / `cfm-pin` | CFM-form state InfoNCE (σ 1, τ 1): unbounded / latent-std band / pin |
+| | `gd` | graph-distance loss: ‖z_s − z_l‖ ≈ obstacle-aware path length / 50 mm (V10) |
+| | `rec<w>` | joint belt reconstruction at weight w (V10; the V2-V8 recon is implicit) |
+| | `aug30` | random ±30° rotation about the pulley axis on every loss (V10) |
+| | `hold<w>` | joint-LCS hold term (u = 0 keeps z) at weight w, inside encoder training (V10) |
+| | `2blk` | two-block latent: 8 task dims (graph loss) + 8 shape dims (recon, cost κ) (V10) |
 | dynamics | `fixB` / `Bz` | fixed B / state-dependent B(z) = B0 + ΔB(z) |
+| encoder | (V10 only, not a tag field) | belt-only MLP encoder (`belt_mlp`): no proprio, no camera cloud |
 | | `+frz` | trained with the head frozen at z_0 over the multistep window (deploy semantics) |
 
 Fine-tuning is recorded separately ("ft from V2"). `ins1` and `vg` are additions to the agreed
@@ -58,8 +64,12 @@ token list (§6).
 | | `stages10` | the 10 matched starts of 2026-09-25 (nominal + 8 of set1 + 1 of set3) |
 | | `rec6` / `rec4` | recorded replay sets (nominal + 3/2 of set1 + 2/1 of set3) |
 | | `eeoff4` / `long25` | EE-offset starts (4) / set1 gv_03 as one 35 s episode |
+| | `seat6-1goal30` | seat6 starts, seated goal only (stage 1 0.075 s), stage 2 30 s |
+| | `under12` | 12 belt-under-pulley snapshots (`data/lcs/contact/snapshots{,_heldout}`), seated goal only, 30 s |
+| | `cell-s30` | one seat6 cell re-run with the stage-2 timeout 10 → 30 s |
 | cost | `Qw` | whitened latent cost (default) |
 | | `QA` / `QB` | metric A (learned global Q) / metric B (decoder pullback) |
+| | `Qi` | isotropic Q = w_q·I/σ² (V10; one σ for every dim, two-block: shape dims × κ) |
 | | `Qw+wp` | Qw + the `demo_traj.w_p` EE-path cost (2026-09-25; rejected design) |
 | limits | `ub-ins` | `u` bounds from insertion data only (for V1b: its own v1 data) |
 | | `ub-pool` | `u` bounds pooled over the v3 union (V3a's export bounds) |
@@ -71,7 +81,8 @@ note column.
 
 **Future runs.**
 
-- New training campaign: `outputs/sim_belt_v<N>_<date>/` with N the next number (V8 next), one
+- New training campaign: `outputs/sim_belt_v<N>_<date>/` with N the next number (V11 next; V9
+  is reserved by `docs/learned-lcs-improvement-plan.md`), one
   config/checkpoint/export per variant letter: `v<N><letter>.yaml`, `ckpt_v<N><letter>/`,
   `deploy_v<N><letter>/`, W&B run name `v<N><letter>`.
 - New closed-loop eval: `data/lcs/mpc_eval/<date>_<ID>_<suite>_<cost>_<limits>/`, e.g.
@@ -99,11 +110,37 @@ note column.
 | V6b | `mix-rmse+cfm-pin-fixB` | T6b, t6b_w10_r2 | rejected | V6 | + latent-std pin 0.35, weight 10 (retrain r2) |
 | V7a | `mix-rmse-Bz` | V1 (09-30), sdv1 | **candidate** | V4a | + state-dependent B(z), H 64, zero-init head |
 | V7b | `mix-rmse+ms7-Bz+frz` | V2 (09-30), sdv2 | rejected | V7a | + multistep H7 (rmse) with B(z_0) frozen; inflates B, ρ(A) 1.264 |
+| V8a | `mix-rmse-fixB (ft-onpolicy 6, tr7)` | - | candidate | V4a | on-policy fine-tune iteration 6 (primary, step 3000), box ub-tr7 |
+| V8b | `mix-rmse-fixB (ft-onpolicy 7, tr8)` | - | candidate | V8a | on-policy fine-tune iteration 7 (primary, step 2500), box ub-tr8 |
+| V8c | `mix-rmse-fixB (ft-onpolicy 8, tr9)` | - | candidate | V8b | on-policy fine-tune iteration 8 (primary, step 2500), box ub-tr9 |
+| V8d | `mix-rmse-fixB (ft-onpolicy 9, tr10)` | - | candidate | V8c | on-policy fine-tune iteration 9 (primary, step 3000), box ub-tr10 |
+| V10a | `mix-gd+vg-fixB` | graphemb_dyn1.0 | **candidate** (not reproducible) | - | belt-only MLP encoder, graph-distance loss + joint LCS (weight 1); only V10 that seats |
+| V10b | `mix-gd+vg+rec0.03+aug30+hold1-fixB` | graphemb_aug_rec0.03 | rejected | V10a | + recon 0.03, aug30, joint hold 1; LCS refit with hold 10 |
+| V10c | same as V10b | lever_b_nohold | rejected | V10b | V10b encoder, LCS refit without hold |
+| V10d | same as V10b | - | rejected | V10b | V10b encoder, LCS refit with hold 1 |
+| V10e | `mix-gd+vg+aug30-fixB` | graphemb_abl_aug | rejected | V10a | + aug30 only (ablation) |
+| V10f | `mix-gd+vg+rec0.03-fixB` | graphemb_abl_rec | rejected | V10a | + recon 0.03 only (ablation) |
+| V10g | `mix-gd+vg+hold1-fixB` | graphemb_abl_hold | rejected | V10a | + joint hold 1 only (ablation); ρ(A) 1.076 |
+| V10h | `mix-gd+vg+rec0.03+2blk-fixB` | graphemb_twoblock | rejected | V10a | two-block 8 + 8, recon 0.03, κ 0.25 |
+| V10i | `mix-gd+vg-fixB` (seed 1) | graphemb_dyn1.0_s1 | rejected | V10a | seed control: V10a recipe, seed 1 |
+| V10j | `mix-gd+vg+rec0.03+aug30+2blk-fixB` | graphemb_twoblock_aug | rejected | V10h | + aug30 |
+| V10k | `mix-gd+vg-fixB` (rerun) | graphemb_rs_rec0 | rejected | V10a | V10a recipe and seed re-run (current code; GPU nondeterminism) |
+| V10l | `mix-gd+vg+rec0.001-fixB` | graphemb_rs_rec0.001 | rejected | V10a | + recon 0.001 (from scratch, seed 0) |
+| V10m | `mix-gd+vg+rec0.003-fixB` | graphemb_rs_rec0.003 | rejected (closest recon variant) | V10a | + recon 0.003 (from scratch, seed 0) |
+| V10n | `mix-gd+vg+rec0.01-fixB` | graphemb_rs_rec0.01 | rejected | V10a | + recon 0.01 (from scratch, seed 0) |
 
 Side runs without an ID (`models.yaml` lists them under V6a/V6b): `t6a_w10` (`trafqf0l`) and
 `t6b_w1` (`6n5j9jvb`) stopped at epoch 30; `t6b_w10` (`q25alk7k`) segfaulted at epoch 216 and
 was retrained as V6b. Smoke, identity, debug and τ-sweep checkpoints (`smoke/`, `identity*/`,
 `sim_belt_v5_20260929/{debug,sweep}/`, V7 `smoke/deploy_smoke_*`) are not models.
+
+**V10 is a prototype, not an lcs_learning trainer run.** Encoders: `embed.py` (graph-distance
+loss + joint LCS, optional recon/hold/aug/two-block), 40k steps, in
+`data/lcs/diag/20261001-temporal-latent/scripts/`; the deployed LCS is refit on the frozen
+latent by `lcs_fit.py` (the trainer's `lcs.loss`, ε 0.01, n_λ 8, stiffness 0.1, 25 PGD
+iterations; whitened, converted to raw units) and exported by `export_v10.py`. Side encoders
+without an ID (`runs/`: `graphemb`, `graphemb_dyn0.01..0.3`, `graphemb_rec0.003..0.03`,
+`graphemb_aug_rec0.003/0.01`, `hilp_*`, `stab*`, `exp0*`) were offline only.
 
 **Provenance** (lcs_learning `outputs/`; checkpoint =
 `<run>/<ckpt>/<date>/<W&B>/checkpoint_epoch_<E>.pt`; `u` bounds as the export's):
@@ -127,9 +164,29 @@ was retrained as V6b. Smoke, identity, debug and τ-sweep checkpoints (`smoke/`,
 | V6b | same | `v6_t6b_w10_r2.yaml` | `ckpt_t6b_w10_r2` | `w3cqrq86` | 300 | `deploy_t6b` | ub-ins |
 | V7a | `sim_belt_v7_20260930` | `v7_v1.yaml` | `ckpt_v1` | `grn9fisu` | 300 | `deploy_v1` | ub-ins |
 | V7b | same | `v7_v2.yaml` | `ckpt_v2` | `vo97r4cg` | 300 | `deploy_v2` | ub-ins |
+| V8a | `sim_belt_v8_20261001` | `finetune_lcs_latent.py` | `iter6/ft_primary` | - | step 3000 | `deploy_v8a` | ub-tr7 |
+| V8b | `sim_belt_v8_20261001` | `finetune_lcs_latent.py` | `iter7/ft_primary` | - | step 2500 | `deploy_v8b` | ub-tr8 |
+| V8c | `sim_belt_v8_20261001` | `finetune_lcs_latent.py` | `iter8/ft_primary` | - | step 2500 | `deploy_v8c` | ub-tr9 |
+| V8d | `sim_belt_v8_20261001` | `finetune_lcs_latent.py` | `iter9/ft_primary` | - | step 3000 | `deploy_v8d` | ub-tr10 |
+| V10a | `sim_belt_v10_20261001` | `embed.py --dyn-weight 1.0` | diag `runs/graphemb_dyn1.0` | - | 40k steps | `deploy_v10a` | ub-ins |
+| V10b | same | `--dyn-weight 1 --hold-weight 1 --recon-weight 0.03 --rot-aug 30` | `runs/graphemb_aug_rec0.03` | - | 40k | `deploy_v10b` (LCS hold 10) | ub-ins |
+| V10c | same | as V10b | `runs/graphemb_aug_rec0.03` | - | 40k | `deploy_v10c` (LCS no hold) | ub-ins |
+| V10d | same | as V10b | `runs/graphemb_aug_rec0.03` | - | 40k | `deploy_v10d` (LCS hold 1) | ub-ins |
+| V10e | same | `--dyn-weight 1 --rot-aug 30` | `runs/graphemb_abl_aug` | - | 40k | `deploy_v10e` | ub-ins |
+| V10f | same | `--dyn-weight 1 --recon-weight 0.03` | `runs/graphemb_abl_rec` | - | 40k | `deploy_v10f` | ub-ins |
+| V10g | same | `--dyn-weight 1 --hold-weight 1` | `runs/graphemb_abl_hold` | - | 40k | `deploy_v10g` | ub-ins |
+| V10h | same | `--dyn-weight 1 --recon-weight 0.03 --split 8` | `runs/graphemb_twoblock` | - | 40k | `deploy_v10h` (κ 0.25) | ub-ins |
+| V10i | same | `--dyn-weight 1 --seed 1` | `runs/graphemb_dyn1.0_s1` | - | 40k | `deploy_v10i` | ub-ins |
+| V10j | same | `… --split 8 --rot-aug 30` | `runs/graphemb_twoblock_aug` | - | 40k | `deploy_v10j` (κ 0.25) | ub-ins |
+| V10k | same | `--dyn-weight 1 --seed 0` | `runs/graphemb_rs_rec0` | - | 40k | `deploy_v10k` | ub-ins |
+| V10l | same | `… --recon-weight 0.001` | `runs/graphemb_rs_rec0.001` | - | 40k | `deploy_v10l` | ub-ins |
+| V10m | same | `… --recon-weight 0.003` | `runs/graphemb_rs_rec0.003` | - | 40k | `deploy_v10m` | ub-ins |
+| V10n | same | `… --recon-weight 0.01` | `runs/graphemb_rs_rec0.01` | - | 40k | `deploy_v10n` | ub-ins |
 
 Checkpoint date folders: V1 and V2 `2026-09-24` (V2's campaign folder is dated 20260925),
-V3 `2026-09-28`, V4/V5 `2026-09-29`, V6/V7 `2026-09-30`.
+V3 `2026-09-28`, V4/V5 `2026-09-29`, V6/V7 `2026-09-30`. V10 encoder runs (`phi.pt`, `z.npz`,
+optional `decoder_weights.npz`) are in `data/lcs/diag/20261001-temporal-latent/runs/<tag>/`;
+LCS fits in the same folder as `lcs_<Name>[_hold<w>].pt`.
 
 **Headline results** (insertion test one-step / h7 belt RMSE in mm; closed loop: strict
 counts, mean final belt RMSE mm; free space: mean final / min mm; "-" = not run):
@@ -150,11 +207,46 @@ counts, mean final belt RMSE mm; free space: mean final / min mm; "-" = not run)
 | V6b | 0.834 / 3.13 | 0/6, 80.7 | 2/12, 66.4 | 65.6 (ub-pool) | - |
 | V7a | 0.509 / 2.29 | 2/6 (3/6 engaged), 10.0 | 3/12, 23.5 | 12.7 / 7.3 (ub-pool) | head off 0/6 |
 | V7b | 0.569 / 1.32 | - | - | - | - |
+| V8a | 0.574 / 2.57 | 0/6 (0/6 engaged), 19.9 (ub-ins) | 0/12, 24.4 | - | V8 on-policy, iteration 7 |
+| V8b | 0.569 / 2.54 | 0/6 (0/6 engaged), 19.9 (ub-ins) | 0/12, 25.6 | - | V8 on-policy, iteration 8 |
+| V8c | 0.564 / 2.54 | 0/6 (0/6 engaged), 19.3 (ub-ins) | 0/12, 26.9 | - | V8 on-policy, iteration 9 |
+| V10a | 0.513 / 0.455 rel | 2/6 (3/6 engaged), 21.7; R2 3/6 (4/6), 20.9 (Qi) | 0/12 (4/12 engaged), 155.3; 6 unsafe | - | cell-s30 urtip6_high strict; seat6-1goal30 0/6 (2/6 eng.); under12 0/12; policy gate both-down 100 % (below both-up 10 %) |
+| V10b | 0.409 / 0.328 rel (hold-10 LCS) | 0/6, 22.5 (Qi) | 0/12, 36.7 | - | policy gate both-down 28 % (below both-up 100 %) |
+| V10c | 0.413 / 0.333 rel | 0/6, 24.6 (Qi) | - | - | policy gate both-down 100 % (below both-up 0 %) |
+| V10d | 0.408 / 0.328 rel (hold-1 LCS) | 0/6, 15.2 (Qi) | - | - | policy gate both-down 100 % (below both-up 0 %) |
+| V10e | 0.624 / 0.51 rel | 0/6, 71.2 (Qi) | - | - | policy gate both-down 38 % (below both-up 0 %) |
+| V10f | 0.456 / 0.394 rel | 0/6, 55.9 (Qi) | - | - | policy gate both-down 62 % (below both-up 90 %) |
+| V10g | 0.526 / 0.468 rel | 0/6, 103.4 (Qi) | - | - | policy gate both-down 15 % (below both-up 10 %) |
+| V10h | 0.819 / 0.695 rel | 0/6, 42.2 (Qi); 1 unsafe | - | - | policy gate both-down 40 % (below both-up 35 %) |
+| V10i | 0.547 / 0.469 rel | 0/6, 19.7 (Qi) | - | - | policy gate both-down 42 % (below both-up 100 %) |
+| V10j | 0.718 / 0.598 rel | 0/6, 20.1 (Qi) | - | - | policy gate both-down 62 % (below both-up 0 %) |
+| V10k | 0.513 / 0.452 rel | 0/6, 45.5 (Qi) | - | - | policy gate both-down 50 % (below both-up 38 %) |
+| V10l | 0.548 / 0.481 rel | 0/6, 108.0 (Qi) | - | - | policy gate both-down 22 % (below both-up 0 %) |
+| V10m | 0.509 / 0.444 rel | 0/6, 27.1 (Qi) | - | - | policy gate both-down 88 % (below both-up 0 %) |
+| V10n | 0.486 / 0.42 rel | 0/6, 49.0 (Qi) | - | - | policy gate both-down 68 % (below both-up 100 %) |
 
 V1a, V1c and V6 have no tabled results (V1a/V1c raw numbers: lcs_learning
 `outputs/sim_belt_ablation_20260924/eval_results.json`). Sources: one-step/h7 from
 lcs_learning `outputs/sim_belt_v{2,3,4,7}_*/eval_table*.md`, `v5`/`v6` `eval_table_v{5,6}.md`;
 closed loop from the tables in §3 and `docs/learned-mpc.md` (2026-09-24 to 2026-09-30).
+**V10 offline numbers are not in mm:** "rel" = held-out one-step / h7 latent error ÷ the
+no-motion error (whitened), for the encoder's no-hold LCS refit, from
+`data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json`; V10b / V10d quote their
+deployed hold-10 / hold-1 fits (`lcs_fit_hold{10.0,1.0}.json`). Refits are not bitwise
+reproducible (V10a: 0.513 / 0.455 here vs 0.51 / 0.46 in the session); the files'
+`cl_drift_over_step` is not quoted (it varies between refits). Policy gate
+(`…/policy_gate.txt`): share of riding-over states where an offline 7-step constant-input
+solve of the deployed model + cost presses both arms down (below: lifts both). It is a
+screen, not a test: V10a scores 100 % and every model below 90 % failed seat6, but V10c
+and V10d also score 100 % and seat 0/6. The one-step lever gate is in `…/lever_gate.txt`.
+Obstacle separation (held-out, blocked
+farther than an equal-RMSE unblocked state, fraction / median distance ratio; V4a 0.687 / 1.11):
+V10a 0.870 / 1.54, V10b-d 0.840 / 1.95, V10e 0.840 / 1.88, V10f 0.889 / 1.55, V10g 0.863 / 1.47,
+V10h 0.849 / 1.44, V10i 0.848 / 1.43, V10j 0.839 / 1.91, V10k 0.870 / 1.54, V10l 0.888 / 1.54,
+V10m 0.891 / 1.55, V10n 0.891 / 1.56 (`…/blocked_vs_unblocked_heldout.json`). Held-out recon
+median (joint decoders; `…/embed_<tag>.log`): V10b-d 2.53, V10f 2.72, V10h 4.03, V10j 3.07,
+V10l 6.08, V10m 5.29, V10n 3.86 mm. V10 seat6 cells use the same harness and params as V4a
+except the model files; the cost is isotropic (`Qi`) although the folder names say `Qw`.
 
 ## 3. Closed-loop evaluation index
 
@@ -274,6 +366,34 @@ no per-folder table; their results are in the worktree
 | V7a · yaw12 · Qw · ub-ins | `mpc_eval/20260930-sdlcs/v1/yaw` | 09-30 | 12 / 12 | `…/table_yaw.md` |  |
 | V7a · fs6 · Qw · ub-pool | `mpc_eval/20260930-sdlcs/v1/freespace` | 09-30 | 6 / 6 | `…/table_freespace.md` |  |
 | - · press48 · D · - | `data/lcs/contact/press_down/eval` | 09-30 | 12 / 48 | `data/lcs/contact/press_down/eval/press_down_report.md` | open-loop Franka-only press-down set (12 snapshots x 4 variants); model-free, used by gate G2b |
+| V4a · seat6 · Qw · ub-tr1 | `mpc_eval/20261001_V4a_seat6_Qw_ub-tr1` | 10-01 | 6 / 6 | `…/table.md` | box control: V4a LCS with box_1 (plan Q6) |
+| V8a · seat6 · Qw · ub-ins | `mpc_eval/20261001_V8a_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | V8 iteration 7: 0/6 strict, RMSE 19.9 |
+| V8a · yaw12 · Qw · ub-ins | `mpc_eval/20261001_V8a_yaw12_Qw_ub-ins` | 10-01 | 12 / 12 | `…/table.md` | V8 iteration 7: 0/12 strict, RMSE 24.4 |
+| V8b · seat6 · Qw · ub-ins | `mpc_eval/20261001_V8b_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | V8 iteration 8: 0/6 strict, RMSE 19.9 |
+| V8b · yaw12 · Qw · ub-ins | `mpc_eval/20261001_V8b_yaw12_Qw_ub-ins` | 10-01 | 12 / 12 | `…/table.md` | V8 iteration 8: 0/12 strict, RMSE 25.6 |
+| V8c · seat6 · Qw · ub-ins | `mpc_eval/20261001_V8c_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | V8 iteration 9: 0/6 strict, RMSE 19.3 |
+| V8c · yaw12 · Qw · ub-ins | `mpc_eval/20261001_V8c_yaw12_Qw_ub-ins` | 10-01 | 12 / 12 | `…/table.md` | V8 iteration 9: 0/12 strict, RMSE 26.9 |
+| V10a · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10A_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | 2/6 strict, 3/6 engaged, RMSE 21.7 |
+| V10a · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10A_R2_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | repeat: 3/6 strict, 4/6 engaged, RMSE 20.9 |
+| V10a · yaw12 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10A_yaw12_Qw_ub-ins` | 10-01 | 12 / 12 | `…/table.md` | 0/12 strict, 4/12 engaged (+15°); −15°: 6 unsafe (Franka ~131°), 6 aborts |
+| V10a · cell-s30 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10A_long30_urtip6_high` | 10-01 | 1 / 1 | `…/index.json` | urtip6_high × ud+6_r0, stage 2 30 s: strict (wrap 106.2°, h 0.23) |
+| V10a · seat6-1goal30 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10A_seatonly30_seat6` | 10-01 | 6 / 6 | `…/*/index.json` | seated goal only: 0/6 strict, 2/6 engaged (gv_05 strict at 6.8 s, then under) |
+| V10a · under12 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10A_from_under` | 10-01 | 12 / 12 | `…/*/index.json` | 0/12; all end under (h −9.4 to −12.1); both arms move down |
+| V10b · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10B_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | 0/6, all over (h 18-42), RMSE 22.5 |
+| V10b · yaw12 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10B_yaw12_Qw_ub-ins` | 10-01 | 12 / 12 | `…/table.md` | 0/12, all over, safe (rot ≤ 8°), RMSE 36.7 |
+| V10c · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10C_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | 0/6, RMSE 24.6 |
+| V10d · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10D_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | 0/6, RMSE 15.2 |
+| V10e · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10E_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | 0/6, belt pulled off (outside), RMSE 71.2 |
+| V10f · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10F_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | 0/6, RMSE 55.9 |
+| V10g · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10G_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | 0/6, belt pulled off, RMSE 103.4 |
+| V10h · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10H_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | 0/6, 1 unsafe (rot 107°), RMSE 42.2 |
+| V10i · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10I_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | seed control: 0/6, RMSE 19.7 |
+| V10j · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10J_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | 0/6, RMSE 20.1 |
+| V10k · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10K_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | V10a rerun: 0/6, RMSE 45.5 |
+| V10l · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10L_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | 0/6, belt lifted (h ~127), RMSE 108.0 |
+| V10m · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10M_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | 0/6, closest (h 5.7-9.5, 5 slanted), RMSE 27.1 |
+| V10n · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10N_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | 0/6, RMSE 49.0 |
+| V2 · cell-s30 · Qw · ub-ins | `mpc_eval/20261001-v10/20261001_V2_long30` | 10-01 | 2 / 2 | `…/*/index.json` | 09-26 params, stage 2 30 s: urtip strict (wrap 142.1°, h 0.03); gv_01 engaged (81.4°, h 1.94) |
 
 Fixed 2026-09-30: the empty `mpc_eval/20260924-202837-evalv2-v2full-set3` was deleted (its
 re-run is `…-203612`); `mpc_eval/20260924-234527-flateval-learned-set1/index.json` had 0
@@ -286,7 +406,11 @@ Not closed loop, listed for lookup: open-loop gates and diagnostics in `data/lcs
 (`20260929-model-vs-mpc`, `20260929-v4-offline`, `20260929-v5-infonce`, `20260929-v6-cfm`,
 `20260930-sdlcs` gates G1-G8, `20260930-v1-yawp15-plans`), E4 offline solves
 (`20260929-c3-consistency/solves/`), the metric offline tables (`mpc_eval/20260929-metric/offline/`)
-and the free-space open-loop gates (`data/lcs/free_space/eval_v3/`).
+and the free-space open-loop gates (`data/lcs/free_space/eval_v3/`). V10 (2026-10-01/02):
+`data/lcs/diag/20261001-temporal-latent/` — HILP temporal-distance runs (`runs/hilp_*`,
+`sep.md`), the obstacle-aware graph (`graph/`), separation tests (`sep.json`,
+`blocked_vs_unblocked*.json`), LCS fits (`lcs_fit*.json`), shortest-path figures (`paths/`)
+and the scripts for the lever / policy gates and plan checks (`scripts/`).
 
 ## 5. How to use
 
@@ -305,3 +429,10 @@ and the free-space open-loop gates (`data/lcs/free_space/eval_v3/`).
   (violation gradient to the encoder), limits `ub-hand`/`ub-hand-x0.5`, and `admm3`/`admm1` for
   the 2026-09-24 runs (their default was `admm_iter` 3).
 - V7b's `+frz` means the multistep window uses B(z_0) frozen (the head's weights still train).
+- V9 is skipped: the 2026-10-01 plan reserves V9a/V9b for the structured physical-state retrain.
+  The obstacle-aware graph latent is campaign V10 (`sim_belt_v10_20261001`).
+- V10 tokens: objective `gd`, `rec<w>`, `aug30`, `hold<w>`, `2blk` (with `vg`, since the joint
+  LCS loss reaches the encoder); cost `Qi`. The encoder (`belt_mlp`) is not a tag field. V10b,
+  V10c and V10d share one encoder and differ only in the LCS refit (hold 10 / none / 1).
+- V10 eval folders are named `…_Qw_…` by the shared harness; their cost is `Qi`, and the labels
+  use `Qi`. Suites `cell-s30`, `seat6-1goal30` and `under12` are added for the 10-01/02 runs.

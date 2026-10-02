@@ -84,7 +84,7 @@ data. "-v3b" (e.g. T1-v3b) = the same model run with v3_mix's `u` bounds (label 
 - G8: 7-step error.
 - The 2026-09-29 diagnostics Q1-Q7 are the same kinds of checks (`data/lcs/diag/20260929-*`).
 
-## Current status (2026-09-30)
+## Current status (2026-10-02)
 
 **Best controller so far:** `honor_penalize_input_change: true`, `w_r 0.3`,
 `demo_traj.w_p 0.03` (an EE-path cost) on the `v2_decoded_only` (V2) model — held-out engaged
@@ -149,6 +149,24 @@ hand below the board) and free space (12.7 mm). V2 (V7b, + frozen multistep H7) 
 destabilises A (ρ(A) 1.264) and was not run in closed loop. All switches are opt-in, off by
 default (`docs/learned-mpc-reference.md` §5.13).
 
+**v8 on-policy loop (2026-10-01), not adopted:** V4a's LCS fine-tuned (encoder frozen) on its
+own closed-loop rollouts (Jin & Posa style). On-policy 7-step error fell 2.55 → 1.60 mm, but
+V8a-c are worse than V4a in closed loop (seat 0/6, 19-20 mm; yaw 0/12, 24-27 mm) and 0/36
+collection attempts seated. A failure-only buffer cannot teach the missing action.
+
+**v10 obstacle-aware graph latent (2026-10-01/02), prototype, not adopted:** a belt-only
+encoder trained so latent distance equals the collision-free path length around the pulley
+(`docs/graph-latent-v10.md`). Offline it ranks blocked states as farther from the goal (0.87
+vs V4a's 0.69). V10a seats 2-3/6 on seat6 (strict with 30 s in a third cell), but 13 other
+V10 trainings, including a same-recipe rerun, seat 0/6: the deciding trait is a learned "both
+arms down" press response that only V10a happened to get. V10a also presses down from under
+the pulley (0/12) and spins at −15° yaw (6/12 unsafe).
+
+**Ranking (end of 2026-10-02):** unchanged at the top: v2 is the only reliable seater (4/6;
+with a 30 s seating stage its `urtip` near-miss also becomes strict). V10a matches V1 (2-3/6
+strict) but is one non-reproducible encoder. The improvement plan from the 10-01 architect
+rebuttal (`docs/learned-lcs-improvement-plan.md`) is written but not executed.
+
 **Ranking (end of 2026-09-30):** v2 is the only reliable seater (4/6). V1 is the first retrain
 that presses down instead of riding over (2/6 strict), but it is unsafe on the +15° yawed
 targets. T1 is safe but rests on top of the pulley; T1 + metric A gives 6/12 on yawed targets.
@@ -173,6 +191,118 @@ C3 plans stay inconsistent with the model (relaxed λ at `admm_iter` 2), and nea
 latent is nearly blind (V1: latent distance 0.52 at 7.7 mm true belt error). Next (none
 run): V1 + metric A; V1b (head warm-up so B0 learns); coordinated-press data (UR down / both
 arms); orientation-envelope safety constraints for the spinning.
+
+**Update 2026-10-02:** the cost-geometry issue now has a working offline fix (the graph latent),
+which confirms that geometry is not the bottleneck: every V10 model ranks states well, and
+seating depends on whether the learned action response happens to favour a coordinated
+two-arm press. Next: coordinated-press and from-under recovery data (plan W0.2 / W2.2), the
+policy gate as a pre-sim screen, a port of the graph term into lcs_learning, and a 30 s
+seating stage for all models in future comparisons.
+
+## 2026-10-01/02 — on-policy loop (V8), improvement plan, obstacle-aware graph latent (V10)
+
+**Summary:** Two campaigns and a plan. (1) **V8**, an on-policy loop that fine-tunes V4a's LCS
+on its own rollouts, improved on-policy prediction but made the closed loop worse (V8a-c seat
+0/6, yaw 0/12). (2) A multi-architect rebuttal (4 lenses + synthesizer, 5 rounds) produced
+`docs/learned-lcs-improvement-plan.md` (not executed). (3) The user's idea, "states separated by
+an obstacle must be far apart in the latent", became **V10**: a belt-only encoder trained so
+latent distance matches the collision-free path length around the pulley
+(`docs/graph-latent-v10.md`). Offline it works (blocked farther 0.87 vs 0.69). V10a seats 2-3/6,
+but it is one lucky trained instance: 13 other V10 trainings seat 0/6, and the decisive factor
+is whether the learned action response near the pulley favours pressing both arms down. V10a
+is a fixed press habit (0/12 from under the pulley). v2 stays deployed.
+
+**Tried:**
+- **V8 on-policy loop** (`scripts/lcs/onpolicy_loop.py`, `onpolicy_pool.py`; plan
+  `handoffs/PLAN-20261001-v8-onpolicy.md`; curve `data/lcs/onpolicy/v8/learning_curve.md`).
+  - Per iteration: 12 collection rollouts from a disjoint start pool → encode with the frozen
+    V4a encoder → LCS-only fine-tune (violation + RMSE decoded loss, ms7 weight 0.1, 50/50
+    buffer / V4a replay, FIFO buffer of 50) → h7 gate → export (`--from-deploy`) → seat6/yaw12.
+  - The h7 gate (≤ 1.25 × V4a's 1.98 mm) rejected every fine-tune for iterations 0-6, so V4a
+    kept collecting (not on-policy; caught by the user). Re-run with promotion
+    (`--no-h7-gate`, `--box-ins`): iteration 6's candidate became V8a, then V8b, V8c, V8d.
+  - Results: on-policy 7-step decoded error 2.55 → 1.60 mm; insertion one-step 0.51 → 0.56 mm;
+    closed loop V8a / V8b / V8c seat 0/6 at 19.9 / 19.9 / 19.3 mm, yaw 0/12 at 24.4 / 25.6 /
+    26.9 mm (V4a: 13.1 / 13.6). Collection: 0/36 seats with fine-tuned models, 1/120 overall.
+    Box control: V4a with the narrowed trust-region box 18.2 mm vs 13.1.
+- **Improvement plan:** 4 architect lenses (representation; dynamics/MPC; data/evaluation;
+  skeptic) on Fable 5.1, a synthesizer, 5 rounds (`handoffs/rebuttal-20261001/`). Waves:
+  safety and measurement floor (orientation envelope, physical R, belt-feature stage rule,
+  held-out grid, offline probes, press reachability search) → no-retrain arms → ≤ 2 structured
+  retrains (analytic belt coordinates, gap-tied λ) → oracle sampling MPC.
+- **HILP temporal-distance latent** (`hilp.py`, 6 runs): orders held-out demo states by
+  steps-to-go (ρ 0.92-0.96), but separates dead-end riding-over states from seated ones worse
+  than raw belt RMSE (in-data-goal AUC 0.55-0.63 vs 0.70). Dropped.
+- **Graph latent (V10a).** Pulley SDF from the collision mesh; graph over 28,137 train states
+  with data edges + collision-checked 15-NN edges; Dijkstra from 1,504 landmarks; encoder
+  trained with a Sammon-weighted stress loss to those distances + a joint LCS loss whose
+  gradient reaches the encoder; LCS refit with the trainer's violation loss; isotropic cost.
+  Details: `docs/graph-latent-v10.md`. Held-out, equal-RMSE pairs: blocked farther 0.87 (V4a
+  0.69, V2 0.79, V3a 0.87), distance ratio 1.54 (V4a 1.11).
+- **V10a closed loop:** seat6 2/6 strict, 3/6 engaged (repeat 3/6, 4/6), RMSE ~21 mm, rotation
+  ≤ 7°. yaw12 0/12 strict: +15° 4/6 engaged, safe; −15° 6/6 under with ~130° Franka spins.
+- **Why the plans look wrong** (`plan_check.py`, `cost_check.py`, latent space, no decoder):
+  per 7 steps the plan claims −1.58 goal distance, V10a's own LCS on the same inputs +3.78,
+  reality −0.10. The LCS drifts 0.41 per step at u = 0 vs a real step of 0.03 (V4a 0.10 vs
+  0.04). Across solves the cost falls in 85 % of steps, so it works as receding-horizon descent.
+- **Fix attempts** (seat6 unless stated; all 0/6):
+
+  | ID | change | result |
+  |---|---|---|
+  | V10b | + rotation aug ±30°, recon 0.03, joint hold; LCS hold 10 | yaw12 0/12, safe; stalls h 14-54 mm |
+  | V10c / V10d | V10b encoder, LCS no hold / hold 1 | riding over (h 10-24 mm) |
+  | V10e / V10f / V10g | + aug / + recon 0.03 / + joint hold (one each) | belt off the pulley / h ≈ 55 / off |
+  | V10h / V10j | two-block latent (8 + 8, κ 0.25), recon 0.03 / + aug | h: 107° spin; j: h 4-16 mm |
+  | V10i | V10a recipe, seed 1 | riding over |
+  | V10k | V10a recipe, seed 0, rerun | riding over (latents differ ≤ 0.16) |
+  | V10l / V10m / V10n | V10a recipe + recon 0.001 / 0.003 / 0.01 | lifts away / closest h ≈ 7 / over |
+
+  The hold term removes the drift but also the press lever (UR-down lever 0.78 → 0.04);
+  reconstruction keeps obstacle separation (0.89) and cuts held-out shape error to 4-6 mm;
+  rotation augmentation closes the yaw gap (held-out −10°: 72 → 2.8 mm median).
+- **Gates** (`lever_gate.txt`, `policy_gate.txt` in the diag folder): the one-step lever
+  ("both down minus both up") does not predict closed loop. The **policy gate** (best constant
+  input over a 7-step model rollout under the deployed cost and bounds) is a screen, not a
+  test: V10a scores 100 % "both down" on riding-over states and every model below 90 % failed
+  (V10m 88 %, V10n 68 %, V10k 50 %, V10l 22 %), but V10c and V10d also score 100 % and seat
+  0/6.
+- **Special runs:**
+  - V10a `urtip6_high` with a 30 s seating stage: strict (wrap 106°, h 0.2 mm) from 16 s on.
+  - V10a from 12 belt-under-pulley snapshots (2 held-out), seated goal only, 30 s: 0/12;
+    both arms move down (Franka −6 to −9 mm).
+  - V10a seat6 with only the seated goal (no pre-place stage), 30 s: 0/6 strict, 2/6
+    engaged; `gv_05` seats at 6.8 s, then is pushed under.
+  - v2 near-misses with 30 s: `urtip` becomes strict at 14.9 s (wrap 142°, h 0.0); `gv_01`
+    plateaus at wrap 82°, h +2.0 mm.
+
+**Issues / bugs -> resolution:**
+
+| symptom | root cause | fix / status |
+|---|---|---|
+| V8 collected with V4a for 7 iterations | the h7 gate rejected every fine-tune, so the collector stayed V4a | stopped; promotion with `--no-h7-gate`; iteration 7 moved to `iter7_aborted_v4a` |
+| graph-embedding loss NaN | norm gradient at s = landmark; ∞ targets poison masked gradients | `sqrt(Σ + 1e-8)`; ∞ targets replaced before the loss |
+| −15° goals encode far off (V10a) | no approach yaw between −30° and 0° in train; MLP on raw coordinates | rotation augmentation (V10b-j); not in V10a |
+| V10a plans inconsistent with its model | `admm_iter` 2 relaxation + LCS drift 12× the real step | hold term removes drift but kills the lever; **open** |
+| V10 seating not reproducible | press lever weakly determined by the data; GPU nondeterminism | policy gate as a screen (necessary, not sufficient); **open**: press / recovery data |
+| seats cut off at 10 s | seating takes 10-16 s for V10a and v2 | **open**: use a 30 s seating stage in future comparisons |
+| V10h fails the C3 check on 4 −15° targets | input bound violations up to 5e-4 | not run on yaw12 |
+| goal leakage | the 4 seat6 targets were graph landmarks | **open**: retrain without them; held-out grid |
+
+**Decisions:**
+- Keep `v2_decoded_only` deployed. V8 and V10 are not adopted.
+- `BeltMlpEncoder` in `task_common/latent_encoder.py` is opt-in (`encoder_type = belt_mlp` in
+  `deploy.npz`); existing deploys load the PointNet encoder unchanged.
+- V10 stays a prototype in `data/lcs/diag/20261001-temporal-latent/`; any further comparison
+  goes through lcs_learning after a port.
+
+**Open / next:**
+- Coordinated two-arm press and from-under recovery data (plan W0.2 scripted reachability,
+  W2.2 collection), then retrain the V10 recipe over several seeds and screen with the
+  policy gate.
+- Port the graph-distance term, the belt-only encoder and the encoder violation gradient into
+  lcs_learning (architect + developer), with identity tests.
+- A scripted constant two-arm press baseline from the seat6 starts: does V10a beat it?
+- 30 s seating stage for all models; orientation envelope (W0.1a) before any yaw re-test.
 
 ## 2026-09-30 — state-dependent LCS B(z), press-down data, V1 (V7a) closed loop
 

@@ -2,7 +2,7 @@
 # Kept in docs/ because data/ is gitignored. Numbers are copied from existing tables only;
 # each result carries its source path. BL = the waypoint baseline controller.
 schema_version: 1
-updated: '2026-09-30'
+updated: '2026-10-02'
 doc: docs/models.md
 scheme:
   model_id: V<campaign>[letter]; campaign = lcs_learning outputs/sim_belt_v<N>_<date>/ (V1 = sim_belt_ablation_20260924)
@@ -25,10 +25,14 @@ suites:
   rec4: 'flat recorded set: nominal + 2 of set1 + 1 of set3'
   eeoff4: EE-offset starts data/lcs/start_states/ee_offsets (ee_f_x+8, ee_f_z+8, ee_ur_y-8, ee_f_rot5)
   long25: set1 gv_03, one 35 s episode
+  cell-s30: one seat6 cell re-run with the stage-2 timeout 10 -> 30 s (episode cap 40 s)
+  seat6-1goal30: seat6 starts, seated goal only (stage 1 shortened to 0.075 s), stage 2 30 s
+  under12: 12 belt-under-pulley snapshots (data/lcs/contact/snapshots{,_heldout}/*final_under_osc.npz), seated goal only, 30 s
 costs:
   Qw: whitened latent Q = w_q diag(1/z_std^2) (default)
   QA: metric A, learned global Q = L^T L
   QB: metric B, decoder pullback J^T W J at the goal
+  Qi: isotropic Q = w_q I / sigma^2 (V10; z_std = sigma for every dim; two-block shape dims weighted by kappa); eval folders still named _Qw_
   Qw+wp: Qw + demo_traj.w_p 0.03 EE-path cost (rejected design)
   '-': waypoint baseline controller, no MPC cost
 limits:
@@ -836,6 +840,553 @@ models:
       insertion_one_step_h7_mm: 0.569 / 1.32
       source: ~/git/lcs_learning/outputs/sim_belt_v7_20260930/eval_table_v7.md
     closed_loop: null
+- id: V8a
+  tag: mix-rmse-fixB (ft-onpolicy 6, tr7)
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v8_20261001
+  config: null
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v8_20261001/iter6/ft_primary/checkpoint_ft_3000.pt
+  step: 3000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v8_20261001/deploy_v8a
+  date: '2026-10-01'
+  parent: V4a
+  change: V4a LCS fine-tuned on 50 on-policy rollouts + V4a replay (AE frozen), primary, step 3000; box ub-tr7
+  u_bounds: ub-tr7
+  status: candidate
+  status_note: V8 on-policy iteration model
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.574 / 2.57
+      rho_A: 1.0276
+      B_fro: 47.93
+      source: data/lcs/onpolicy/v8/iter6/finetune.json
+    closed_loop: null
+- id: V8b
+  tag: mix-rmse-fixB (ft-onpolicy 7, tr8)
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v8_20261001
+  config: null
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v8_20261001/iter7/ft_primary/checkpoint_ft_2500.pt
+  step: 2500
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v8_20261001/deploy_v8b
+  date: '2026-10-01'
+  parent: V8a
+  change: V8a LCS fine-tuned on 50 on-policy rollouts + V4a replay (AE frozen), primary, step 2500; box ub-tr8
+  u_bounds: ub-tr8
+  status: candidate
+  status_note: V8 on-policy iteration model
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.569 / 2.54
+      rho_A: 1.0312
+      B_fro: 47.8
+      source: data/lcs/onpolicy/v8/iter7/finetune.json
+    closed_loop: null
+- id: V8c
+  tag: mix-rmse-fixB (ft-onpolicy 8, tr9)
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v8_20261001
+  config: null
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v8_20261001/iter8/ft_primary/checkpoint_ft_2500.pt
+  step: 2500
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v8_20261001/deploy_v8c
+  date: '2026-10-01'
+  parent: V8b
+  change: V8b LCS fine-tuned on 50 on-policy rollouts + V4a replay (AE frozen), primary, step 2500; box ub-tr9
+  u_bounds: ub-tr9
+  status: candidate
+  status_note: V8 on-policy iteration model
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.564 / 2.54
+      rho_A: 1.0284
+      B_fro: 47.74
+      source: data/lcs/onpolicy/v8/iter8/finetune.json
+    closed_loop: null
+- id: V8d
+  tag: mix-rmse-fixB (ft-onpolicy 9, tr10)
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v8_20261001
+  config: null
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v8_20261001/iter9/ft_primary/checkpoint_ft_3000.pt
+  step: 3000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v8_20261001/deploy_v8d
+  date: '2026-10-01'
+  parent: V8c
+  change: V8c LCS fine-tuned on 50 on-policy rollouts + V4a replay (AE frozen), primary, step 3000; box ub-tr10
+  u_bounds: ub-tr10
+  status: candidate
+  status_note: V8 on-policy iteration model
+  results:
+    offline:
+      insertion_one_step_h7_mm: 0.562 / 2.54
+      rho_A: 1.0244
+      B_fro: 47.8
+      source: data/lcs/onpolicy/v8/iter9/finetune.json
+    closed_loop: null
+- id: V10a
+  tag: mix-gd+vg-fixB
+  aliases:
+  - graphemb_dyn1.0
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v10_20261001
+  config: 'prototype embed.py --dyn-weight 1.0 (data/lcs/diag/20261001-temporal-latent/scripts; not the lcs_learning trainer)'
+  checkpoint: data/lcs/diag/20261001-temporal-latent/runs/graphemb_dyn1.0/phi.pt
+  lcs_fit: data/lcs/diag/20261001-temporal-latent/lcs_GraphEmb_dyn1.0.pt
+  step: 40000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10a
+  date: '2026-10-01'
+  parent: null
+  change: 'belt-only MLP encoder (belt_mlp, no proprio/cloud) trained on the obstacle-aware graph-distance loss + a joint LCS (weight 1.0, gradient to the encoder); LCS refit without hold'
+  data: v3 union train split (20260929 diag cache)
+  u_bounds: ub-ins
+  cost: Qi
+  status: candidate
+  status_note: 'only V10 model that seats; not reproducible (V10i seed 1 and V10k same-seed rerun: 0/6)'
+  results:
+    offline:
+      rho_A: 1.0027
+      sigma: 0.4407
+      B_fro_whitened: 60.2
+      heldout_blocked_farther_ratio: 0.87 / 1.54
+      one_step_h7_rel_no_motion_nohold_refit: 0.513 / 0.455
+      policy_gate_both_down_above_pct: 100
+      policy_gate_both_up_below_pct: 10
+      source: data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json (refits not bitwise reproducible; cl_drift_over_step not used); data/lcs/diag/20261001-temporal-latent/policy_gate.txt (screen, not a test); ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10a/report.json; data/lcs/diag/20261001-temporal-latent/blocked_vs_unblocked_heldout.json
+    closed_loop:
+      seat6: 2/6 strict, 3/6 engaged, RMSE 21.7; repeat 3/6, 4/6, RMSE 20.9
+      yaw12: 0/12 strict, 4/12 engaged, RMSE 155.3, 6 unsafe (-15 deg runaway)
+      cell_s30_urtip6_high: strict (wrap 106.2, h 0.23)
+      seat6_1goal30: 0/6 strict, 2/6 engaged
+      under12: 0/12 (all under)
+      source: data/lcs/mpc_eval/20261001-v10/20261001_V10A*/table.md, index.json
+- id: V10b
+  tag: mix-gd+vg+rec0.03+aug30+hold1-fixB
+  aliases:
+  - graphemb_aug_rec0.03
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v10_20261001
+  config: 'prototype embed.py --dyn-weight 1 --hold-weight 1 --recon-weight 0.03 --rot-aug 30 (data/lcs/diag/20261001-temporal-latent/scripts; not the lcs_learning trainer)'
+  checkpoint: data/lcs/diag/20261001-temporal-latent/runs/graphemb_aug_rec0.03/phi.pt
+  lcs_fit: data/lcs/diag/20261001-temporal-latent/lcs_GraphEmb_aug_rec0.03_hold10.0.pt
+  step: 40000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10b
+  date: '2026-10-01'
+  parent: V10a
+  change: '+ recon 0.03, aug30, joint hold 1; LCS refit with hold 10'
+  data: v3 union train split (20260929 diag cache)
+  u_bounds: ub-ins
+  cost: Qi
+  status: rejected
+  status_note: 'calm but parks riding over (hold removed the press lever)'
+  results:
+    offline:
+      rho_A: 1.0134
+      sigma: 0.6551
+      B_fro_whitened: 81.6
+      heldout_blocked_farther_ratio: 0.84 / 1.952
+      recon_heldout_median_mm: 2.53
+      one_step_h7_rel_no_motion_nohold_refit: 0.413 / 0.333
+      one_step_h7_rel_no_motion_deployed_hold10: 0.409 / 0.328
+      policy_gate_both_down_above_pct: 28
+      policy_gate_both_up_below_pct: 100
+      source: data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json (refits not bitwise reproducible; cl_drift_over_step not used); data/lcs/diag/20261001-temporal-latent/policy_gate.txt (screen, not a test); ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10b/report.json; data/lcs/diag/20261001-temporal-latent/blocked_vs_unblocked_heldout.json; data/lcs/diag/20261001-temporal-latent/lcs_fit_hold10.0.json; data/lcs/diag/20261001-temporal-latent/embed_aug_rec0.03.log
+    closed_loop:
+      seat6: 0/6, RMSE 22.5
+      yaw12: 0/12, RMSE 36.7
+      source: data/lcs/mpc_eval/20261001-v10/20261001_V10B*/table.md, index.json
+- id: V10c
+  tag: mix-gd+vg+rec0.03+aug30+hold1-fixB
+  aliases:
+  - graphemb_aug_rec0.03
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v10_20261001
+  config: 'prototype embed.py as V10b (data/lcs/diag/20261001-temporal-latent/scripts; not the lcs_learning trainer)'
+  checkpoint: data/lcs/diag/20261001-temporal-latent/runs/graphemb_aug_rec0.03/phi.pt
+  lcs_fit: data/lcs/diag/20261001-temporal-latent/lcs_GraphEmb_aug_rec0.03.pt
+  step: 40000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10c
+  date: '2026-10-01'
+  parent: V10b
+  change: 'V10b encoder, LCS refit without hold'
+  data: v3 union train split (20260929 diag cache)
+  u_bounds: ub-ins
+  cost: Qi
+  status: rejected
+  results:
+    offline:
+      rho_A: 1.0102
+      sigma: 0.6551
+      B_fro_whitened: 79.0
+      heldout_blocked_farther_ratio: 0.84 / 1.952
+      recon_heldout_median_mm: 2.53
+      one_step_h7_rel_no_motion_nohold_refit: 0.413 / 0.333
+      policy_gate_both_down_above_pct: 100
+      policy_gate_both_up_below_pct: 0
+      source: data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json (refits not bitwise reproducible; cl_drift_over_step not used); data/lcs/diag/20261001-temporal-latent/policy_gate.txt (screen, not a test); ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10c/report.json; data/lcs/diag/20261001-temporal-latent/blocked_vs_unblocked_heldout.json; data/lcs/diag/20261001-temporal-latent/embed_aug_rec0.03.log
+    closed_loop:
+      seat6: 0/6, RMSE 24.6
+      source: data/lcs/mpc_eval/20261001-v10/20261001_V10C*/table.md, index.json
+- id: V10d
+  tag: mix-gd+vg+rec0.03+aug30+hold1-fixB
+  aliases:
+  - graphemb_aug_rec0.03
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v10_20261001
+  config: 'prototype embed.py as V10b (data/lcs/diag/20261001-temporal-latent/scripts; not the lcs_learning trainer)'
+  checkpoint: data/lcs/diag/20261001-temporal-latent/runs/graphemb_aug_rec0.03/phi.pt
+  lcs_fit: data/lcs/diag/20261001-temporal-latent/lcs_GraphEmb_aug_rec0.03_hold1.0.pt
+  step: 40000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10d
+  date: '2026-10-01'
+  parent: V10b
+  change: 'V10b encoder, LCS refit with hold 1'
+  data: v3 union train split (20260929 diag cache)
+  u_bounds: ub-ins
+  cost: Qi
+  status: rejected
+  results:
+    offline:
+      rho_A: 1.0034
+      sigma: 0.6551
+      B_fro_whitened: 67.6
+      heldout_blocked_farther_ratio: 0.84 / 1.952
+      recon_heldout_median_mm: 2.53
+      one_step_h7_rel_no_motion_nohold_refit: 0.413 / 0.333
+      one_step_h7_rel_no_motion_deployed_hold1: 0.408 / 0.328
+      policy_gate_both_down_above_pct: 100
+      policy_gate_both_up_below_pct: 0
+      source: data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json (refits not bitwise reproducible; cl_drift_over_step not used); data/lcs/diag/20261001-temporal-latent/policy_gate.txt (screen, not a test); ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10d/report.json; data/lcs/diag/20261001-temporal-latent/blocked_vs_unblocked_heldout.json; data/lcs/diag/20261001-temporal-latent/lcs_fit_hold1.0.json; data/lcs/diag/20261001-temporal-latent/embed_aug_rec0.03.log
+    closed_loop:
+      seat6: 0/6, RMSE 15.2
+      source: data/lcs/mpc_eval/20261001-v10/20261001_V10D*/table.md, index.json
+- id: V10e
+  tag: mix-gd+vg+aug30-fixB
+  aliases:
+  - graphemb_abl_aug
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v10_20261001
+  config: 'prototype embed.py --dyn-weight 1 --rot-aug 30 (data/lcs/diag/20261001-temporal-latent/scripts; not the lcs_learning trainer)'
+  checkpoint: data/lcs/diag/20261001-temporal-latent/runs/graphemb_abl_aug/phi.pt
+  lcs_fit: data/lcs/diag/20261001-temporal-latent/lcs_GraphEmb_abl_aug.pt
+  step: 40000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10e
+  date: '2026-10-01'
+  parent: V10a
+  change: '+ aug30 only (ablation)'
+  data: v3 union train split (20260929 diag cache)
+  u_bounds: ub-ins
+  cost: Qi
+  status: rejected
+  status_note: 'belt pulled off the pulley'
+  results:
+    offline:
+      rho_A: 1.0148
+      sigma: 0.6687
+      B_fro_whitened: 76.2
+      heldout_blocked_farther_ratio: 0.84 / 1.876
+      one_step_h7_rel_no_motion_nohold_refit: 0.624 / 0.51
+      policy_gate_both_down_above_pct: 38
+      policy_gate_both_up_below_pct: 0
+      source: data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json (refits not bitwise reproducible; cl_drift_over_step not used); data/lcs/diag/20261001-temporal-latent/policy_gate.txt (screen, not a test); ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10e/report.json; data/lcs/diag/20261001-temporal-latent/blocked_vs_unblocked_heldout.json
+    closed_loop:
+      seat6: 0/6, RMSE 71.2
+      source: data/lcs/mpc_eval/20261001-v10/20261001_V10E*/table.md, index.json
+- id: V10f
+  tag: mix-gd+vg+rec0.03-fixB
+  aliases:
+  - graphemb_abl_rec
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v10_20261001
+  config: 'prototype embed.py --dyn-weight 1 --recon-weight 0.03 (data/lcs/diag/20261001-temporal-latent/scripts; not the lcs_learning trainer)'
+  checkpoint: data/lcs/diag/20261001-temporal-latent/runs/graphemb_abl_rec/phi.pt
+  lcs_fit: data/lcs/diag/20261001-temporal-latent/lcs_GraphEmb_abl_rec.pt
+  step: 40000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10f
+  date: '2026-10-01'
+  parent: V10a
+  change: '+ recon 0.03 only (ablation)'
+  data: v3 union train split (20260929 diag cache)
+  u_bounds: ub-ins
+  cost: Qi
+  status: rejected
+  status_note: 'parks high riding over'
+  results:
+    offline:
+      rho_A: 1.0173
+      sigma: 0.4455
+      B_fro_whitened: 48.0
+      heldout_blocked_farther_ratio: 0.889 / 1.554
+      recon_heldout_median_mm: 2.72
+      one_step_h7_rel_no_motion_nohold_refit: 0.456 / 0.394
+      policy_gate_both_down_above_pct: 62
+      policy_gate_both_up_below_pct: 90
+      source: data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json (refits not bitwise reproducible; cl_drift_over_step not used); data/lcs/diag/20261001-temporal-latent/policy_gate.txt (screen, not a test); ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10f/report.json; data/lcs/diag/20261001-temporal-latent/blocked_vs_unblocked_heldout.json; data/lcs/diag/20261001-temporal-latent/embed_abl_rec.log
+    closed_loop:
+      seat6: 0/6, RMSE 55.9
+      source: data/lcs/mpc_eval/20261001-v10/20261001_V10F*/table.md, index.json
+- id: V10g
+  tag: mix-gd+vg+hold1-fixB
+  aliases:
+  - graphemb_abl_hold
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v10_20261001
+  config: 'prototype embed.py --dyn-weight 1 --hold-weight 1 (data/lcs/diag/20261001-temporal-latent/scripts; not the lcs_learning trainer)'
+  checkpoint: data/lcs/diag/20261001-temporal-latent/runs/graphemb_abl_hold/phi.pt
+  lcs_fit: data/lcs/diag/20261001-temporal-latent/lcs_GraphEmb_abl_hold.pt
+  step: 40000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10g
+  date: '2026-10-01'
+  parent: V10a
+  change: '+ joint hold 1 only (ablation)'
+  data: v3 union train split (20260929 diag cache)
+  u_bounds: ub-ins
+  cost: Qi
+  status: rejected
+  status_note: 'belt pulled off the pulley; rho(A) 1.076'
+  results:
+    offline:
+      rho_A: 1.0757
+      sigma: 0.431
+      B_fro_whitened: 50.6
+      heldout_blocked_farther_ratio: 0.863 / 1.471
+      one_step_h7_rel_no_motion_nohold_refit: 0.526 / 0.468
+      policy_gate_both_down_above_pct: 15
+      policy_gate_both_up_below_pct: 10
+      source: data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json (refits not bitwise reproducible; cl_drift_over_step not used); data/lcs/diag/20261001-temporal-latent/policy_gate.txt (screen, not a test); ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10g/report.json; data/lcs/diag/20261001-temporal-latent/blocked_vs_unblocked_heldout.json
+    closed_loop:
+      seat6: 0/6, RMSE 103.4
+      source: data/lcs/mpc_eval/20261001-v10/20261001_V10G*/table.md, index.json
+- id: V10h
+  tag: mix-gd+vg+rec0.03+2blk-fixB
+  aliases:
+  - graphemb_twoblock
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v10_20261001
+  config: 'prototype embed.py --dyn-weight 1 --recon-weight 0.03 --split 8 (data/lcs/diag/20261001-temporal-latent/scripts; not the lcs_learning trainer)'
+  checkpoint: data/lcs/diag/20261001-temporal-latent/runs/graphemb_twoblock/phi.pt
+  lcs_fit: data/lcs/diag/20261001-temporal-latent/lcs_GraphEmb_twoblock.pt
+  step: 40000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10h
+  date: '2026-10-01'
+  parent: V10a
+  change: 'two-block latent (8 task + 8 shape), recon 0.03, kappa 0.25'
+  data: v3 union train split (20260929 diag cache)
+  u_bounds: ub-ins
+  cost: Qi
+  status: rejected
+  status_note: '1 unsafe cell (rot 107 deg)'
+  results:
+    offline:
+      rho_A: 1.0439
+      sigma: 0.4264
+      B_fro_whitened: 96.0
+      split_kappa: 8 / 0.25
+      heldout_blocked_farther_ratio: 0.849 / 1.439
+      recon_heldout_median_mm: 4.03
+      one_step_h7_rel_no_motion_nohold_refit: 0.819 / 0.695
+      policy_gate_both_down_above_pct: 40
+      policy_gate_both_up_below_pct: 35
+      source: data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json (refits not bitwise reproducible; cl_drift_over_step not used); data/lcs/diag/20261001-temporal-latent/policy_gate.txt (screen, not a test); ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10h/report.json; data/lcs/diag/20261001-temporal-latent/blocked_vs_unblocked_heldout.json; data/lcs/diag/20261001-temporal-latent/embed_twoblock.log
+    closed_loop:
+      seat6: 0/6, RMSE 42.2
+      source: data/lcs/mpc_eval/20261001-v10/20261001_V10H*/table.md, index.json
+- id: V10i
+  tag: mix-gd+vg-fixB
+  aliases:
+  - graphemb_dyn1.0_s1
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v10_20261001
+  config: 'prototype embed.py --dyn-weight 1 --seed 1 (data/lcs/diag/20261001-temporal-latent/scripts; not the lcs_learning trainer)'
+  checkpoint: data/lcs/diag/20261001-temporal-latent/runs/graphemb_dyn1.0_s1/phi.pt
+  lcs_fit: data/lcs/diag/20261001-temporal-latent/lcs_GraphEmb_dyn1.0_s1.pt
+  step: 40000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10i
+  date: '2026-10-01'
+  parent: V10a
+  change: 'seed control: V10a recipe with seed 1'
+  data: v3 union train split (20260929 diag cache)
+  u_bounds: ub-ins
+  cost: Qi
+  status: rejected
+  status_note: 'shows V10a seating is seed-dependent'
+  results:
+    offline:
+      rho_A: 1.0141
+      sigma: 0.4253
+      B_fro_whitened: 67.4
+      heldout_blocked_farther_ratio: 0.848 / 1.429
+      one_step_h7_rel_no_motion_nohold_refit: 0.547 / 0.469
+      policy_gate_both_down_above_pct: 42
+      policy_gate_both_up_below_pct: 100
+      source: data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json (refits not bitwise reproducible; cl_drift_over_step not used); data/lcs/diag/20261001-temporal-latent/policy_gate.txt (screen, not a test); ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10i/report.json; data/lcs/diag/20261001-temporal-latent/blocked_vs_unblocked_heldout.json
+    closed_loop:
+      seat6: 0/6, RMSE 19.7
+      source: data/lcs/mpc_eval/20261001-v10/20261001_V10I*/table.md, index.json
+- id: V10j
+  tag: mix-gd+vg+rec0.03+aug30+2blk-fixB
+  aliases:
+  - graphemb_twoblock_aug
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v10_20261001
+  config: 'prototype embed.py --dyn-weight 1 --recon-weight 0.03 --split 8 --rot-aug 30 (data/lcs/diag/20261001-temporal-latent/scripts; not the lcs_learning trainer)'
+  checkpoint: data/lcs/diag/20261001-temporal-latent/runs/graphemb_twoblock_aug/phi.pt
+  lcs_fit: data/lcs/diag/20261001-temporal-latent/lcs_GraphEmb_twoblock_aug.pt
+  step: 40000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10j
+  date: '2026-10-01'
+  parent: V10h
+  change: '+ aug30'
+  data: v3 union train split (20260929 diag cache)
+  u_bounds: ub-ins
+  cost: Qi
+  status: rejected
+  status_note: 'gets close (h 4-16 mm, one slanted wrap 40)'
+  results:
+    offline:
+      rho_A: 1.0225
+      sigma: 0.6511
+      B_fro_whitened: 111.7
+      split_kappa: 8 / 0.25
+      heldout_blocked_farther_ratio: 0.839 / 1.906
+      recon_heldout_median_mm: 3.07
+      one_step_h7_rel_no_motion_nohold_refit: 0.718 / 0.598
+      policy_gate_both_down_above_pct: 62
+      policy_gate_both_up_below_pct: 0
+      source: data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json (refits not bitwise reproducible; cl_drift_over_step not used); data/lcs/diag/20261001-temporal-latent/policy_gate.txt (screen, not a test); ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10j/report.json; data/lcs/diag/20261001-temporal-latent/blocked_vs_unblocked_heldout.json; data/lcs/diag/20261001-temporal-latent/embed_twoblock_aug.log
+    closed_loop:
+      seat6: 0/6, RMSE 20.1
+      source: data/lcs/mpc_eval/20261001-v10/20261001_V10J*/table.md, index.json
+- id: V10k
+  tag: mix-gd+vg-fixB
+  aliases:
+  - graphemb_rs_rec0
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v10_20261001
+  config: 'prototype embed.py --dyn-weight 1 --seed 0 (data/lcs/diag/20261001-temporal-latent/scripts; not the lcs_learning trainer)'
+  checkpoint: data/lcs/diag/20261001-temporal-latent/runs/graphemb_rs_rec0/phi.pt
+  lcs_fit: data/lcs/diag/20261001-temporal-latent/lcs_GraphEmb_rs_rec0.pt
+  step: 40000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10k
+  date: '2026-10-02'
+  parent: V10a
+  change: 'V10a recipe and seed re-run with the current code (GPU nondeterminism: latents differ up to 0.16)'
+  data: v3 union train split (20260929 diag cache)
+  u_bounds: ub-ins
+  cost: Qi
+  status: rejected
+  status_note: 'V10a does not reproduce'
+  results:
+    offline:
+      rho_A: 1.0071
+      sigma: 0.4406
+      B_fro_whitened: 58.1
+      heldout_blocked_farther_ratio: 0.87 / 1.538
+      one_step_h7_rel_no_motion_nohold_refit: 0.513 / 0.452
+      policy_gate_both_down_above_pct: 50
+      policy_gate_both_up_below_pct: 38
+      source: data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json (refits not bitwise reproducible; cl_drift_over_step not used); data/lcs/diag/20261001-temporal-latent/policy_gate.txt (screen, not a test); ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10k/report.json; data/lcs/diag/20261001-temporal-latent/blocked_vs_unblocked_heldout.json; data/lcs/diag/20261001-temporal-latent/lcs_fit.json
+    closed_loop:
+      seat6: 0/6, RMSE 45.5
+      source: data/lcs/mpc_eval/20261001-v10/20261001_V10K*/table.md, index.json
+- id: V10l
+  tag: mix-gd+vg+rec0.001-fixB
+  aliases:
+  - graphemb_rs_rec0.001
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v10_20261001
+  config: 'prototype embed.py --dyn-weight 1 --recon-weight 0.001 --seed 0 (data/lcs/diag/20261001-temporal-latent/scripts; not the lcs_learning trainer)'
+  checkpoint: data/lcs/diag/20261001-temporal-latent/runs/graphemb_rs_rec0.001/phi.pt
+  lcs_fit: data/lcs/diag/20261001-temporal-latent/lcs_GraphEmb_rs_rec0.001.pt
+  step: 40000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10l
+  date: '2026-10-02'
+  parent: V10a
+  change: '+ recon 0.001, from scratch'
+  data: v3 union train split (20260929 diag cache)
+  u_bounds: ub-ins
+  cost: Qi
+  status: rejected
+  status_note: 'lifts the belt away (h ~127 mm)'
+  results:
+    offline:
+      rho_A: 1.0071
+      sigma: 0.437
+      B_fro_whitened: 59.2
+      heldout_blocked_farther_ratio: 0.888 / 1.535
+      recon_heldout_median_mm: 6.08
+      one_step_h7_rel_no_motion_nohold_refit: 0.548 / 0.481
+      policy_gate_both_down_above_pct: 22
+      policy_gate_both_up_below_pct: 0
+      source: data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json (refits not bitwise reproducible; cl_drift_over_step not used); data/lcs/diag/20261001-temporal-latent/policy_gate.txt (screen, not a test); ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10l/report.json; data/lcs/diag/20261001-temporal-latent/blocked_vs_unblocked_heldout.json; data/lcs/diag/20261001-temporal-latent/lcs_fit.json; data/lcs/diag/20261001-temporal-latent/embed_rs_rec0.001.log
+    closed_loop:
+      seat6: 0/6, RMSE 108.0
+      source: data/lcs/mpc_eval/20261001-v10/20261001_V10L*/table.md, index.json
+- id: V10m
+  tag: mix-gd+vg+rec0.003-fixB
+  aliases:
+  - graphemb_rs_rec0.003
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v10_20261001
+  config: 'prototype embed.py --dyn-weight 1 --recon-weight 0.003 --seed 0 (data/lcs/diag/20261001-temporal-latent/scripts; not the lcs_learning trainer)'
+  checkpoint: data/lcs/diag/20261001-temporal-latent/runs/graphemb_rs_rec0.003/phi.pt
+  lcs_fit: data/lcs/diag/20261001-temporal-latent/lcs_GraphEmb_rs_rec0.003.pt
+  step: 40000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10m
+  date: '2026-10-02'
+  parent: V10a
+  change: '+ recon 0.003, from scratch'
+  data: v3 union train split (20260929 diag cache)
+  u_bounds: ub-ins
+  cost: Qi
+  status: rejected
+  status_note: 'closest recon variant (h 5.7-9.5 mm, 5 slanted); policy gate 88 % both-down'
+  results:
+    offline:
+      rho_A: 1.0048
+      sigma: 0.4404
+      B_fro_whitened: 67.0
+      heldout_blocked_farther_ratio: 0.891 / 1.553
+      recon_heldout_median_mm: 5.29
+      one_step_h7_rel_no_motion_nohold_refit: 0.509 / 0.444
+      policy_gate_both_down_above_pct: 88
+      policy_gate_both_up_below_pct: 0
+      source: data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json (refits not bitwise reproducible; cl_drift_over_step not used); data/lcs/diag/20261001-temporal-latent/policy_gate.txt (screen, not a test); ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10m/report.json; data/lcs/diag/20261001-temporal-latent/blocked_vs_unblocked_heldout.json; data/lcs/diag/20261001-temporal-latent/lcs_fit.json; data/lcs/diag/20261001-temporal-latent/embed_rs_rec0.003.log
+    closed_loop:
+      seat6: 0/6, RMSE 27.1
+      source: data/lcs/mpc_eval/20261001-v10/20261001_V10M*/table.md, index.json
+- id: V10n
+  tag: mix-gd+vg+rec0.01-fixB
+  aliases:
+  - graphemb_rs_rec0.01
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v10_20261001
+  config: 'prototype embed.py --dyn-weight 1 --recon-weight 0.01 --seed 0 (data/lcs/diag/20261001-temporal-latent/scripts; not the lcs_learning trainer)'
+  checkpoint: data/lcs/diag/20261001-temporal-latent/runs/graphemb_rs_rec0.01/phi.pt
+  lcs_fit: data/lcs/diag/20261001-temporal-latent/lcs_GraphEmb_rs_rec0.01.pt
+  step: 40000
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10n
+  date: '2026-10-02'
+  parent: V10a
+  change: '+ recon 0.01, from scratch'
+  data: v3 union train split (20260929 diag cache)
+  u_bounds: ub-ins
+  cost: Qi
+  status: rejected
+  results:
+    offline:
+      rho_A: 1.0068
+      sigma: 0.4399
+      B_fro_whitened: 53.4
+      heldout_blocked_farther_ratio: 0.891 / 1.561
+      recon_heldout_median_mm: 3.86
+      one_step_h7_rel_no_motion_nohold_refit: 0.486 / 0.42
+      policy_gate_both_down_above_pct: 68
+      policy_gate_both_up_below_pct: 100
+      source: data/lcs/diag/20261001-temporal-latent/lcs_fit_all_nohold.json (refits not bitwise reproducible; cl_drift_over_step not used); data/lcs/diag/20261001-temporal-latent/policy_gate.txt (screen, not a test); ~/git/lcs_learning/outputs/sim_belt_v10_20261001/deploy_v10n/report.json; data/lcs/diag/20261001-temporal-latent/blocked_vs_unblocked_heldout.json; data/lcs/diag/20261001-temporal-latent/lcs_fit.json; data/lcs/diag/20261001-temporal-latent/embed_rs_rec0.01.log
+    closed_loop:
+      seat6: 0/6, RMSE 49.0
+      source: data/lcs/mpc_eval/20261001-v10/20261001_V10N*/table.md, index.json
 evals:
 - label: BL · nom · - · -
   model: BL
@@ -2069,3 +2620,339 @@ evals:
   n_episodes: 48
   table: data/lcs/contact/press_down/eval/press_down_report.md
   note: open-loop Franka-only press-down set (12 snapshots x 4 variants); model-free, used by gate G2b
+- label: V4a · seat6 · Qw · ub-tr1
+  model: V4a
+  suite: seat6
+  cost: Qw
+  limits: ub-tr1
+  path: data/lcs/mpc_eval/20261001_V4a_seat6_Qw_ub-tr1
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001_V4a_seat6_Qw_ub-tr1/table.md
+  note: 'box control: V4a LCS with box_1 (plan Q6)'
+- label: V8a · seat6 · Qw · ub-ins
+  model: V8a
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001_V8a_seat6_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001_V8a_seat6_Qw_ub-ins/table.md
+  note: 'V8 iteration 7: 0/6 strict, RMSE 19.9'
+- label: V8a · yaw12 · Qw · ub-ins
+  model: V8a
+  suite: yaw12
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001_V8a_yaw12_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20261001_V8a_yaw12_Qw_ub-ins/table.md
+  note: 'V8 iteration 7: 0/12 strict, RMSE 24.4'
+- label: V8b · seat6 · Qw · ub-ins
+  model: V8b
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001_V8b_seat6_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001_V8b_seat6_Qw_ub-ins/table.md
+  note: 'V8 iteration 8: 0/6 strict, RMSE 19.9'
+- label: V8b · yaw12 · Qw · ub-ins
+  model: V8b
+  suite: yaw12
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001_V8b_yaw12_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20261001_V8b_yaw12_Qw_ub-ins/table.md
+  note: 'V8 iteration 8: 0/12 strict, RMSE 25.6'
+- label: V8c · seat6 · Qw · ub-ins
+  model: V8c
+  suite: seat6
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001_V8c_seat6_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001_V8c_seat6_Qw_ub-ins/table.md
+  note: 'V8 iteration 9: 0/6 strict, RMSE 19.3'
+- label: V8c · yaw12 · Qw · ub-ins
+  model: V8c
+  suite: yaw12
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001_V8c_yaw12_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20261001_V8c_yaw12_Qw_ub-ins/table.md
+  note: 'V8 iteration 9: 0/12 strict, RMSE 26.9'
+- label: V10a · seat6 · Qi · ub-ins
+  model: V10a
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10A_seat6_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10A_seat6_Qw_ub-ins/table.md
+  note: '2/6 strict, 3/6 engaged, RMSE 21.7'
+- label: V10a · seat6 · Qi · ub-ins
+  model: V10a
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10A_R2_seat6_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10A_R2_seat6_Qw_ub-ins/table.md
+  note: 'repeat: 3/6 strict, 4/6 engaged, RMSE 20.9'
+- label: V10a · yaw12 · Qi · ub-ins
+  model: V10a
+  suite: yaw12
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10A_yaw12_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10A_yaw12_Qw_ub-ins/table.md
+  note: '0/12 strict, 4/12 engaged; -15 deg: 6 unsafe, 6 aborts'
+- label: V10a · cell-s30 · Qi · ub-ins
+  model: V10a
+  suite: cell-s30
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10A_long30_urtip6_high
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 1
+  n_episodes: 1
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10A_long30_urtip6_high/index.json
+  note: 'urtip6_high x ud+6_r0: strict (wrap 106.2, h 0.23)'
+- label: V10a · seat6-1goal30 · Qi · ub-ins
+  model: V10a
+  suite: seat6-1goal30
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10A_seatonly30_seat6
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10A_seatonly30_seat6/*/index.json
+  note: '0/6 strict, 2/6 engaged'
+- label: V10a · under12 · Qi · ub-ins
+  model: V10a
+  suite: under12
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10A_from_under
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10A_from_under/*/index.json
+  note: '0/12, all under (h -9.4 to -12.1)'
+- label: V10b · seat6 · Qi · ub-ins
+  model: V10b
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10B_seat6_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10B_seat6_Qw_ub-ins/table.md
+  note: '0/6, RMSE 22.5'
+- label: V10b · yaw12 · Qi · ub-ins
+  model: V10b
+  suite: yaw12
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10B_yaw12_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 12
+  n_episodes: 12
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10B_yaw12_Qw_ub-ins/table.md
+  note: '0/12, RMSE 36.7'
+- label: V10c · seat6 · Qi · ub-ins
+  model: V10c
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10C_seat6_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10C_seat6_Qw_ub-ins/table.md
+  note: '0/6, RMSE 24.6'
+- label: V10d · seat6 · Qi · ub-ins
+  model: V10d
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10D_seat6_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10D_seat6_Qw_ub-ins/table.md
+  note: '0/6, RMSE 15.2'
+- label: V10e · seat6 · Qi · ub-ins
+  model: V10e
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10E_seat6_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10E_seat6_Qw_ub-ins/table.md
+  note: '0/6, RMSE 71.2'
+- label: V10f · seat6 · Qi · ub-ins
+  model: V10f
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10F_seat6_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10F_seat6_Qw_ub-ins/table.md
+  note: '0/6, RMSE 55.9'
+- label: V10g · seat6 · Qi · ub-ins
+  model: V10g
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10G_seat6_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10G_seat6_Qw_ub-ins/table.md
+  note: '0/6, RMSE 103.4'
+- label: V10h · seat6 · Qi · ub-ins
+  model: V10h
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10H_seat6_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10H_seat6_Qw_ub-ins/table.md
+  note: '0/6, 1 unsafe, RMSE 42.2'
+- label: V10i · seat6 · Qi · ub-ins
+  model: V10i
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10I_seat6_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10I_seat6_Qw_ub-ins/table.md
+  note: '0/6, RMSE 19.7'
+- label: V10j · seat6 · Qi · ub-ins
+  model: V10j
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10J_seat6_Qw_ub-ins
+  date: '2026-10-01'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10J_seat6_Qw_ub-ins/table.md
+  note: '0/6, RMSE 20.1'
+- label: V10k · seat6 · Qi · ub-ins
+  model: V10k
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10K_seat6_Qw_ub-ins
+  date: '2026-10-02'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10K_seat6_Qw_ub-ins/table.md
+  note: '0/6, RMSE 45.5'
+- label: V10l · seat6 · Qi · ub-ins
+  model: V10l
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10L_seat6_Qw_ub-ins
+  date: '2026-10-02'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10L_seat6_Qw_ub-ins/table.md
+  note: '0/6, RMSE 108.0'
+- label: V10m · seat6 · Qi · ub-ins
+  model: V10m
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10M_seat6_Qw_ub-ins
+  date: '2026-10-02'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10M_seat6_Qw_ub-ins/table.md
+  note: '0/6, RMSE 27.1'
+- label: V10n · seat6 · Qi · ub-ins
+  model: V10n
+  suite: seat6
+  cost: Qi
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V10N_seat6_Qw_ub-ins
+  date: '2026-10-02'
+  log_day: '2026-10-01'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V10N_seat6_Qw_ub-ins/table.md
+  note: '0/6, RMSE 49.0'
+- label: V2 · cell-s30 · Qw · ub-ins
+  model: V2
+  suite: cell-s30
+  cost: Qw
+  limits: ub-ins
+  path: data/lcs/mpc_eval/20261001-v10/20261001_V2_long30
+  date: '2026-10-02'
+  log_day: '2026-10-01'
+  n_cells: 2
+  n_episodes: 2
+  table: data/lcs/mpc_eval/20261001-v10/20261001_V2_long30/*/index.json
+  note: '09-26 params, stage 2 30 s: urtip strict (wrap 142.1, h 0.03); gv_01 engaged (81.4, h 1.94)'

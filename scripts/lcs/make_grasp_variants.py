@@ -20,6 +20,10 @@ UR ``pre_pick_1``/``pick`` poses move back along the tracking +z (tip -> wrist),
 nearer the fingertips. It logs the grasp and the belt's depth in the jaw at the end of every pick
 phase, then settles under the OSC and saves the held states + ``index.json``.
 
+``--ur-pivot-deg -30,-15,15,30`` (opt-in) builds nominal + one variant per angle: the UR
+``pre_pick_1``/``pick`` poses turn about the jaw's closing axis (approach x belt tangent) through
+the grasp point, so the belt crosses the 2F-85 pads at that angle.
+
 Run:
     uv run python scripts/lcs/make_grasp_variants.py --probe
     uv run python scripts/lcs/make_grasp_variants.py --set set1 --count 12 --seed 0
@@ -87,11 +91,14 @@ class Variant:
     ur_slide_mm: float = 0.0
     ur_roll_deg: float = 0.0
     ur_depth_mm: float = 0.0  # + = shallower: pick moved back along the UR tracking +z
+    ur_pivot_deg: float = 0.0  # UR pick turned about the jaw axis: the belt crosses the pads slanted
 
     def commanded(self) -> dict:
         out = {k: float(getattr(self, k)) for k in KNOBS}
         if self.ur_depth_mm:
             out["ur_depth_mm"] = float(self.ur_depth_mm)
+        if self.ur_pivot_deg:
+            out["ur_pivot_deg"] = float(self.ur_pivot_deg)
         return out
 
 
@@ -144,6 +151,14 @@ def variant_waypoints(nominal: list[Waypoint], frames: dict, v: Variant) -> list
                        v.franka_slide_mm, v.franka_roll_deg)
     T_u = grasp_offset(frames["ur"]["point"], frames["ur"]["tangent"],
                        v.ur_slide_mm, v.ur_roll_deg)
+    if v.ur_pivot_deg:  # about approach x tangent (the jaw's closing axis) through the grasp point
+        p, t = frames["ur"]["point"], frames["ur"]["tangent"]
+        pick = next(w for w in nominal if w.label == "pick")
+        axis = np.cross(pick.ur_mat()[:3, 2], t)
+        P = np.eye(4)
+        P[:3, :3] = rotation_about(axis, math.radians(v.ur_pivot_deg))
+        P[:3, 3] = p - P[:3, :3] @ p
+        T_u = P @ T_u
     out = copy.deepcopy(nominal)
     for w in out:
         if w.label == "pick":
@@ -539,6 +554,28 @@ def run_depth(args: argparse.Namespace, set_dir: Path) -> int:
     return 0
 
 
+def run_pivot(args: argparse.Namespace, set_dir: Path) -> int:
+    angles = [float(x) for x in args.ur_pivot_deg.split(",") if x.strip()]
+    variants = [Variant("up+0")] + [Variant(f"up{a:+g}", ur_pivot_deg=a) for a in angles]
+    logger.info(f"[PIVOT] {args.set}: {[v.id for v in variants]}")
+    set_dir.mkdir(parents=True, exist_ok=True)
+    snaps, failed = phase_a(variants, args.params)
+    rows = list(phase_b(variants, snaps, failed, args.lcm_url, args.reference, set_dir,
+                        jaw=True).values())
+    index = {"set": args.set, "created": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+             "kind": "ur_pivot", "pivots_deg": angles,
+             "params": str(args.params), "params_sha256": sha256(args.params),
+             "nominal_start": str(args.reference),
+             "nominal_start_sha256": sha256(args.reference),
+             "ur_pivot_deg": "pre_pick_1 + pick UR poses rotated about approach x belt tangent "
+                             "(the jaw's closing axis) through the grasp point",
+             "variants": rows}
+    (set_dir / "index.json").write_text(json.dumps(index, indent=2) + "\n")
+    print_table(rows)
+    logger.success(f"[PIVOT] {set_dir}: {sum(r['held'] for r in rows)}/{len(rows)} held")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--probe", action="store_true", help="single-knob feasibility sweep")
@@ -557,11 +594,15 @@ def main() -> int:
     parser.add_argument("--ur-depth-mm", default=None,
                         help="opt-in: comma list of shallower UR pick depths (mm) to build")
     parser.add_argument("--repeats", type=int, default=1, help="--ur-depth-mm runs per depth")
+    parser.add_argument("--ur-pivot-deg", default=None,
+                        help="opt-in: comma list of UR pick pivots (deg) about the jaw axis")
     args = parser.parse_args()
     configure_logging()
     set_dir = args.root / args.set
     if args.ur_depth_mm is not None:
         return run_depth(args, set_dir)
+    if args.ur_pivot_deg is not None:
+        return run_pivot(args, set_dir)
     return run_probe(args, set_dir) if args.probe else run_set(args, set_dir)
 
 

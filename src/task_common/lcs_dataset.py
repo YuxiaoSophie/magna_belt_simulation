@@ -57,7 +57,13 @@ KEYS_REQUIRED = ("pcd", "pcd_belt", "pcd_kinematic", "state", "actions", "utime"
 KEYS_OPTIONAL = (
     "pcd_rgb", "trajectory_label", "point_cloud_source", "record_kinematic_points",
     "kinematic_model_names", "kinematic_body_name_patterns", "kinematic_sampled_body_names",
+    "pcd_belt_seg",
 )
+# ``pcd_belt_seg``: segmented belt cloud in the known large-pulley frame (task_common.belt_cloud).
+BELT_SEG_KEY = "pcd_belt_seg"
+BELT_SEG_META_KEYS = ("version", "frame", "pulley_pose7_known", "noise_spec", "seg_spec",
+                      "source")
+BELT_SEG_SOURCES = ("record", "offline")
 LEGACY_CLOUD_KEYS = ("pcd_kept", "pcd_removed")
 EXTRA_PREFIX = "sim_"
 _RESERVED_EXTRAS = ("step", "time", "meta")
@@ -350,13 +356,15 @@ class EpisodeWriter:
         self._rgb: list[np.ndarray] = []
         self._belt: list[np.ndarray] = []
         self._kin: list[np.ndarray] = []
+        self._seg: list[np.ndarray] = []
         self._extras: dict[str, list] = {}
 
     def __len__(self) -> int:
         return len(self._steps)
 
     def add_frame(self, step: int, sim_time: float, state, action, pcd, pcd_belt,
-                  pcd_kinematic=None, extras: dict | None = None, pcd_rgb=None) -> None:
+                  pcd_kinematic=None, extras: dict | None = None, pcd_rgb=None,
+                  pcd_belt_seg=None) -> None:
         step = int(step)
         if self._steps and step - self._steps[-1] != self.sample_steps:
             raise ValueError(f"step {step}: expected {self._steps[-1] + self.sample_steps} "
@@ -374,6 +382,9 @@ class EpisodeWriter:
             rgb = np.asarray(pcd_rgb, dtype=np.uint8)
             if rgb.shape != pcd.shape:
                 raise ValueError(f"pcd_rgb: shape {rgb.shape} != pcd {pcd.shape}")
+        if self._steps and (pcd_belt_seg is None) != (not self._seg):
+            raise ValueError("pcd_belt_seg: give it on every frame or on none")
+        seg = None if pcd_belt_seg is None else _as_xyz(pcd_belt_seg, BELT_SEG_KEY).copy()
         extras = dict(extras or {})
         for name in extras:
             if name in _RESERVED_EXTRAS or name.startswith(EXTRA_PREFIX) or not name.isidentifier():
@@ -392,6 +403,8 @@ class EpisodeWriter:
         self._rgb.append(rgb)
         self._belt.append(belt)
         self._kin.append(kin)
+        if seg is not None:
+            self._seg.append(seg)
 
     def arrays(self, trajectory_label: str, extras_meta: dict | None = None) -> dict:
         """The exact ``{key: array}`` payload :meth:`write` saves."""
@@ -429,6 +442,11 @@ class EpisodeWriter:
                 out[EXTRA_PREFIX + name] = np.stack(values)
             except ValueError:
                 out[EXTRA_PREFIX + name] = _ragged(values)
+        if self._seg:
+            if not isinstance(meta.get("belt_seg"), dict):
+                raise ValueError("pcd_belt_seg needs extras_meta['belt_seg'] "
+                                 "(task_common.belt_cloud.belt_seg_meta)")
+            out[BELT_SEG_KEY] = _ragged(self._seg)
         return out
 
     def write(self, path, trajectory_label: str, extras_meta: dict | None = None,
@@ -456,6 +474,33 @@ class EpisodeWriter:
 
 def _fail(path: Path, key: str, message: str) -> None:
     raise ValueError(f"{path.name}: {key}: {message}")
+
+
+def _check_belt_seg(path: Path, data, T: int, summary: dict) -> None:
+    arr = data[BELT_SEG_KEY]
+    if arr.dtype != object or arr.shape != (T,):
+        _fail(path, BELT_SEG_KEY, f"expected a ({T},) object array, got {arr.shape} {arr.dtype}")
+    counts = []
+    for i, xyz in enumerate(arr):
+        ok = isinstance(xyz, np.ndarray) and xyz.dtype == np.float32 and xyz.ndim == 2
+        if not ok or xyz.shape[1] != 3:
+            got = (getattr(xyz, "shape", None), getattr(xyz, "dtype", None))
+            _fail(path, BELT_SEG_KEY, f"[{i}] expected (M, 3) float32, got {got}")
+        if not np.all(np.isfinite(xyz)):
+            _fail(path, BELT_SEG_KEY, f"[{i}] non-finite points")
+        counts.append(xyz.shape[0])
+    try:
+        block = json.loads(str(data["sim_meta"]))["belt_seg"]
+    except (KeyError, TypeError, json.JSONDecodeError):
+        _fail(path, BELT_SEG_KEY, "sim_meta has no belt_seg block")
+    missing = [k for k in BELT_SEG_META_KEYS if k not in block]
+    if missing:
+        _fail(path, "sim_meta", f"belt_seg lacks {missing}")
+    if block["source"] not in BELT_SEG_SOURCES:
+        _fail(path, "sim_meta", f"belt_seg source {block['source']!r} not in {BELT_SEG_SOURCES}")
+    if np.shape(block["pulley_pose7_known"]) != (7,):
+        _fail(path, "sim_meta", "belt_seg pulley_pose7_known is not a 7-vector")
+    summary["points"][BELT_SEG_KEY] = (min(counts), max(counts))
 
 
 def validate_episode(path, legacy: bool = False, period_us: int | None = SAMPLE_PERIOD_US) -> dict:
@@ -516,6 +561,8 @@ def validate_episode(path, legacy: bool = False, period_us: int | None = SAMPLE_
                 _fail(path, key,
                       f"expected {BELT_POINTS} points per frame, got {sorted(set(counts))}")
             summary["points"][key] = (min(counts), max(counts))
+        if BELT_SEG_KEY in files:
+            _check_belt_seg(path, data, T, summary)
         if legacy and "pcd_belt" not in files and min(summary["points"]["pcd_kept"]) < 1:
             _fail(path, "pcd_kept", "empty reconstruction target")
 

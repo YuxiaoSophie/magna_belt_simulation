@@ -5,7 +5,10 @@ No sim, no GPU, no LCM traffic. Against an ``lcs_learning`` deploy export: E0 lo
 E1 preprocessing bit-exact, E2 encoder vs the torch reference ``z``, E3 LCS step vs the torch PGD,
 E4 timing, E5 ``LATENT_STATE`` round trip, E6 ``DemoGoals`` on a synthetic file, E7 belt metrics,
 E8 ``LatentDecoder`` vs the torch decodes in ``decoder.npz`` beside the deploy (``[SKIP]`` without it),
-E9 the ``B(z)`` state head vs the export's references (``[SKIP]`` for a fixed-B export).
+E9 the ``B(z)`` state head vs the export's references (``[SKIP]`` for a fixed-B export),
+E10 (``belt_cloud_pointnet`` deploys only) resample determinism + permutation invariance of z.
+A ``belt_cloud_pointnet`` deploy runs E0-E4 on its segmented pulley-frame clouds (``pc_raw`` ->
+``pc_in``), z to REF_Z_F32_TOL_REL x max(1, max|z|) of the float32 torch reference.
 ``[SKIP]`` (exit 0) if the deploy export is absent.
 
 Run:
@@ -32,12 +35,21 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
+from task_common import belt_cloud as bc
 from task_common import belt_metrics as bm
 from task_common import latent_encoder as le
 from task_common.lcs_dataset import BELT_BODIES, BELT_POINTS, STATE_DIM
 
 DEFAULT_DEPLOY = Path("/home/hienbui/git/lcs_learning/outputs/sim_belt_ablation_20260924/"
                       "ckpt_decoded_only/deploy/deploy.npz")
+
+# float32 batch-order noise of the torch reference z, x max(1, max|z|): 4 x measured cpu max
+# 1.5e-6 (data/lcs/realfirst/v1_1/f32_tol/measure.md)
+REF_Z_F32_TOL_REL = 1e-5
+
+
+def _belt_cloud(ctx: SimpleNamespace) -> bool:
+    return isinstance(ctx.enc, le.BeltCloudPointNetEncoder)
 
 
 def _require(ok: bool, message: str) -> None:
@@ -50,6 +62,10 @@ CHECKS: list[tuple[str, callable]] = []
 
 class Skip(Exception):
     pass
+
+
+class NotApplicable(Exception):
+    """Not printed, so older deploys keep their output."""
 
 
 def check(title: str):
@@ -65,7 +81,15 @@ def check_e0(ctx: SimpleNamespace) -> str:
     ctx.enc = le.LatentEncoder.load(ctx.deploy)
     ctx.lcs = le.LearnedLcs.load(ctx.deploy)
     enc, lcs = ctx.enc, ctx.lcs
-    a = json.loads(ctx.report.read_text())["checkpoint_args"]
+    report = json.loads(ctx.report.read_text())
+    a = report["checkpoint_args"]
+    belt_cloud = _belt_cloud(ctx)
+    if belt_cloud:
+        # The model has no proprio/belt inputs whatever the trainer's CLI defaults say.
+        a = {**a, "belt_num_points": 0, "proprio_dim": 0}
+        _require(report.get("model") == le.BELT_CLOUD_TYPE and a.get("model") == le.BELT_CLOUD_TYPE,
+                 f"report model {report.get('model')!r} / args {a.get('model')!r}")
+        _require(enc.frame == report.get("frame") == bc.SEG_FRAME, f"frame {enc.frame!r}")
     dims = {"num_points": (enc.num_points, a["num_points"]),
             "belt_num_points": (enc.belt_num_points, a["belt_num_points"]),
             "proprio_dim": (enc.proprio_dim, a["proprio_dim"]),
@@ -87,7 +111,8 @@ def check_e0(ctx: SimpleNamespace) -> str:
         _require(np.array_equal(lcs.z_goal, lcs.stage_goals[1]), "z_goal != z_goal_stage2")
         _require(lcs.goal_frames is not None, "demo export without goal_frames")
     _require(lcs.goal_source != "", "empty goal_source")
-    return (f"dims match checkpoint_args (pts {enc.num_points}, belt {enc.belt_num_points}, "
+    kind = f"{le.BELT_CLOUD_TYPE} ({enc.frame}); " if belt_cloud else ""
+    return (f"{kind}dims match checkpoint_args (pts {enc.num_points}, belt {enc.belt_num_points}, "
             f"prop {enc.proprio_dim}, feat {enc.point_feat_dim}, z {enc.latent_dim}, u {lcs.n_u}, "
             f"lam {lcs.n_lam}); F identity {f_err:.1e}; goal_source {lcs.goal_source!r}; "
             f"stage_goals {lcs.stage_goals.shape[0]} row(s); goal_tol {lcs.goal_tol:.3f}")
@@ -96,6 +121,14 @@ def check_e0(ctx: SimpleNamespace) -> str:
 @check("E1 preprocessing bit-exact")
 def check_e1(ctx: SimpleNamespace) -> str:
     r = ctx.ref
+    if _belt_cloud(ctx):
+        n = ctx.enc.num_points
+        for k, pc in enumerate(r["pc_raw"]):
+            _require(np.array_equal(ctx.enc.preprocess(pc), r["pc_in"][k]),
+                     f"frame {k}: preprocess != pc_in")
+        n_sub = sum(len(pc) >= n for pc in r["pc_raw"])
+        return (f"K={len(r['pc_raw'])} resample_deterministic(pc_raw) == pc_in bit-exact "
+                f"(M >= {n}: {n_sub}, M < {n}: {len(r['pc_raw']) - n_sub})")
     n_lin = n_tile = 0
     for k, pc in enumerate(r["pc_raw"]):
         _require(np.array_equal(ctx.enc.preprocess(pc), r["pc_resized"][k]),
@@ -113,6 +146,8 @@ def check_e1(ctx: SimpleNamespace) -> str:
 @check("E2 encoder vs torch z")
 def check_e2(ctx: SimpleNamespace) -> str:
     r = ctx.ref
+    if _belt_cloud(ctx):
+        return _e2_belt_cloud(ctx)
     z = np.stack([ctx.enc.encode(r["pc_raw"][k], r["prop"][k], r["belt_raw"][k])
                   for k in range(len(r["z"]))])
     z_err = float(np.abs(z - r["z"]).max())
@@ -127,9 +162,35 @@ def check_e2(ctx: SimpleNamespace) -> str:
             f"(|z| max {np.abs(r['z']).max():.2f})")
 
 
+def _e2_belt_cloud(ctx: SimpleNamespace) -> str:
+    r, enc = ctx.ref, ctx.enc
+    z = np.stack([enc.encode(pc) for pc in r["pc_raw"]])
+    zb = enc.encode_batch(list(r["pc_raw"]))
+    s = max(1.0, float(np.abs(r["z"]).max()))  # float32 torch reference: error scales with |z|
+    with np.load(ctx.deploy, allow_pickle=False) as d:
+        rel = max(REF_Z_F32_TOL_REL, float(d["reference_z_f32_tol_rel"])
+                  if "reference_z_f32_tol_rel" in d.files else 0.0)
+    tol = rel * s
+    z_err, b_err = float(np.abs(z - r["z"]).max()), float(np.abs(zb - r["z"]).max())
+    g_ref = r["pc_global"]
+    g_err = float(np.abs(enc.pc_global(r["pc_in"]) - g_ref).max())
+    g_tol = 1e-5 * max(1.0, float(np.abs(g_ref).max()))
+    _require(z.dtype == np.float64 and z.shape == r["z"].shape, f"z {z.dtype} {z.shape}")
+    _require(z_err <= tol, f"max |encode - z| = {z_err:.2e} > {tol:.1e}")
+    _require(b_err <= tol, f"max |encode_batch - z| = {b_err:.2e} > {tol:.1e}")
+    _require(g_err <= g_tol, f"max |pc_global - ref| = {g_err:.2e} > {g_tol:.1e}")
+    _require(not enc.last_empty.any(), "a reference cloud flagged empty")
+    return (f"max |encode - z| {z_err:.2e} ({z_err / s:.2e} x max(1, |z|max), "
+            f"tol {rel:.0e} x max = {tol:.1e}), encode_batch {b_err:.2e}, "
+            f"pc_global {g_err:.2e} (|z| max {s:.2f})")
+
+
 @check("E3 learned LCS step")
 def check_e3(ctx: SimpleNamespace) -> str:
     r, lcs = ctx.ref, ctx.lcs
+    with np.load(ctx.deploy, allow_pickle=False) as d:
+        _require("A_p" not in d.files, "state_ee deploy (A_p/E_p): LearnedLcs.step has no EE "
+                 "input, the references step [u; p]")
     fixed, loose, lam_min = [], [], math.inf
     for k in range(len(r["z"])):
         zn, lam, _ = lcs.step(r["z"][k], r["u"][k], iters=25, tol=0.0)
@@ -145,7 +206,8 @@ def check_e3(ctx: SimpleNamespace) -> str:
     _require(e_fixed <= 1e-6 * s,
              f"step(25, 0) vs z_next_pgd_trainfixed {e_fixed:.2e} > {1e-6 * s:.1e}")
     _require(e_pgd <= 1e-5 * s, f"step(100, 1e-5) vs z_next_pgd {e_pgd:.2e} > {1e-5 * s:.1e}")
-    _require(e_exact <= 1e-2, f"step(100, 1e-5) vs z_next_exact {e_exact:.2e} > 1e-2")
+    tol = getattr(ctx, "exact_tol", 1e-2)
+    _require(e_exact <= tol, f"step(100, 1e-5) vs z_next_exact {e_exact:.2e} > {tol:.0e}")
     _require(lam_min >= 0.0, f"lam < 0 ({lam_min})")
     _require(lcs.whitened_dist(lcs.z_goal) == 0.0, "whitened_dist(z_goal) != 0")
     Z, L = lcs.rollout(r["z"][0], np.stack([r["u"][0]] * 3))
@@ -161,7 +223,8 @@ def check_e3(ctx: SimpleNamespace) -> str:
 def check_e4(ctx: SimpleNamespace) -> str:
     r = ctx.ref
     k = int(np.argmax([len(p) for p in r["pc_raw"]]))
-    args = (r["pc_raw"][k], r["prop"][k], r["belt_raw"][k])
+    belt_cloud = _belt_cloud(ctx)
+    args = (r["pc_raw"][k],) if belt_cloud else (r["pc_raw"][k], r["prop"][k], r["belt_raw"][k])
     ctx.enc.encode(*args)
     t0 = time.perf_counter()
     for _ in range(50):
@@ -182,6 +245,8 @@ def check_e4(ctx: SimpleNamespace) -> str:
         _require(t_head < 0.1, f"head_out {t_head:.4f} ms >= 0.1 ms")
         head = f"; head_out mean {t_head:.4f} ms"
     warn = " [WARN encode >= 20 ms target]" if t_enc >= 20.0 else ""
+    if belt_cloud:
+        warn = " [WARN encode > 2 ms target]" if t_enc > 2.0 else ""
     return (f"encode mean {t_enc:.2f} ms over 50 ({len(args[0])} pts); step mean "
             f"{t_step:.3f} ms{head}{warn}")
 
@@ -353,6 +418,44 @@ def check_e9(ctx: SimpleNamespace) -> str:
             f"(B0 {np.linalg.norm(lcs.B):.4f}), |dB|/|B0| p95 {np.percentile(rel, 95):.3f}")
 
 
+@check("E10 belt-cloud resample + permutation invariance")
+def check_e10(ctx: SimpleNamespace) -> str:
+    if not _belt_cloud(ctx):
+        raise NotApplicable
+    enc, r = ctx.enc, ctx.ref
+    rng = np.random.default_rng(0)
+    n = enc.num_points
+    z_err = 0.0
+    for pc in r["pc_raw"]:
+        pc = np.asarray(pc, dtype=np.float32)
+        a, empty = bc.resample_deterministic(pc, n)
+        _require(not empty and a.shape == (n, 3) and a.dtype == np.float32, f"resample {a.shape}")
+        _require(np.array_equal(bc.resample_deterministic(pc.copy(), n)[0], a),
+                 "resample not deterministic")
+        perm = pc[rng.permutation(len(pc))]
+        _require(np.array_equal(bc.resample_deterministic(perm, n)[0], a),
+                 "resample depends on the point order")
+        z = enc.encode(pc)
+        z_err = max(z_err, float(np.abs(enc.encode(perm) - z).max()),
+                    float(np.abs(enc._fuse(enc.pc_global(a[rng.permutation(n)])) - z).max()))
+    _require(z_err <= 1e-9, f"z not permutation invariant: {z_err:.2e} > 1e-9")
+    small = np.asarray(r["pc_raw"][0], dtype=np.float32)[:n // 3]
+    tiled, empty = bc.resample_deterministic(small, n)
+    _require(not empty and len(np.unique(tiled, axis=0)) == len(np.unique(small, axis=0)),
+             f"M={len(small)} < {n}: cyclic repeat does not cover the cloud")
+    z_small = enc.encode(small)
+    _require(not enc.last_empty and np.all(np.isfinite(z_small)), "M < n encode")
+    z0 = enc.encode(np.zeros((0, 3), dtype=np.float32))
+    _require(enc.last_empty is True and np.all(np.isfinite(z0)), "M == 0 not flagged empty")
+    zb = enc.encode_batch([small, np.zeros((0, 3)), r["pc_raw"][0]])
+    _require(enc.last_empty.tolist() == [False, True, False], f"batch flags {enc.last_empty}")
+    _require(np.abs(zb[1] - z0).max() <= 1e-12 and np.abs(zb[0] - z_small).max() <= 1e-12,
+             "encode_batch != encode")
+    return (f"K={len(r['pc_raw'])}: resample deterministic + order-free, z under input and "
+            f"resampled-point permutations max {z_err:.1e}; M={len(small)} cyclic, M=0 flagged "
+            "empty (finite z)")
+
+
 def _quat_z(deg: float) -> list[float]:
     h = math.radians(deg) / 2.0
     return [math.cos(h), 0.0, 0.0, math.sin(h)]
@@ -362,6 +465,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--deploy", type=Path, default=DEFAULT_DEPLOY,
                         help="deploy.npz (reference_vectors.npz + report.json beside it)")
+    parser.add_argument("--exact-tol", type=float, default=1e-2,
+                        help="E3 loose-PGD vs exact bound; MPPI rolls out the train-fixed PGD only")
     args = parser.parse_args()
     reference = args.deploy.parent / "reference_vectors.npz"
     report = args.deploy.parent / "report.json"
@@ -375,7 +480,8 @@ def main() -> int:
     # pc_raw is a ragged object array in our own export.
     with np.load(reference, allow_pickle=True) as d:
         ref = {k: d[k] for k in d.files}
-    ctx = SimpleNamespace(tmp=tmp, deploy=args.deploy, report=report, ref=ref)
+    ctx = SimpleNamespace(tmp=tmp, deploy=args.deploy, report=report, ref=ref,
+                          exact_tol=args.exact_tol)
     exit_code = 0
     try:
         for name, fn in CHECKS:
@@ -383,6 +489,8 @@ def main() -> int:
                 detail = fn(ctx)
             except Skip as exc:
                 print(f"[SKIP] {name}: {exc}")
+                continue
+            except NotApplicable:
                 continue
             except AssertionError as exc:
                 print(f"[FAIL] {name}: {exc}", file=sys.stderr)

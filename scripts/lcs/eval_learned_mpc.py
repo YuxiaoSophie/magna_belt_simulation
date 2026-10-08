@@ -10,13 +10,19 @@ LCM URL, and steps the sim in lock-step with the OSC: every 15 steps the harness
 controller's UR line; grippers stay at the start-state commands. The episode ends on the
 controller's end marker (+ ``--settle-s``), ``--max-episode-s`` (``timeout``) or a safety abort.
 Episodes are classified (``outcome.classify_episode``), scored against the demo's belt/poses
-(``demo_goals.npz``) and written in the dataset format plus ``index.json``.
+(``demo_goals.npz``) and written in the dataset format plus ``index.json``. Opt-in ``--reset
+scripted``: a held episode is followed by ``scripted_reset.py`` (lift, return to the start poses
+with jitter) instead of the next restore; ``index.json`` then has ``reset_before`` rows and a
+``budget`` block. Opt-in ``--controller mppi``: ``scripts/lcs/mppi_controller_node.py`` replaces
+the C++ controller (same markers and channels; ``--params`` ignored); ``--mppi-clearance`` also
+exports ``<out>/clearance_model.npz`` at the first start state and runs the node with it.
 
 Run:
     uv run python scripts/lcs/eval_learned_mpc.py --mode baseline --repeats 2
     uv run python scripts/lcs/eval_learned_mpc.py --mode learned --repeats 2
     uv run python scripts/lcs/eval_learned_mpc.py --mode learned \
         --start-states data/lcs/start_states/grasp_variants/set1 --variants gv_00,gv_03
+    uv run python scripts/lcs/eval_learned_mpc.py --mode learned --controller mppi --mppi-debug
 """
 
 from __future__ import annotations
@@ -27,6 +33,7 @@ import json
 import math
 import sys
 import time
+import zlib
 from collections import Counter
 from pathlib import Path
 
@@ -63,20 +70,26 @@ from round_belt_task.waypoints import (
     MAGNA_PARAMS_SIM_YAML,
     load_pre_mpc_segment,
 )
+from task_common import belt_cloud as bc
 from task_common import belt_metrics as bm
+from task_common import clearance_model as cm
 from task_common import lcs_dataset as lcs
 from task_common import sim_snapshot
 from task_common.latent_encoder import (
+    BeltCloudPointNetEncoder,
     DemoGoals,
     LatentEncoder,
     LearnedLcs,
+    encoder_input,
     latent_state_message,
 )
+from task_common.lcm_contract import LcmChannels
 from task_common.magna_process import (
     CONTROLLER_MARKERS,
     CONTROLLER_STARTED,
     MAGNA_WORKTREE,
     AssemblyControllerProcess,
+    MppiControllerProcess,
     check_private_url,
     parse_pre_mpc_line,
     parse_stage_line,
@@ -108,8 +121,26 @@ PRED_ITERS = 25
 N_KNOTS = 7
 END_POLL_S = 0.05
 UR_EXACT_DT_TOL_S = 1e-6  # line knot times are utime-quantised (1 us)
+RESET_ARG_DEFAULTS = {"reset": "snapshot", "reset_spec": []}
+CLOUD_ARG_DEFAULTS = {"cloud_noise": "off", "belt_seg": False}
+CONTROLLERS = ("magna", "mppi")
+DEFAULT_MPPI_CONFIG = REPO_ROOT / "data" / "lcs" / "realfirst" / "v1" / "mppi.yaml"
+MPPI_ARG_DEFAULTS = {"controller": "magna", "mppi_config": DEFAULT_MPPI_CONFIG,
+                     "mppi_goal": None, "mppi_stages": "last", "mppi_max_duration_s": 30.0,
+                     "mppi_debug": False}
+# Dropped from index.args at default even with --controller mppi (pre-clearance index identity).
+CLEARANCE_ARG_DEFAULTS = {"mppi_clearance": False, "mppi_clearance_ur_min_mm": cm.DEFAULT_UR_MIN_MM,
+                          "mppi_clearance_franka_min_mm": cm.DEFAULT_FRANKA_MIN_MM}
+# Demo transport (latent_waypoints.py goals, track mode, demo action prior): dropped from
+# index.args at default.
+TRANSPORT_ARG_DEFAULTS = {"mppi_waypoints": None, "mppi_goal_mode": "stage",
+                          "mppi_demo_actions": None, "mppi_demo_offset_frames": 0}
+# Grasp-adaptive reference demo (node --waypoint-bank): dropped from index.args at default.
+BANK_ARG_DEFAULTS = {"mppi_waypoint_bank": None, "mppi_bank_knn": 1}
 # Where the frame's command comes from (sim_cmd_source).
 CMD_RESPONSE, CMD_IN_FORCE, CMD_NONE = 0, 1, 2
+CMD_PREFIX = 3  # demo-prefix replay before the controller starts (demo_prefix.py)
+PREFIX_ARG_DEFAULTS = {"prefix_demos": None, "prefix_frac": 0.0, "prefix_offset_to_node": None}
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -151,6 +182,74 @@ def create_parser() -> argparse.ArgumentParser:
                         "of the plan in force / line(t+dt) - line(t) (fresh exact-dt line: line "
                         "end - latent ee_ur = u0); knot1_minus_measured = the pre-2026-09-25 "
                         "definition (matches models trained on it)")
+    p.add_argument("--cloud-noise", default=CLOUD_ARG_DEFAULTS["cloud_noise"],
+                   metavar="PRESET|JSON",
+                   help="the sensor cloud (encoder input + pcd/pcd_rgb) is the noised one: "
+                        f"{sorted(bc.CLOUD_NOISE_PRESETS)} or a .json of CloudNoiseSpec fields "
+                        "(RNG [crc32(start id), repeat, 11])")
+    p.add_argument("--belt-seg", action="store_true", default=CLOUD_ARG_DEFAULTS["belt_seg"],
+                   help="also store pcd_belt_seg (colour-segmented belt, known pulley frame)")
+    p.add_argument("--reset", choices=("snapshot", "scripted"),
+                   default=RESET_ARG_DEFAULTS["reset"],
+                   help="between episodes: snapshot restore, or scripted_reset.py (lift, return "
+                        "to the start poses + jitter) after a held episode of the same start, "
+                        "snapshot fallback = human reset")
+    p.add_argument("--reset-spec", nargs="*", default=RESET_ARG_DEFAULTS["reset_spec"],
+                   metavar="KEY=VALUE", help="scripted reset: ResetSpec overrides")
+    f = PREFIX_ARG_DEFAULTS
+    p.add_argument("--prefix-demos", default=f["prefix_demos"], metavar="JSON|PATH",
+                   help="demo-prefix replay: {'<set>/<variant>' (a snapshot: its stem): demo "
+                        "episode npz} as JSON text or a .json file")
+    p.add_argument("--prefix-frac", type=float, default=f["prefix_frac"],
+                   help="before the controller starts, replay the start's demo up to this "
+                        "fraction (0..1: motion start..pre_place_2 latch, 1..2: latch..first "
+                        "hold:place_3; 0 = off); recorded with sim_cmd_source 3")
+    p.add_argument("--prefix-offset-to-node", action=argparse.BooleanOptionalAction,
+                   default=f["prefix_offset_to_node"],
+                   help="mppi: --mppi-demo-offset-frames = the prefix end frame, per episode "
+                        "(default: on with --mppi-goal waypoints or --mppi-demo-actions)")
+    d = MPPI_ARG_DEFAULTS
+    p.add_argument("--controller", choices=CONTROLLERS, default=d["controller"],
+                   help="learned mode: magna's C++ assembly controller, or "
+                        "scripts/lcs/mppi_controller_node.py (same markers/channels)")
+    p.add_argument("--mppi-config", type=Path, default=d["mppi_config"],
+                   help="mppi: MppiParams yaml")
+    p.add_argument("--mppi-goal", choices=("deploy", "demo_goals", "waypoints"),
+                   default=d["mppi_goal"],
+                   help="mppi: latent goals from the deploy, --demo-goals (default "
+                        "demo_goals when that file exists, else deploy) or --mppi-waypoints")
+    p.add_argument("--mppi-stages", choices=("last", "all"), default=d["mppi_stages"],
+                   help="mppi: the last goal only (one stage) or every goal as a stage")
+    p.add_argument("--mppi-max-duration-s", type=float, default=d["mppi_max_duration_s"],
+                   help="mppi: stage timeout (latent time)")
+    p.add_argument("--mppi-debug", action="store_true", default=d["mppi_debug"],
+                   help="mppi: the node publishes LEARNED_MPC_DEBUG (C++ layout)")
+    c = CLEARANCE_ARG_DEFAULTS
+    p.add_argument("--mppi-clearance", action="store_true", default=c["mppi_clearance"],
+                   help="mppi: 2F-85 / Franka-hand clearance vs plate + pulleys in the MPPI cost "
+                        "(model exported at the first start state)")
+    p.add_argument("--mppi-clearance-ur-min-mm", type=float,
+                   default=c["mppi_clearance_ur_min_mm"], help="mppi clearance: UR set minimum")
+    p.add_argument("--mppi-clearance-franka-min-mm", type=float,
+                   default=c["mppi_clearance_franka_min_mm"],
+                   help="mppi clearance: Franka set minimum (seed demos' rule)")
+    t = TRANSPORT_ARG_DEFAULTS
+    p.add_argument("--mppi-waypoints", type=Path, default=t["mppi_waypoints"],
+                   help="mppi: latent_waypoints.py artifact (with --mppi-goal waypoints)")
+    p.add_argument("--mppi-goal-mode", choices=("stage", "track"), default=t["mppi_goal_mode"],
+                   help="mppi: stage goals, or track the demo's per-frame latents (waypoints)")
+    p.add_argument("--mppi-demo-actions", default=t["mppi_demo_actions"], metavar="auto|PATH",
+                   help="mppi: demo action prior inputs (prior_alpha / prior_weight in the "
+                        "config); auto = the waypoints artifact's")
+    p.add_argument("--mppi-demo-offset-frames", type=int, default=t["mppi_demo_offset_frames"],
+                   help="mppi: demo progress index at the node's first latent")
+    b = BANK_ARG_DEFAULTS
+    p.add_argument("--mppi-waypoint-bank", type=Path, default=b["mppi_waypoint_bank"],
+                   metavar="BANK_JSON",
+                   help="mppi (with --mppi-goal waypoints): per episode the node picks the bank "
+                        "demo with the nearest initial latent (latent_waypoints.py --bank-out)")
+    p.add_argument("--mppi-bank-knn", type=int, default=b["mppi_bank_knn"],
+                   help="mppi bank: mean of the k nearest demos (1 = nearest only)")
     return p
 
 
@@ -305,6 +404,11 @@ class EvalContext:
     snaps: dict = dataclasses.field(default_factory=dict)
     controller_info: dict | None = None
     learned_mpc_meta: dict | None = None  # recording meta.json "learned_mpc" (sans start)
+    cloud: dict | None = None  # collect_lcs_dataset.cloud_options (+ "origins")
+    cloud_rng: np.random.Generator | None = None
+    reset: dict | None = None  # --reset scripted: {module, spec, rng, homes}
+    mppi: dict | None = None  # --controller mppi: _mppi_options
+    prefix: dict | None = None  # --prefix-frac > 0: _prefix_options
 
     @property
     def plate_top_z(self) -> float:
@@ -441,7 +545,7 @@ def build_writer(frames: list[dict], pcd: bool,
         cloud = fr["cloud"] if pcd else np.zeros((1, 3), np.float32)
         writer.add_frame(fr["sim_step"], fr["time"], fr["prop"], action, cloud, fr["belt_pts"],
                          lcs.kinematic_points(), pcd_rgb=fr.get("pcd_rgb") if pcd else None,
-                         extras={
+                         pcd_belt_seg=fr.get("pcd_belt_seg"), extras={
                              "ee_franka": fr["ee_f"], "ee_ur": fr["ee_u"],
                              "cmd_knot0_franka": fr["knot0"], "cmd_knot1_franka": fr["knot1"],
                              "cmd_knots_franka": fr["knots"],
@@ -471,23 +575,33 @@ def build_writer(frames: list[dict], pcd: bool,
                              "action_knot1_minus_measured":
                                  frame_action(fr, "knot1_minus_measured"),
                              "realised_delta": realised[t],
+                             **cli.cloud_feature_extras(fr),
                          })
     return writer, track
 
 
-def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int) -> dict:
+def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int,
+                from_reset: dict | None = None) -> dict:
+    """``from_reset``: the scripted reset's report; the episode starts from the current state."""
     args, bridge, n = ctx.args, sim.bridge, SAMPLE_STEPS
     dt = sim.frame_dt
     t0 = time.perf_counter()
     timing: dict[str, float] = {}
     name = f"episode_{state.id}_{repeat}"
-    row = {"file": f"{name}.npz", "start_state": state.to_dict(), "repeat": repeat,
+    start = state.to_dict()
+    if from_reset is not None:
+        start.update(from_reset=True, jitter=from_reset["jitter"])
+    row = {"file": f"{name}.npz", "start_state": start, "repeat": repeat,
            "mode": ctx.mode}
-    snap = ctx.snaps.get(state.id)
-    if snap is None:
-        snap = ctx.snaps[state.id] = sim_snapshot.load(state.file)
-    sim.restore(snap, settle_steps=0)
+    if from_reset is None:
+        snap = ctx.snaps.get(state.id)
+        if snap is None:
+            snap = ctx.snaps[state.id] = sim_snapshot.load(state.file)
+        sim.restore(snap, settle_steps=0)
     timing["restore"] = time.perf_counter() - t0
+    if ctx.cloud is not None:
+        ctx.cloud_rng = np.random.default_rng([zlib.crc32(state.id.encode()), repeat,
+                                               cli.CLOUD_NOISE_RNG])
     t1 = time.perf_counter()
     grasp = sim.settle(round(START_SETTLE_S / dt))
     timing["settle"] = time.perf_counter() - t1
@@ -495,32 +609,44 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int) -> dict:
         logger.warning(f"[EVAL] {name} skipped: grasp lost after settle ({grasp.describe()})")
         return {**row, "file": None, "status": "skipped", "outcome": None,
                 "reason": f"grasp lost after settle ({grasp.describe()})"}
+    pre = None
+    if ctx.prefix is not None:
+        pre = _run_prefix(sim, ctx, state, name, timing)
+        if not pre["report"]["ok"]:
+            return {**row, "file": None, "status": "skipped", "outcome": None,
+                    "reason": f"prefix: {pre['report']['reason']}", "prefix": pre["report"]}
 
     sim.commander_hook = None  # the controller owns TARGET_CARTESIAN_POSE_TRAJECTORY now
     bridge.reset_controller_io()
     bridge.reset_stats()
     log_path = ctx.out / "controller" / f"{name}.log"
-    ctrl = AssemblyControllerProcess()
+    ctrl = AssemblyControllerProcess() if ctx.mppi is None else MppiControllerProcess()
     t2 = time.perf_counter()
     events_raw: list[tuple[str, float]] = []
     status, reason = "ok", None
     try:
-        ctrl.start(args.lcm_url, ctx.params_rel, log_path, magna_root=args.magna_root)
+        if ctx.mppi is None:
+            ctrl.start(args.lcm_url, ctx.params_rel, log_path, magna_root=args.magna_root)
+        else:
+            off = (pre["report"]["node_offset_frames"]
+                   if pre is not None and ctx.prefix["offset_to_node"] else None)
+            _start_mppi(ctrl, ctx, log_path, demo_offset_frames=off)
         ctrl.wait_for(CONTROLLER_STARTED, CONTROLLER_START_TIMEOUT_S)
         if ctx.controller_info is None:
             ctx.controller_info = ctrl.describe()
         timing["controller_start"] = time.perf_counter() - t2
-        if args.record:
-            # Plan/debug times are OSC clock: osc_utime = step * control_dt_us + offset.
-            sim.start_recording(ctx.out / "recordings", name, extra_meta={
-                "learned_mpc": _recording_learned_meta(ctx, state),
-                "osc_utime_offset_us": int(bridge.utime_offset_us)})
-        sampler = cli.EpisodeSampler(sim, n, pcd=not args.no_pcd,
-                                     traj_phase=np.zeros(0, np.int64), phase_offset=0,
-                                     board=ctx.board, gripper=ctx.gripper)
+        if args.record and pre is None:
+            _start_recording(sim, ctx, state, name)
+        sampler = _sampler(sim, ctx) if pre is None else pre["sampler"]
         loop = _run_loop(sim, ctx, ctrl, sampler, events_raw)
         status, reason = loop["status"], loop["reason"]
         frames = loop["frames"]
+        n_pre = pre_steps = 0
+        if pre is not None:  # one frame sequence; duration_s / events stay controller-relative
+            n_pre, pre_steps = len(pre["frames"]), pre["report"]["steps"]
+            for fr in frames:
+                fr["step"] += pre_steps
+            frames = pre["frames"] + frames
         # Late answers to the last published state.
         end = time.perf_counter() + END_POLL_S
         while time.perf_counter() < end:
@@ -528,6 +654,10 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int) -> dict:
             time.sleep(0.005)
         events_raw.extend((line, sim.osc_time_s()) for line in ctrl.read_new_lines()
                           if any(m in line for m in CONTROLLER_MARKERS))
+    except BaseException:
+        if pre is not None:  # the prefix opened the recording before the controller start
+            finish_recording(sim, ctx.out, name, "controller error after the prefix")
+        raise
     finally:
         ctrl_code = ctrl.stop()
         sim.commander_hook = sim.make_hold_hook()
@@ -536,10 +666,16 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int) -> dict:
 
     t3 = time.perf_counter()
     ev = _marker_events(events_raw, ctx.mode)
-    _resolve_commands(frames, bridge, dt)
-    t_start = frames[0]["time"]
-    for fr in frames:
+    _resolve_commands(frames[n_pre:], bridge, dt)
+    t_start = frames[n_pre]["time"]
+    if ctx.reset is not None and from_reset is None:
+        ctx.reset["homes"].setdefault(state.id, (frames[0]["ee_f"].copy(),
+                                                 frames[0]["ee_u"].copy()))
+    done = len(ctx.phase_labels) - 1
+    for j, fr in enumerate(frames):
         fr["phase"], fr["stage"] = _phase_and_stage(ctx, ev, fr["time"])
+        if pre is not None:  # phase 0 = the prefix label; "done" stays last
+            fr["phase"] = 0 if j < n_pre else (done if fr["phase"] == done else fr["phase"] + 1)
         fr["ctrl_hand_mm"], fr["ctrl_robotiq"] = _gripper_at(bridge, fr["wall"])
     latent_stats = _latent_diagnostics(ctx, frames)
     belt_T = np.stack([fr["belt"] for fr in frames])
@@ -548,6 +684,9 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int) -> dict:
     metrics.update(slant_episode(belt_T, pulley_T, ctx.tangent, ctx.thresholds))
     min_clear_mm = sampler.min_clearance_m * 1e3
     tip_min_mm = loop["tip_min_m"] * 1e3
+    if pre is not None:
+        min_clear_mm = min(min_clear_mm, pre["report"]["min_clearance_mm"])
+        tip_min_mm = min(tip_min_mm, pre["report"]["tip_min_mm"])
     align = None
     if ctx.demo is not None:
         first, last = frames[0], frames[-1]
@@ -568,7 +707,7 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int) -> dict:
 
     extras_meta = {
         "phase_labels": ctx.phase_labels, "mode": ctx.mode, "outcome": label, "status": status,
-        "reason": reason, "start_state": state.to_dict(), "repeat": repeat, "backend": "osc",
+        "reason": reason, "start_state": start, "repeat": repeat, "backend": "osc",
         "controller": ctx.controller_info, "controller_events": ctrl_events,
         "ee_pose_source": "measured finger_tip / tracking frame (FK of the measured joints)",
         "action_source": (
@@ -590,8 +729,17 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int) -> dict:
         "thresholds": dataclasses.asdict(ctx.thresholds),
         "grippers": "held at the start-state commands; controller commands logged only",
     }
+    if pre is not None:
+        extras_meta["cmd_source_codes"]["prefix"] = CMD_PREFIX
+        extras_meta["prefix"] = pre["report"]
+    if ctx.cloud is not None:
+        extras_meta["cloud_noise"] = {**ctx.cloud["noise"].to_dict(),
+                                      "camera_origins": ctx.cloud["origins"].tolist()}
+        if ctx.cloud["seg"] is not None:
+            extras_meta["belt_seg"] = bc.belt_seg_meta(ctx.cloud["noise"], ctx.cloud["seg"],
+                                                       "record", ctx.cloud["pose"])
     post = {"outcome": np.array(label), "status": np.array(status), "mode": np.array(ctx.mode),
-            "start_state": np.array(json.dumps(state.to_dict())),
+            "start_state": np.array(json.dumps(start)),
             "wrap_deg": metrics["wrap_deg"], "h_median_mm": metrics["h_median_mm"],
             **{k: np.array(metrics[k]) for k in cli.SLANT_KEYS},
             "min_board_clearance_mm": np.float32(min_clear_mm),
@@ -616,7 +764,7 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int) -> dict:
     moving = np.array([ctx.phase_labels[fr["phase"]] != "done" for fr in frames])
     moving[0] = False
     move = track[moving] if moving.any() else track[1:]
-    steps = frames[-1]["step"]
+    steps = frames[-1]["step"] - pre_steps
     out_row = {
         **row, "outcome": label, "status": status, "reason": reason,
         "duration_s": steps * dt, "steps": steps, "frames": len(frames),
@@ -635,6 +783,11 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int) -> dict:
         "controller_log": str(log_path.relative_to(ctx.out)), "controller_exit": ctrl_code,
         "recording": recording, "size_bytes": path.stat().st_size,
     }
+    if ctx.mppi is not None:
+        out_row["mppi"] = _mppi_solve_stats(ctx.out, log_path)
+    if pre is not None:
+        out_row["prefix"] = pre["report"]
+        timing["prefix"] = pre["wall_s"]
     a = align["final"] if align else None
     logger.info(f"[EVAL] {name} {ctx.mode}: {label} ({status}{f': {reason}' if reason else ''})"
                 f", {steps * dt:.2f} s, stages {stage_ends}, wrap "
@@ -645,6 +798,114 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int) -> dict:
                 + f", tracking {out_row['tracking_rms_mm'][0]:.2f}/"
                   f"{out_row['tracking_rms_mm'][1]:.2f} mm, {timing['total']:.1f} s")
     return out_row
+
+
+def _start_recording(sim, ctx: EvalContext, state: StartState, name: str) -> None:
+    # Plan/debug times are OSC clock: osc_utime = step * control_dt_us + offset.
+    sim.start_recording(ctx.out / "recordings", name, extra_meta={
+        "learned_mpc": _recording_learned_meta(ctx, state),
+        "osc_utime_offset_us": int(sim.bridge.utime_offset_us)})
+
+
+def _sampler(sim, ctx: EvalContext):
+    return cli.EpisodeSampler(sim, SAMPLE_STEPS, pcd=not ctx.args.no_pcd,
+                              traj_phase=np.zeros(0, np.int64), phase_offset=0,
+                              board=ctx.board, gripper=ctx.gripper)
+
+
+def _run_prefix(sim, ctx: EvalContext, state: StartState, name: str, timing: dict) -> dict:
+    """Demo-prefix replay from the settled state (recording on): ``{report, frames, sampler,
+    wall_s}``; frames carry the replay's own command (``sim_cmd_source`` 3)."""
+    dp, spec = ctx.prefix["module"], ctx.prefix["demos"][state.id]
+    w0 = time.perf_counter()
+    if ctx.args.record:
+        _start_recording(sim, ctx, state, name)
+    sampler = _sampler(sim, ctx)
+    frames: list[dict] = []
+    s0 = sim.step_index
+
+    def on_frame(k: int, cmd: dict) -> None:
+        fr = _sample(sim, ctx, sampler, k, s0, publish=False, timing=timing.setdefault(
+            "prefix_detail", {"render": 0.0, "encode": 0.0}))
+        fr.update(cmd, n_knots=N_KNOTS, cmd_source=CMD_PREFIX, ur_line=np.full(16, np.nan),
+                  ur_fresh_exact=False, ur_own_delta=np.full(6, np.nan))
+        frames.append(fr)
+
+    home_f = sim.franka_measured_pose7()
+    home_u = pose7_mat(UrTracking.fk(sim.arm_positions()[1]))
+    rep = dp.replay_prefix(sim, ctx, dp.PrefixSpec(spec["episode"], ctx.prefix["frac"]),
+                           home_f, home_u, on_frame=on_frame).to_dict()
+    rep.update(key=spec["key"], tol_mm=dp.TOL_MM, tol_deg=dp.TOL_DEG)
+    if ctx.prefix["offset_to_node"]:
+        rep["node_offset_frames"] = _node_offset(ctx, rep["end_frame"])
+    if not rep["ok"]:
+        finish_recording(sim, ctx.out, name, f"prefix failed: {rep['reason']}")
+        logger.warning(f"[EVAL] {name} skipped: prefix failed ({rep['reason']})")
+    return {"report": rep, "frames": frames, "sampler": sampler,
+            "wall_s": time.perf_counter() - w0}
+
+
+def _node_offset(ctx: EvalContext, end_frame: int) -> int:
+    """The prefix end on the node's demo clock: the same frac on the waypoint artifact's demo
+    (``--mppi-waypoints``, key ``demo_episode``) when there is one, else ``end_frame``."""
+    wp = getattr(ctx.args, "mppi_waypoints", None)
+    if wp and Path(wp).is_file():
+        with np.load(wp, allow_pickle=True) as d:
+            if "demo_episode" in d.files:
+                return ctx.prefix["module"].prefix_end_frame(str(d["demo_episode"]),
+                                                             ctx.prefix["frac"])
+    return int(end_frame)
+
+
+def _prefix_options(args: argparse.Namespace, states: list[StartState],
+                    start_meta: dict) -> dict | None:
+    """``--prefix-frac > 0``: ``{module, frac, demos (state id -> demo), offset_to_node}``;
+    None when off (the default)."""
+    frac = float(getattr(args, "prefix_frac", 0.0) or 0.0)
+    offset = getattr(args, "prefix_offset_to_node", None)
+    if not 0.0 <= frac <= 2.0:
+        raise ValueError(f"--prefix-frac {frac} outside [0, 2]")
+    if frac == 0.0:
+        if offset:
+            raise ValueError("--prefix-offset-to-node needs --prefix-frac > 0")
+        return None
+    if not getattr(args, "prefix_demos", None):
+        raise ValueError("--prefix-frac > 0 needs --prefix-demos")
+    import demo_prefix as dp
+
+    src = Path(args.prefix_demos)
+    demos = json.loads(src.read_text() if src.suffix == ".json" and src.is_file()
+                       else args.prefix_demos)
+    set_name = start_meta.get("set") if start_meta["kind"] == "variant_set" else None
+    by_state = {}
+    for s in states:
+        key = f"{set_name}/{s.id}" if set_name else s.id
+        if key not in demos:
+            raise ValueError(f"--prefix-demos has no demo for start {key!r} ({sorted(demos)})")
+        path = _resolve(REPO_ROOT, demos[key])
+        if not path.is_file():
+            raise FileNotFoundError(f"prefix demo {path}")
+        d = dp.load_demo(path)
+        marks = {k: d[k] for k in ("move0", "latch", "first_hold")}
+        by_state[s.id] = {"key": key, "episode": str(path.resolve()), "sha256": sha256_file(path),
+                          "end_frame": dp.frac_frame(marks, frac), **marks}
+    auto = (getattr(args, "mppi_goal", None) == "waypoints"
+            or bool(getattr(args, "mppi_demo_actions", None)))
+    offset = auto if offset is None else bool(offset)
+    if offset and getattr(args, "controller", "magna") != "mppi":
+        raise ValueError("--prefix-offset-to-node needs --controller mppi")
+    return {"module": dp, "frac": frac, "demos": by_state, "offset_to_node": offset}
+
+
+def _prefix_index_block(prefix: dict) -> dict:
+    dp = prefix["module"]
+    return {"frac": prefix["frac"], "demos": prefix["demos"],
+            "offset_to_node": prefix["offset_to_node"], "phase_label": dp.PHASE_LABEL,
+            "cmd_source": CMD_PREFIX, "tol_mm": dp.TOL_MM, "tol_deg": dp.TOL_DEG,
+            "settle": {"tol_mm": dp.SETTLE_TOL_MM, "tol_deg": dp.SETTLE_TOL_DEG,
+                       "max_s": dp.SETTLE_MAX_S},
+            "frac_rule": "0..1 -> [first move:* frame, pre_place_2 latch], 1..2 -> [latch, "
+                         "first hold:place_3]; demo prehold skipped"}
 
 
 def _events_dict(ev: dict, t_start: float) -> dict:
@@ -749,7 +1010,7 @@ def _run_loop(sim, ctx: EvalContext, ctrl, sampler, events_raw: list) -> dict:
                 abort = f"franka finger_tip {tip * 1e3:.2f} mm above the plate at step {k}"
             elif board_neg > BOARD_NEGATIVE_STEPS:
                 abort = f"2F-85 board clearance < 0 for {board_neg} steps at step {k}"
-            elif not ctrl.alive():
+            elif not ctrl.alive() and not (ctx.mppi is not None and end_at is not None):
                 abort = f"controller exited ({ctrl.proc.returncode}) at step {k}"
             if abort is not None:
                 status, reason = "aborted", abort
@@ -821,12 +1082,20 @@ def _sample(sim, ctx: EvalContext, sampler, k: int, s0: int, publish: bool,
     r0 = time.perf_counter()
     if not ctx.args.no_pcd:
         xyz, rgb = sim.point_cloud()
+        if ctx.cloud is not None:
+            c = ctx.cloud
+            out = bc.belt_seg_frame(xyz, rgb, c["noise"], c["seg"] or bc.DEFAULT_SEG,
+                                    ctx.cloud_rng, c["origins"],
+                                    bc.jaw_centres_from_poses(ee_f, ee_u), c["pose"])
+            xyz, rgb = out["pcd"], out["pcd_rgb"]
+            if c["seg"] is not None:
+                frame["pcd_belt_seg"] = out["pcd_belt_seg"]
         frame["cloud"], frame["pcd_rgb"] = lcs.camera_points(xyz), rgb
     timing["render"] += time.perf_counter() - r0
     frame["latent"] = np.full(ctx.encoder.latent_dim if ctx.encoder else 16, np.nan)
     if ctx.mode == "learned":
         e0 = time.perf_counter()
-        z = ctx.encoder.encode(frame["cloud"], frame["prop"], frame["belt_pts"])
+        z = ctx.encoder.encode(encoder_input(ctx.encoder, frame), frame["prop"], frame["belt_pts"])
         frame["latent"] = z
         if publish:
             bridge.set_latent(latent_state_message(utime, t, z, ee_f, ee_u, frame["prop"]))
@@ -851,6 +1120,8 @@ def learned_mpc_meta(args: argparse.Namespace, mode: str, params_rel: Path, para
            "action_definition": None, "debug_channel": None}
     if mode != "learned":
         return out
+    if getattr(args, "controller", "magna") == "mppi":
+        return _mppi_learned_meta(args, out, demo)
     block = params["learned_mpc"]
     root = Path(args.magna_root)
     demo_traj = (block.get("demo_traj") or {}).get("file")
@@ -866,6 +1137,178 @@ def learned_mpc_meta(args: argparse.Namespace, mode: str, params_rel: Path, para
     out["action_definition"] = args.action_definition
     out["debug_channel"] = block.get("debug_channel")
     return out
+
+
+def _demo_episode_path(demo: DemoGoals | None) -> Path | None:
+    if demo is None:
+        return None
+    episode = Path(demo.demo_episode)
+    return episode if episode.is_absolute() else REPO_ROOT / episode
+
+
+def _mppi_learned_meta(args: argparse.Namespace, out: dict, demo: DemoGoals | None) -> dict:
+    """``learned_mpc`` meta of an mppi run: no C++ params/lcs yaml; ``demo_traj_yaml`` None
+    (= staged run for the replay viewer)."""
+    for k, path in (("deploy", args.deploy), ("demo_goals", args.demo_goals),
+                    ("demo_episode", _demo_episode_path(demo)),
+                    ("mppi_config", args.mppi_config)):
+        out[k], out[f"{k}_sha256"] = _file_ref(path)
+    out["action_definition"] = args.action_definition
+    out["debug_channel"] = LcmChannels().learned_mpc_debug_channel if args.mppi_debug else None
+    out["controller"] = "mppi"
+    return out
+
+
+def _mppi_options(args: argparse.Namespace, demo_exists: bool) -> dict | None:
+    """``--controller mppi``: node options + the config; None for magna (mppi flags at default)."""
+    clear = {k: getattr(args, k, v) for k, v in CLEARANCE_ARG_DEFAULTS.items()}
+    if getattr(args, "controller", "magna") != "mppi":
+        bad = [k for k, v in {**MPPI_ARG_DEFAULTS, **CLEARANCE_ARG_DEFAULTS,
+                              **TRANSPORT_ARG_DEFAULTS, **BANK_ARG_DEFAULTS}.items()
+               if getattr(args, k, v) != v]
+        if bad:
+            raise ValueError(f"--{', --'.join(k.replace('_', '-') for k in bad)}: only with "
+                             "--controller mppi")
+        return None
+    if not clear["mppi_clearance"] and clear != CLEARANCE_ARG_DEFAULTS:
+        raise ValueError("--mppi-clearance-*-min-mm: only with --mppi-clearance")
+    if args.mode != "learned":
+        raise ValueError("--controller mppi needs --mode learned")
+    if args.params is not None:
+        logger.warning(f"[EVAL] --params {args.params} ignored with --controller mppi")
+    config = Path(args.mppi_config)
+    if not config.is_file():
+        raise FileNotFoundError(config)
+    kind = args.mppi_goal or ("demo_goals" if demo_exists else "deploy")
+    if kind == "demo_goals" and not demo_exists:
+        raise ValueError(f"--mppi-goal demo_goals but no file at {args.demo_goals}")
+    transport = _mppi_transport(args, kind)
+    goal = ("deploy" if kind == "deploy" else f"waypoints:{transport['waypoints']}"
+            if kind == "waypoints" else f"demo_goals:{Path(args.demo_goals).resolve()}")
+    debug = LcmChannels().learned_mpc_debug_channel if args.mppi_debug else None
+    out = {"config": config.resolve(), "config_sha256": sha256(config),
+           "params": yaml.safe_load(config.read_text()) or {}, "goal_kind": kind,
+           "goal": goal, "stages": args.mppi_stages,
+           "max_duration_s": float(args.mppi_max_duration_s), "debug_channel": debug,
+           "clearance": None, "transport": transport}
+    bank = _mppi_bank(args, kind)
+    if bank is not None:
+        out["bank"] = bank
+    return out
+
+
+def _mppi_bank(args: argparse.Namespace, kind: str) -> dict | None:
+    """``--mppi-waypoint-bank/-bank-knn``; None at default."""
+    b = {k: getattr(args, k, v) for k, v in BANK_ARG_DEFAULTS.items()}
+    if b == BANK_ARG_DEFAULTS:
+        return None
+    if b["mppi_waypoint_bank"] is None or kind != "waypoints":
+        raise ValueError("--mppi-waypoint-bank PATH needs --mppi-goal waypoints (the base)")
+    if int(b["mppi_bank_knn"]) < 1:
+        raise ValueError("--mppi-bank-knn >= 1")
+    path = Path(b["mppi_waypoint_bank"]).resolve()
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    doc = json.loads(path.read_text())
+    return {"path": str(path), "sha256": sha256(path), "knn": int(b["mppi_bank_knn"]),
+            "n_entries": len(doc["entries"]), "deploy_sha256": doc["deploy_sha256"],
+            "max_waypoints": max(len(e["frames"]) for e in doc["entries"])}
+
+
+def _mppi_transport(args: argparse.Namespace, kind: str) -> dict | None:
+    """``--mppi-waypoints/-goal-mode/-demo-actions/-demo-offset-frames``; None at default."""
+    t = {k: getattr(args, k, v) for k, v in TRANSPORT_ARG_DEFAULTS.items()}
+    if (kind == "waypoints") != (t["mppi_waypoints"] is not None):
+        raise ValueError("--mppi-goal waypoints and --mppi-waypoints PATH go together")
+    if t == TRANSPORT_ARG_DEFAULTS:
+        return None
+    if t["mppi_goal_mode"] == "track" and kind != "waypoints":
+        raise ValueError("--mppi-goal-mode track needs --mppi-goal waypoints")
+    if t["mppi_demo_actions"] == "auto" and kind != "waypoints":
+        raise ValueError("--mppi-demo-actions auto needs --mppi-goal waypoints")
+    out = {"waypoints": None, "waypoints_sha256": None, "goal_mode": t["mppi_goal_mode"],
+           "demo_actions": t["mppi_demo_actions"], "demo_actions_sha256": None,
+           "demo_offset_frames": int(t["mppi_demo_offset_frames"])}
+    if t["mppi_waypoints"] is not None:
+        wp = Path(t["mppi_waypoints"]).resolve()
+        if not wp.is_file():
+            raise FileNotFoundError(wp)
+        out.update(waypoints=str(wp), waypoints_sha256=sha256(wp))
+    if t["mppi_demo_actions"] not in (None, "auto"):
+        da = Path(t["mppi_demo_actions"]).resolve()
+        if not da.is_file():
+            raise FileNotFoundError(da)
+        out.update(demo_actions=str(da), demo_actions_sha256=sha256(da))
+    return out
+
+
+def _export_clearance(sim, args: argparse.Namespace, out: Path, start: Path) -> dict:
+    """``--mppi-clearance``: ``<out>/clearance_model.npz`` at the current (first start) state."""
+    model = cm.export_from_sim(sim, args.mppi_clearance_ur_min_mm * 1e-3,
+                               args.mppi_clearance_franka_min_mm * 1e-3)
+    model.source.update(start_state=str(Path(start).resolve()),
+                        start_state_sha256=sha256_file(start))
+    path = model.save(out / "clearance_model.npz").resolve()
+    logger.info(f"[EVAL] clearance model {path}: UR {len(model.ur_local)} / Franka "
+                f"{len(model.franka_local)} points ({model.source['franka']}), min "
+                f"{model.ur_min_m * 1e3:g} / {model.franka_min_m * 1e3:g} mm")
+    return {"path": str(path), "sha256": sha256_file(path), "ur_min_m": model.ur_min_m,
+            "franka_min_m": model.franka_min_m,
+            "n_points": {"ur": len(model.ur_local), "franka": len(model.franka_local)}}
+
+
+def _start_mppi(ctrl: MppiControllerProcess, ctx: EvalContext, log_path: Path,
+                demo_offset_frames: int | None = None) -> None:
+    """Node offset = ``demo_offset_frames`` if given, else ``ctx.args.mppi_demo_offset_frames``
+    read now (a prefix replay may set it per episode)."""
+    m = ctx.mppi
+    extra = ["--log", str(_mppi_solve_log(log_path).resolve())]
+    if m["debug_channel"]:
+        extra += ["--debug-channel", m["debug_channel"]]
+    if m.get("clearance"):
+        extra += ["--clearance-model", m["clearance"]["path"]]
+    offset = int(getattr(ctx.args, "mppi_demo_offset_frames", 0) if demo_offset_frames is None
+                 else demo_offset_frames)
+    tr = m.get("transport")
+    if tr is not None:
+        extra += ["--goal-mode", tr["goal_mode"], "--demo-offset-frames", str(offset)]
+        if tr["demo_actions"] is not None:
+            extra += ["--demo-actions", tr["demo_actions"]]
+    elif offset:
+        extra += ["--demo-offset-frames", str(offset)]
+    if m.get("bank"):
+        extra += ["--waypoint-bank", m["bank"]["path"], "--bank-knn", str(m["bank"]["knn"])]
+    ctrl.start(ctx.args.lcm_url, ctx.args.deploy, m["config"], log_path, goal=m["goal"],
+               stages=m["stages"], max_duration_s=m["max_duration_s"], extra_args=extra)
+
+
+def _mppi_solve_log(log_path: Path) -> Path:
+    return log_path.with_suffix(".solves.jsonl")
+
+
+def _mppi_solve_stats(out: Path, log_path: Path) -> dict:
+    """Per-episode summary of the node's per-solve JSONL."""
+    path = _mppi_solve_log(log_path)
+    rows = [json.loads(line) for line in path.read_text().splitlines()
+            if line.strip()] if path.is_file() else []
+    ms = np.array([r["solve_ms"] for r in rows if r.get("solve_ms") is not None
+                   and np.isfinite(r["solve_ms"])], dtype=np.float64)
+    pct = {f"p{q}": float(np.percentile(ms, q)) if ms.size else None for q in (50, 95)}
+    stats = {"solve_log": str(path.relative_to(out)), "solves": len(rows),
+             "solve_ms": {**pct, "max": float(ms.max()) if ms.size else None,
+                          "mean": float(ms.mean()) if ms.size else None},
+             "solve_failed": sum(r.get("solve_ok", 1.0) == 0.0 for r in rows),
+             "fallbacks": sum(bool(r.get("fallback")) for r in rows),
+             "plans_violating": sum(int(r.get("plan_violations") or 0) > 0 for r in rows)}
+    clear = [r for r in rows if "clear_min_ur_mm" in r]
+    if clear:
+        stats["clear_min_mm"] = {"ur": min(r["clear_min_ur_mm"] for r in clear),
+                                 "franka": min(r["clear_min_f_mm"] for r in clear)}
+        stats["clear_violating_plans"] = sum(int(r["clear_violating"]) > 0 for r in clear)
+    bank = next((r["bank"] for r in rows if "bank" in r), None)
+    if bank is not None:
+        stats["bank"] = bank
+    return stats
 
 
 def _recording_learned_meta(ctx: EvalContext, state: StartState) -> dict:
@@ -885,22 +1328,94 @@ def default_osc_binary() -> tuple[Path, Path]:
     return OSC_BINARY, MAGNA_ROOT
 
 
+def _reset_options(args: argparse.Namespace) -> dict | None:
+    """``--reset scripted``: ``{module, spec, rng, homes}``; None for the snapshot default."""
+    pairs = getattr(args, "reset_spec", None) or []
+    if getattr(args, "reset", "snapshot") != "scripted":
+        if pairs:
+            raise ValueError("--reset-spec needs --reset scripted")
+        return None
+    import scripted_reset
+
+    spec = scripted_reset.parse_reset_spec(pairs)
+    return {"module": scripted_reset, "spec": spec, "rng": np.random.default_rng(spec.seed),
+            "homes": {}}
+
+
+def _reset_before(sim, ctx: EvalContext, state: StartState, rows: list[dict]
+                  ) -> tuple[dict, dict | None]:
+    """``(reset_before row, from_reset)``: scripted only after a held episode of the same start
+    (its first-frame poses = home); else the episode's own snapshot restore (human)."""
+    sr = ctx.reset["module"]
+    prev = rows[-1] if rows else None
+    home = ctx.reset["homes"].get(state.id)
+    reason = None
+    if prev is None:
+        reason = "initial start state"
+    elif prev["start_state"]["id"] != state.id:
+        reason = "start state changed"
+    elif prev.get("status") == "skipped" or prev.get("grasp_ok_final") != [True, True]:
+        reason = "grasp not held at the end of the previous episode"
+    elif home is None:
+        reason = "no home poses for this start state"
+    if reason is not None:
+        return sr.ResetReport.human(reason).to_dict(), None
+    try:
+        rep = sr.scripted_reset(sim, ctx, home[0], home[1], ctx.reset["spec"], ctx.reset["rng"])
+    except OscTimeout as exc:
+        if not exc.process_alive:
+            raise
+        sim.bridge.forget_pending()
+        rep = sr.ResetReport(ok=False, kind="scripted", reason=f"osc timeout: {exc}",
+                             grasp_held=None, duration_s=0.0)
+    if not rep.ok:
+        return sr.ResetReport.human(f"scripted reset failed: {rep.reason}", rep).to_dict(), None
+    return rep.to_dict(), rep.to_dict()
+
+
+def _reset_budget(rows: list[dict]) -> dict:
+    resets = [r["reset_before"] for r in rows if r.get("reset_before")]
+    return {"resets_scripted": sum(x["kind"] == "scripted" for x in resets),
+            "resets_human": sum(x["kind"] == "human" for x in resets),
+            "reset_s": float(sum(x["duration_s"] for x in resets))}
+
+
+def _run_budget(ctx: EvalContext, rows: list[dict]) -> dict:
+    """``index.budget``: the scripted-reset counts; with a prefix also its time and failures
+    and ``robot_s`` (episodes + 0.5 s settle each + prefixes + scripted resets)."""
+    b = _reset_budget(rows) if ctx.reset is not None else {}
+    if ctx.prefix is not None:
+        pre = [r["prefix"] for r in rows if r.get("prefix")]
+        b.update(prefix_s=float(sum(p["duration_s"] for p in pre)),
+                 prefix_failed=sum(not p["ok"] for p in pre))
+        b["robot_s"] = float(sum(r.get("duration_s", 0.0) + START_SETTLE_S for r in rows)
+                             + b["prefix_s"] + b.get("reset_s", 0.0))
+    return b
+
+
 def evaluate(args: argparse.Namespace) -> dict:
     """Run the evaluation; returns the ``index.json`` dict."""
     mode = args.mode
     check_private_url(args.lcm_url)
     if args.no_pcd and mode == "learned":
         raise ValueError("--no-pcd is baseline only (the encoder needs the cloud)")
-    params_rel = Path(args.params or DEFAULT_PARAMS[mode])
-    params = _controller_yaml(args.magna_root, params_rel)
-    has_learned = params.get("learned_mpc") is not None
-    if has_learned != (mode == "learned"):
-        raise ValueError(f"--mode {mode} but {params_rel} "
-                         f"{'has' if has_learned else 'lacks'} a learned_mpc block")
+    cloud = cli.cloud_options(args)
+    reset = _reset_options(args)
+    mppi = _mppi_options(args, args.demo_goals is not None and Path(args.demo_goals).is_file())
+    if mppi is None:
+        params_rel = Path(args.params or DEFAULT_PARAMS[mode])
+        params = _controller_yaml(args.magna_root, params_rel)
+        has_learned = params.get("learned_mpc") is not None
+        if has_learned != (mode == "learned"):
+            raise ValueError(f"--mode {mode} but {params_rel} "
+                             f"{'has' if has_learned else 'lacks'} a learned_mpc block")
+    else:
+        params_rel, params = None, {}
     pre_labels = [str(w.get("label", f"target{i}"))
                   for i, w in enumerate(params.get("pre_mpc_motion") or [])]
     states, start_meta = load_start_states(args.start_states, args.variants)
     plan = plan_episodes(states, args.repeats, args.seed)
+    prefix = _prefix_options(args, states, start_meta)
     if args.dry_run:
         for i, (s, r) in enumerate(plan):
             print(f"{i:4d}  {s.id:<24} repeat {r}  {s.file}")
@@ -910,6 +1425,9 @@ def evaluate(args: argparse.Namespace) -> dict:
     deploy_meta = None
     if mode == "learned":
         encoder, lcs_model = LatentEncoder.load(args.deploy), LearnedLcs.load(args.deploy)
+        if isinstance(encoder, BeltCloudPointNetEncoder) and not args.belt_seg:
+            raise ValueError(f"{args.deploy}: a belt_cloud_pointnet deploy encodes the segmented "
+                             "belt cloud; add --belt-seg")
         deploy_meta = {"path": str(args.deploy), "sha256": sha256_file(args.deploy),
                        "goal_source": lcs_model.goal_source,
                        "n_stage_goals": int(lcs_model.stage_goals.shape[0])}
@@ -928,8 +1446,23 @@ def evaluate(args: argparse.Namespace) -> dict:
         n_stages = int(lcs_model.stage_goals.shape[0])
         stage_labels = (demo.stage_labels if demo is not None and demo.n_stages == n_stages
                         else [f"stage{k}" for k in range(n_stages)])
+    if mppi is not None:
+        n_goals = demo.n_stages if mppi["goal_kind"] == "demo_goals" else n_stages
+        tr = mppi["transport"]
+        if mppi["goal_kind"] == "waypoints":
+            with np.load(tr["waypoints"], allow_pickle=False) as f:
+                n_goals = len(f["frames"])
+            if mppi.get("bank"):  # stage labels cover the longest bank entry
+                n_goals = max(n_goals, mppi["bank"]["max_waypoints"])
+        track = tr is not None and tr["goal_mode"] == "track"
+        n_stages = 1 if mppi["stages"] == "last" or track else n_goals
+        stage_labels = (["stage0"] if mppi["stages"] == "last" or track else
+                        demo.stage_labels if demo is not None and demo.n_stages == n_goals
+                        else [f"stage{k}" for k in range(n_goals)])
     phase_labels = ([f"pre:{lab}" for lab in pre_labels]
                     + [f"mpc:{lab}" for lab in stage_labels] + ["done"])
+    if prefix is not None:
+        phase_labels = [prefix["module"].PHASE_LABEL, *phase_labels]
 
     label = args.label or mode
     out = Path(args.out or DEFAULT_OUT_ROOT / f"{time.strftime('%Y%m%d-%H%M%S')}-{label}")
@@ -942,17 +1475,36 @@ def evaluate(args: argparse.Namespace) -> dict:
         osc_binary = Path(args.osc_binary)
         osc_root = MAGNA_WORKTREE if MAGNA_WORKTREE in osc_binary.parents else MAGNA_ROOT
     index = {
-        "args": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},
+        "args": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()
+                 if not (k in CLOUD_ARG_DEFAULTS and v == CLOUD_ARG_DEFAULTS[k])},
         "git": git_info(), "mode": mode, "start_states": start_meta,
-        "controller": {"mode": mode, "magna_root": str(args.magna_root),
-                       "params": str(params_rel),
-                       "params_sha256": sha256(args.magna_root / params_rel)},
+        "controller": ({"mode": mode, "magna_root": str(args.magna_root),
+                        "params": str(params_rel),
+                        "params_sha256": sha256(args.magna_root / params_rel)}
+                       if mppi is None else _mppi_index_block(mppi)),
         "deploy": deploy_meta, "demo_goals": demo_meta,
         "sample_period_s": SAMPLE_STEPS * lcs.SIM_DT_S, "sample_steps": SAMPLE_STEPS,
         "action_definition": args.action_definition, "belt_sampling": lcs.BELT_SAMPLING,
         "thresholds": dataclasses.asdict(thresholds), "labels": list(LABELS),
         "phase_labels": phase_labels, "belt_tangent": tangent, "episodes": [],
     }
+    if reset is None:
+        for key in RESET_ARG_DEFAULTS:
+            index["args"].pop(key, None)
+    else:
+        index["reset"] = {"mode": "scripted", "spec": dataclasses.asdict(reset["spec"])}
+    if mppi is None:
+        for key in MPPI_ARG_DEFAULTS:
+            index["args"].pop(key, None)
+    for key, value in {**CLEARANCE_ARG_DEFAULTS, **TRANSPORT_ARG_DEFAULTS,
+                       **BANK_ARG_DEFAULTS}.items():
+        if index["args"].get(key) == value:
+            index["args"].pop(key)
+    for key, value in PREFIX_ARG_DEFAULTS.items():
+        if index["args"].get(key) == value:
+            index["args"].pop(key)
+    if prefix is not None:
+        index["prefix"] = _prefix_index_block(prefix)
     index_path = out / "index.json"
     write_json(index_path, index)
 
@@ -971,15 +1523,28 @@ def evaluate(args: argparse.Namespace) -> dict:
         sim.restore(first)  # clearance geometry is read at a start pose, gripper closed
         jaws = sorted({w.ur_gripper_byte for w in nominal if w.ur_gripper_byte is not None})
         board, gripper = sim.clearance_geometry(jaw_bytes=tuple(jaws))
+        if mppi is not None and args.mppi_clearance:
+            mppi["clearance"] = _export_clearance(sim, args, out, plan[0][0].file)
+            index["controller"]["clearance"] = mppi["clearance"]
+            write_json(index_path, index)
         ctx = EvalContext(args=args, out=out, mode=mode, params_rel=params_rel,
                           thresholds=thresholds, tangent=tangent, board=board, gripper=gripper,
                           encoder=encoder, lcs_model=lcs_model, demo=demo,
                           phase_labels=phase_labels, n_pre=len(pre_labels), n_stages=n_stages,
                           stage_labels=stage_labels,
-                          learned_mpc_meta=learned_mpc_meta(args, mode, params_rel, params, demo))
+                          learned_mpc_meta=learned_mpc_meta(args, mode, params_rel, params, demo),
+                          mppi=mppi)
+        if cloud is not None:
+            ctx.cloud = {**cloud, "origins": cli.sim_camera_origins(sim)}
+            index["cloud_noise_spec"] = cloud["noise"].to_dict()
+        ctx.reset = reset
+        ctx.prefix = prefix
         for s, r in plan:
+            reset_row = from_reset = None
             try:
-                row = run_episode(sim, ctx, s, r)
+                if ctx.reset is not None:
+                    reset_row, from_reset = _reset_before(sim, ctx, s, rows)
+                row = run_episode(sim, ctx, s, r, from_reset)
             except OscTimeout as exc:
                 finish_recording(sim, out, f"episode_{s.id}_{r}", "osc timeout")
                 if not exc.process_alive:
@@ -994,7 +1559,11 @@ def evaluate(args: argparse.Namespace) -> dict:
                 logger.warning(f"[EVAL] {s.id}/{r} skipped: {exc}")
                 row = {"file": None, "start_state": s.to_dict(), "repeat": r, "mode": mode,
                        "status": "skipped", "outcome": None, "reason": str(exc)}
+            if reset_row is not None:
+                row["reset_before"] = reset_row
             rows.append(row)
+            if ctx.reset is not None or ctx.prefix is not None:
+                index["budget"] = _run_budget(ctx, rows)
             index["controller"].update(ctx.controller_info or {})
             index["summary"] = _summary(rows, time.perf_counter() - t_run)
             write_json(index_path, index)
@@ -1009,6 +1578,15 @@ def evaluate(args: argparse.Namespace) -> dict:
                 + f", outcomes {s['outcomes']}, aborted {s['aborted']}, timeouts "
                   f"{s['timeouts']}, skipped {s['skipped']} -> {out}")
     return index
+
+
+def _mppi_index_block(m: dict) -> dict:
+    return {"mode": "mppi", "node": str(MppiControllerProcess().node),
+            "config": str(m["config"]), "config_sha256": m["config_sha256"],
+            "mppi_params": m["params"], "goal": m["goal"], "stages": m["stages"],
+            "max_duration_s": m["max_duration_s"], "debug_channel": m["debug_channel"],
+            **({} if m.get("transport") is None else {"transport": m["transport"]}),
+            **({"bank": m["bank"]} if m.get("bank") else {})}
 
 
 def _summary(rows: list[dict], wall: float) -> dict:

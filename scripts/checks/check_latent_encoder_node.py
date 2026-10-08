@@ -6,10 +6,15 @@ L0 the three vendored perception lcmtypes; L1 the sim's ``POINT_CLOUD_CROPPED`` 
 world; the default ``--test`` sim publishes neither); L2 ``scripts/lcs/latent_encoder_node.py``
 as a subprocess against the same sim (one latent per cloud, bit-exact ``z``, FK/proprio, rate,
 latency); L3 the hardware mappings on synthetic messages; L4 hygiene. All on a private URL.
+``--belt-seg`` (+ ``--cloud-noise``): L2 runs the node with those flags and rebuilds each latent
+from the received cloud's segmented pulley-frame belt (the node's RNG stream replayed), e.g. for a
+``belt_cloud_pointnet`` deploy.
 
 Run:
     uv run python scripts/checks/check_latent_encoder_node.py
     uv run python scripts/checks/check_latent_encoder_node.py --keep
+    uv run python scripts/checks/check_latent_encoder_node.py --belt-seg --deploy D \\
+        --lcm-url 'udpm://239.255.76.160:7760?ttl=0'
 """
 
 from __future__ import annotations
@@ -49,10 +54,13 @@ from round_belt_task.arm_kinematics import FrankaTip, UrTracking
 from round_belt_task.commander import mat3_to_quat
 from round_belt_task.lcm_simulation import RoundBeltLcmSimulation
 from round_belt_task.waypoints import MAGNA_PARAMS_SIM_YAML, board_pose
+from task_common import belt_cloud as bc
 from task_common import lcs_dataset as lcs
+from task_common import sim_snapshot
 from task_common.latent_encoder import (
     LATENT_STATE_CHANNEL,
     LatentEncoder,
+    encoder_input,
     parse_latent_state_message,
     resize_points_ordered,
 )
@@ -78,6 +86,7 @@ TEST_TIMEOUT_S = 240.0
 LATENCY_MEAN_MS = 30.0
 RUNTIME_BUDGET_S = 360.0
 NODE = REPO_ROOT / "scripts" / "lcs" / "latent_encoder_node.py"
+SEG_START_STATE = REPO_ROOT / "data" / "lcs" / "start_states" / "pre_place_1_osc.npz"
 SIM_SCRIPT = REPO_ROOT / "scripts" / "round_belt_lcm_simulation.py"
 MAIN_MAGNA = Path("/home/hienbui/git/magna")
 
@@ -109,6 +118,18 @@ def _gpu_apps() -> set[int] | None:
     except (OSError, subprocess.SubprocessError):
         return None
     return {int(v) for v in out.split() if v.strip().isdigit()}
+
+
+def _ancestors() -> set[int]:
+    """This process and its parents (a launcher's command line may carry ``--lcm-url``)."""
+    pids, pid = set(), os.getpid()
+    while pid > 1 and pid not in pids:
+        pids.add(pid)
+        try:
+            pid = int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            break
+    return pids
 
 
 class Listener:
@@ -283,10 +304,11 @@ def check_l1(ctx) -> str:
 def _start_node(ctx) -> subprocess.Popen:
     log = ctx.tmp / "node.log"
     out = log.open("w")
+    seg = ["--belt-seg", "--cloud-noise", ctx.cloud_noise] if ctx.belt_seg else []
     proc = subprocess.Popen(
         [sys.executable, "-u", str(NODE), "--lcm-url", PRIVATE_LCM_URL, "--deploy",
          str(ctx.deploy), "--ur-state-channel", UR_CH, "--state-match", "exact",
-         "--stats-every", "2"],
+         "--stats-every", "2", *seg],
         cwd=REPO_ROOT, stdout=out, stderr=subprocess.STDOUT, start_new_session=True)
     ctx.node, ctx.node_log = proc, log
     ctx.pids.append(proc.pid)
@@ -305,6 +327,9 @@ def check_l2(ctx) -> str:
     sim, lis = ctx.sim, ctx.listener
     enc = LatentEncoder.load(ctx.deploy)
     X_WB = board_pose(MAGNA_PARAMS_SIM_YAML)
+    if ctx.belt_seg:
+        # The default scene's belt lies outside the crop (no segmented points).
+        sim_snapshot.restore(sim, sim_snapshot.load(ctx.start_state))
     _start_node(ctx)
     lis.clear()
     fk_ref: dict[int, tuple] = {}
@@ -335,6 +360,9 @@ def check_l2(ctx) -> str:
              f"rate != 1 per {EVERY} steps")
     z_err = fk_err = 0.0
     lat_ms = []
+    seg_opts = (node_mod.LatentEncoderNode._cloud_options(
+        SimpleNamespace(cloud_noise=ctx.cloud_noise, belt_seg=True)) if ctx.belt_seg else None)
+    n_seg = []
     for msg, wall in latents:
         u, t, z, ee_f, ee_u, prop = parse_latent_state_message(msg)
         _require(t == u * 1e-6, f"t {t} != utime {u}")
@@ -348,7 +376,18 @@ def check_l2(ctx) -> str:
         prop_msgs = lcs.state_vector(
             fr.q, urs.q, fr.v, urs.v, np.concatenate([Xf[:3, 3], mat3_to_quat(Xf[:3, :3])]),
             np.concatenate([Xu[:3, 3], mat3_to_quat(Xu[:3, :3])]))
-        z_ref = enc.encode(pc, prop_msgs, belt)
+        if seg_opts is None:
+            z_ref = enc.encode(pc, prop_msgs, belt)
+        else:
+            # The node's _sensor_cloud, in latent order (one RNG draw per published cloud).
+            c = seg_opts
+            ee_f_n, ee_u_n, _ = node_mod.proprio(fr, urs)
+            out = bc.belt_seg_frame(pc, node_mod.cloud_rgb(cmsg), c["noise"], c["seg"], c["rng"],
+                                    c["origins"], bc.jaw_centres_from_poses(ee_f_n, ee_u_n),
+                                    c["pose"])
+            frame = {"cloud": lcs.camera_points(out["pcd"]), "pcd_belt_seg": out["pcd_belt_seg"]}
+            n_seg.append(len(out["pcd_belt_seg"]))
+            z_ref = enc.encode(encoder_input(enc, frame), prop_msgs, belt)
         z_err = max(z_err, float(np.abs(z - z_ref).max()))
         diffs = (ee_f - ref_f, ee_u - ref_u, prop - ref_prop, prop_msgs - ref_prop)
         fk_err = max(fk_err, *(float(np.abs(d).max()) for d in diffs))
@@ -364,11 +403,16 @@ def check_l2(ctx) -> str:
     lat = np.asarray(lat_ms)
     under_load = "" if lat.mean() < LATENCY_MEAN_MS else " (> 30 ms: measured under load)"
     ctx.l2 = (lat.mean(), lat.max(), len(latents), sim_wall)
+    seg_note = ""
+    if seg_opts is not None:
+        _require(min(n_seg) > 0, f"empty segmented clouds: M {n_seg}")
+        seg_note = (f"; --belt-seg --cloud-noise {ctx.cloud_noise} from {ctx.start_state.name}: "
+                    f"{type(enc).__name__} on M {min(n_seg)}-{max(n_seg)} segmented pts")
     return (f"{len(latents)} latents == {n_clouds} clouds (steps {step0 + EVERY}..{sim.step_index}"
             f", 1 per {EVERY} steps, strictly increasing), z bit-exact, ee/proprio err "
             f"{fk_err:.1e}, 0 misses; cloud->latent wall mean {lat.mean():.1f} max "
             f"{lat.max():.1f} ms{under_load}; sim {L2_STEPS} steps in {sim_wall:.1f} s "
-            f"({len(latents) / sim_wall:.2f} latents/s wall)")
+            f"({len(latents) / sim_wall:.2f} latents/s wall){seg_note}")
 
 
 # --- L3 ------------------------------------------------------------------------------------------
@@ -447,7 +491,7 @@ def check_l4(ctx) -> str:
         raise AssertionError(f"pid {pid} still alive")
     left = subprocess.run(["pgrep", "-f", PRIVATE_PORT], capture_output=True, text=True,
                           check=False).stdout.split()
-    left = [p for p in left if int(p) != os.getpid()]
+    left = [p for p in left if int(p) not in _ancestors()]
     _require(not left, f"processes on {PRIVATE_PORT}: {left}")
     gpu = _gpu_apps()
     gpu_note = "nvidia-smi unavailable"
@@ -462,10 +506,21 @@ def check_l4(ctx) -> str:
 
 
 def main() -> int:
+    global PRIVATE_LCM_URL, PRIVATE_PORT
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--keep", action="store_true", help="keep the sim/node logs")
     parser.add_argument("--deploy", type=Path, default=node_mod.DEFAULT_DEPLOY)
+    parser.add_argument("--belt-seg", action="store_true",
+                        help="L2: node with --belt-seg; z rebuilt from the segmented belt cloud")
+    parser.add_argument("--cloud-noise", default="off", help="L2 with --belt-seg: noise preset")
+    parser.add_argument("--start-state", type=Path, default=SEG_START_STATE,
+                        help="L2 with --belt-seg: snapshot restored before the node starts")
+    parser.add_argument("--lcm-url", default=PRIVATE_LCM_URL, help="a private LCM URL")
     args = parser.parse_args()
+    port = re.search(r":(\d+)", args.lcm_url.split("//")[-1])
+    if port is None or port.group(1) == SHARED_PORT:
+        parser.error(f"--lcm-url {args.lcm_url!r}: needs a private port (not {SHARED_PORT})")
+    PRIVATE_LCM_URL, PRIVATE_PORT = args.lcm_url, port.group(1)
     logger.remove()
     logger.add(sys.stdout, level="WARNING", format="{level: <7} | {message}")
     t0 = time.perf_counter()
@@ -473,7 +528,8 @@ def main() -> int:
     magna_before = subprocess.run(["git", "-C", str(MAIN_MAGNA), "status", "--porcelain"],
                                   capture_output=True, text=True, check=False).stdout
     ctx = SimpleNamespace(tmp=tmp, deploy=args.deploy, pids=[], gpu_baseline=_gpu_apps(),
-                          listener=Listener())
+                          listener=Listener(), belt_seg=args.belt_seg,
+                          cloud_noise=args.cloud_noise, start_state=args.start_state)
     exit_code = 0
     try:
         for name, fn in CHECKS:

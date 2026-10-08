@@ -6,8 +6,14 @@ frame, tracking, state/utime layout); H2 a learned episode (``LATENT_STATE`` cad
 latents, plans answering each latent inside the LCS input bounds, recorded UR action == u0 on
 fresh exact-dt lines); H3 two grasp variants
 (``[SKIP]`` without the set); H4 alignment metrics on the demo itself (``[SKIP]`` without it);
-H5 dataset compatibility; H6 hygiene. H1-H3 run the harness as a subprocess while this process
-listens on the same private URL.
+H5 dataset compatibility; H7 two chained learned episodes with ``--reset scripted`` (episode 2
+starts from the scripted reset: grasp held, first-frame poses at the jittered start); H8 a learned
+episode with ``--controller mppi`` (H2's latent-path assertions on the MPPI node, markers in
+order, exact-dt UR lines, recorded actions == the node's executed u_0); H10 H8's run with
+``--mppi-clearance`` (model written, node started with it, clearance row fields; H8 without the
+flag has none of them); H6 hygiene (runs last).
+H1-H3, H7 and H8 run the harness as a subprocess while this process listens on the same private
+URL.
 
 Run:
     uv run python scripts/checks/check_mpc_harness.py
@@ -23,6 +29,7 @@ import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -99,6 +106,7 @@ H2_V2_DEPLOY = Path("/home/hienbui/git/lcs_learning/outputs/sim_belt_v2_20260925
 H2_V2_PARAMS = Path("systems/parameters/learned_archive/2026-09-24/learned_tuning/"
                     "round_belt_controller_params_learned_eval_v2.yaml")
 H2_V2_GOALS = REPO_ROOT / "data" / "lcs" / "demo" / "v2" / "demo_goals.npz"
+H8_MPPI_DURATION_S = 2.0  # < H2_MAX_EPISODE_S so the node's end markers are exercised
 RUNTIME_BUDGET_S = 480.0
 FRANKA_TRAJ = "TARGET_CARTESIAN_POSE_TRAJECTORY"
 UR_TRAJ = "UR_TARGET_CARTESIAN_POSE_TRAJECTORY"
@@ -329,12 +337,20 @@ def check_h2(ctx: SimpleNamespace) -> str:
     run = _run_harness(ctx, "h2", ["--mode", "learned", "--deploy", str(deploy),
                                    "--max-episode-s", str(H2_MAX_EPISODE_S), *extra])
     ctx.h2 = run
+    return _latent_path(ctx, run, deploy, exact)
+
+
+def _latent_path(ctx: SimpleNamespace, run: SimpleNamespace, deploy: Path, exact: bool,
+                 mppi: dict | None = None) -> str:
+    """H2's assertions on one learned run; ``mppi``: ``{"u0": {utime: u0}, "lb", "ub"}`` (the
+    node's executed inputs and its effective box) replaces the C++ log cross-check."""
     row = run.rows[0]
     _require(row["status"] in ("ok", "timeout"), f"row {row['status']} {row.get('reason')}")
     path = run.out / row["file"]
     lcs.validate_episode(path, period_us=lcs.SAMPLE_PERIOD_US)
     d = _load(path)
-    ctx.h2_file = path
+    if mppi is None:
+        ctx.h2_file = path
     lat_msgs = [(i, parse_latent_state_message(lcmt_timestamped_saved_traj.decode(b)))
                 for i, (ch, b) in enumerate(run.msgs) if ch == LATENT_STATE_CHANNEL]
     utimes = [m[1][0] for m in lat_msgs]
@@ -362,17 +378,23 @@ def check_h2(ctx: SimpleNamespace) -> str:
     X_W_base, X_t0_tr = ur_base_world(), x_tool0_tracking()
     matched, consumed, knot0_err, ur_err, u0_err = 0, 0, 0.0, 0.0, 0.0
     lags, gaps, ur_u0 = [], [], {}
-    lb, ub = model.u_lb, model.u_ub
-    for j, (order, (_, t, _, ee_f, ee_u, _)) in enumerate(lat_msgs):
+    lb, ub = (model.u_lb, model.u_ub) if mppi is None else (mppi["lb"], mppi["ub"])
+    skipped, node_err = 0, 0.0
+    for j, (order, (utime, t, _, ee_f, ee_u, _)) in enumerate(lat_msgs):
         nxt = lat_msgs[j + 1][0] if j + 1 < len(lat_msgs) else len(run.msgs)
         plan = next((p for p in plans if order < p[0] < nxt and p[4][0] >= t - 0.5 * TICK_S),
                     None)
         if plan is None:
             near = any(abs(m - t) <= 2 * TICK_S + 1e-9 for m in marks) or t >= end_t - 1e-9
+            if mppi is not None and not near and utime not in mppi["u0"]:
+                skipped += 1  # the node replans on the newest latent only (stale one dropped)
+                continue
             _require(near, f"latent t={t:.3f}: no plan before the next latent")
             consumed += 1
             continue
         _, _, pos, quat, times = plan
+        if mppi is not None:
+            _require(len(pos) == harness.N_KNOTS, f"latent t={t:.3f}: {len(pos)} knots")
         lags.append(times[0] - t)
         _require(times[0] - t <= 2 * TICK_S + 1e-9, f"latent t={t:.3f}: plan at {times[0]:.3f}")
         knot0_err = max(knot0_err, float(np.abs(pos[0] - ee_f[:3]).max()),
@@ -404,6 +426,15 @@ def check_h2(ctx: SimpleNamespace) -> str:
                 _require(err <= ACTION_TOL, f"latent t={t:.3f}: recorded UR action vs u0 from "
                          f"the raw line off by {err:.2e}")
                 _require(d["sim_cmd_ur_fresh_exact"][j] == 1, f"frame {j} not flagged fresh")
+                if mppi is not None:
+                    # The end latent is consumed without a solve: the node's hold plan (u = 0).
+                    end = t >= end_t - 1e-9 or any(abs(m - t) <= 2 * TICK_S + 1e-9 for m in marks)
+                    want = mppi["u0"].get(utime, np.zeros(len(rec)) if end else None)
+                    _require(want is not None, f"latent t={t:.3f}: not in the solve log")
+                    e = float(np.abs(rec - want).max())
+                    _require(e <= ACTION_TOL, f"latent t={t:.3f}: recorded action vs the node's "
+                             f"executed u_0 off by {e:.2e}")
+                    node_err = max(node_err, e)
                 own = d["sim_ur_line_own_window_delta"][j]
                 gaps.append(float(np.abs(own[:3] - du).max()))
                 ur_u0[t] = float(np.linalg.norm(du))
@@ -413,7 +444,8 @@ def check_h2(ctx: SimpleNamespace) -> str:
     # Loose cross-check vs the controller's 1 s log (|u0 ur| printed at cout precision).
     log_path = run.out / "controller" / (Path(row["file"]).stem + ".log")
     logged = 0
-    for m in [] if not gaps else re.finditer(r"\[learned-mpc\] t=(\S+) .*? ur=(\S+)mm/", log_path.read_text()):
+    pattern = r"\[learned-mpc\] t=(\S+) .*? ur=(\S+)mm/"
+    for m in [] if not gaps or mppi is not None else re.finditer(pattern, log_path.read_text()):
         t_log = float(m.group(1))  # context time = latent t + one tick
         key = next((k for k in ur_u0 if 0.0 <= t_log - k <= TICK_S + 1e-6), None)
         if key is not None:
@@ -421,7 +453,8 @@ def check_h2(ctx: SimpleNamespace) -> str:
             _require(abs(ur_u0[key] - want) <= 1e-4 * max(want, 1e-6) + 1e-9,
                      f"t={key}: |u0 ur| {ur_u0[key]:.6e} vs controller log {want:.6e}")
             logged += 1
-    _require(logged > 0 or not gaps, f"no controller |u0| log line matched a fresh line ({log_path})")
+    _require(logged > 0 or not gaps or mppi is not None,
+             f"no controller |u0| log line matched a fresh line ({log_path})")
     _require(matched > 0, "no latent was answered by a plan")
     _require(knot0_err <= KNOT0_TOL, f"knot 0 vs the latent's ee_pose_franka {knot0_err:.2e}")
     _require(np.isfinite(d["sim_goal_dist"]).all(), "sim_goal_dist not finite")
@@ -434,6 +467,10 @@ def check_h2(ctx: SimpleNamespace) -> str:
                f"(max {u0_err:.1e}; own-window gap med/max {np.median(gaps) * 1e3:.3f}/"
                f"{max(gaps) * 1e3:.3f} mm; {logged} matched the controller log)" if gaps else
                "UR u0 label check skipped (no v2 exact-dt config)")
+    if mppi is not None:
+        u0_note = (f"recorded actions == the node's executed u_0 on {len(gaps)} fresh exact-dt "
+                   f"lines (max {node_err:.1e}; UR vs the raw line {u0_err:.1e}); {skipped} "
+                   "stale latents skipped by the node")
     return (f"{len(utimes)} latents == frame utimes, z bit-exact; {matched} plans answer their "
             f"latent (t0 - t in [{min(lags) * 1e3:.0f}, {max(lags) * 1e3:.0f}] ms), {consumed} "
             f"consumed at a stage switch/end; knot 0 err {knot0_err:.1e}; deltas within "
@@ -559,6 +596,147 @@ def check_h5(ctx: SimpleNamespace) -> str:
     return (f"{len(files)} files: actions == knot1 - knot0 / line(t+dt) - line(t), "
             f"sim_action_knot1_minus_measured == knot1/line(t+dt) - measured (max {worst:.1e}), "
             f"sim_latent (T, 16); {loader}")
+
+
+@check("H7 scripted reset")
+def check_h7(ctx: SimpleNamespace) -> str:
+    import scripted_reset as sr
+
+    from round_belt_task.commander import quat_to_mat3
+
+    exact = all(p.is_file() for p in (H2_V2_DEPLOY, H2_V2_GOALS, MAGNA_WORKTREE / H2_V2_PARAMS))
+    deploy, extra = ((H2_V2_DEPLOY, ["--params", str(H2_V2_PARAMS), "--demo-goals",
+                                     str(H2_V2_GOALS)]) if exact else (harness.DEFAULT_DEPLOY, []))
+    run = _run_harness(ctx, "h7", ["--mode", "learned", "--deploy", str(deploy),
+                                   "--max-episode-s", str(H2_MAX_EPISODE_S), "--repeats", "2",
+                                   "--reset", "scripted", *extra])
+    _require(len(run.rows) == 2, f"{len(run.rows)} rows")
+    r0, r1 = run.rows
+    for r in (r0, r1):
+        _require(r["status"] in ("ok", "timeout"), f"{r['file']}: {r['status']} {r.get('reason')}")
+    _require(r0["reset_before"]["kind"] == "human" and "from_reset" not in r0["start_state"],
+             f"episode 1 reset_before {r0['reset_before']}")
+    rb = r1["reset_before"]
+    _require(rb["kind"] == "scripted" and rb["ok"] and rb["grasp_held"] == [True, True],
+             f"episode 2 reset_before {rb}")
+    _require(r1["start_state"].get("from_reset") is True
+             and r1["start_state"].get("jitter") == rb["jitter"],
+             f"episode 2 start_state {r1['start_state']}")
+    want_budget = {"resets_scripted": 1, "resets_human": 1, "reset_s": rb["duration_s"]}
+    _require(run.index.get("budget") == want_budget, f"budget {run.index.get('budget')}")
+    spec = sr.ResetSpec(**run.index["reset"]["spec"])
+    d0, d1 = _load(run.out / r0["file"]), _load(run.out / r1["file"])
+    pose = d1["sim_pulley_large_pose"][0].astype(np.float64)  # xyz_wxyz
+    pulley = {"centre": pose[:3], "axis": quat_to_mat3(pose[3:])[:, 2]}
+    j = rb["jitter"]
+    notes = []
+    for arm, key in (("franka", "sim_ee_franka"), ("ur", "sim_ee_ur")):
+        p0, p1 = d0[key][0].astype(np.float64), d1[key][0].astype(np.float64)
+        err = float(np.linalg.norm(p1[:3] - sr.jitter_pose7(p0, j, pulley)[:3])) * 1e3
+        _require(err <= sr.JITTER_TOL_MM, f"{arm}: first frame {err:.2f} mm off the jittered start")
+        # The yaw moves the EEs too: undo it, then the xy offset is the xy jitter only.
+        back = sr.jitter_pose7(p1, {"dx": 0.0, "dy": 0.0, "yaw_deg": -j["yaw_deg"]}, pulley)
+        dxyz = (back[:3] - p0[:3]) * 1e3
+        _require(np.all(np.abs(dxyz[:2]) <= spec.jitter_xy_mm + sr.JITTER_TOL_MM)
+                 and abs(dxyz[2]) <= sr.JITTER_TOL_MM,
+                 f"{arm}: offset from the start {np.round(dxyz, 2)} mm (yaw removed)")
+        notes.append(f"{arm} {err:.2f} mm")
+    return (f"episode 2 after a scripted reset ({rb['duration_s']:.1f} s sim, jitter "
+            f"{j['dx']:+.1f}/{j['dy']:+.1f} mm {j['yaw_deg']:+.2f} deg, grasp held); first frame "
+            f"vs the jittered start: {', '.join(notes)}; budget {run.index['budget']}; outcomes "
+            f"{r0['outcome']}/{r1['outcome']}")
+
+
+@check("H8 mppi controller")
+def check_h8(ctx: SimpleNamespace) -> str:
+    _require(all(p.is_file() for p in (H2_V2_DEPLOY, H2_V2_GOALS, harness.DEFAULT_MPPI_CONFIG)),
+             "V2 deploy / demo goals / mppi.yaml missing")
+    run = _run_harness(ctx, "h8", ["--mode", "learned", "--controller", "mppi", "--deploy",
+                                   str(H2_V2_DEPLOY), "--demo-goals", str(H2_V2_GOALS),
+                                   "--max-episode-s", str(H2_MAX_EPISODE_S),
+                                   "--mppi-max-duration-s", str(H8_MPPI_DURATION_S)])
+    ctrl = run.index["controller"]
+    _require(ctrl["mode"] == "mppi" and ctrl.get("config_sha256") and ctrl.get("node_sha256"),
+             f"index controller block {ctrl}")
+    row = run.rows[0]
+    # -SIGINT: the stop can land in the node's interpreter shutdown after its own exit path.
+    _require(row["status"] == "ok" and row["controller_exit"] in (0, -signal.SIGINT),
+             f"row {row['status']} {row.get('reason')} exit {row['controller_exit']}")
+    log = (run.out / row["controller_log"]).read_text()
+    want = ["Assembly controller started", "No pre-MPC targets found. Initial phase set to MPC.",
+            "[learned-mpc] stage 0 timeout", "MPC completed!", "Switching to Terminate"]
+    at = [log.find(m) for m in want]
+    _require(all(i >= 0 for i in at) and at == sorted(at), f"markers missing/out of order {at}")
+    solves = [json.loads(x) for x in (run.out / row["mppi"]["solve_log"]).read_text().splitlines()]
+    u0 = {int(r["utime"]): np.asarray(r["u0"], dtype=np.float64) for r in solves}
+    model = LearnedLcs.load(H2_V2_DEPLOY)
+    outer = ctrl["mppi_params"]["u_box_outer"]
+    box = np.r_[[outer["trans_m"]] * 6, [np.radians(outer["rot_deg"])] * 6]
+    lb, ub = np.maximum(model.u_lb, -box), np.minimum(model.u_ub, box)
+    for r in u0.values():
+        _require(np.all(r >= lb - BOUND_TOL) and np.all(r <= ub + BOUND_TOL), f"u0 {r} off box")
+    lines = _decode_trajs(run.msgs, UR_TRAJ)
+    spans = [abs(ts[1] - ts[0] - lcs.ACTION_KNOT_DT_S) for *_, ts in lines]
+    _require(spans and max(spans) <= harness.UR_EXACT_DT_TOL_S, f"UR line span off dt {spans}")
+    detail = _latent_path(ctx, run, H2_V2_DEPLOY, True, {"u0": u0, "lb": lb, "ub": ub})
+    ctx.h8 = run
+    ms = row["mppi"]["solve_ms"]
+    return (f"markers in order; {len(solves)} solves (p50/p95 {ms['p50']:.1f}/{ms['p95']:.1f} ms)"
+            f", u_0 in the effective box; {len(lines)} UR lines span dt (max off "
+            f"{max(spans):.1e} s); {detail}")
+
+
+H10_CLEAR_ROW = ("clear_min_ur_mm", "clear_min_f_mm", "clear_violating")
+
+
+@check("H10 mppi clearance")
+def check_h10(ctx: SimpleNamespace) -> str:
+    _require(all(p.is_file() for p in (H2_V2_DEPLOY, H2_V2_GOALS, harness.DEFAULT_MPPI_CONFIG)),
+             "V2 deploy / demo goals / mppi.yaml missing")
+    run = _run_harness(ctx, "h10", ["--mode", "learned", "--controller", "mppi", "--deploy",
+                                    str(H2_V2_DEPLOY), "--demo-goals", str(H2_V2_GOALS),
+                                    "--max-episode-s", str(H2_MAX_EPISODE_S),
+                                    "--mppi-max-duration-s", str(H8_MPPI_DURATION_S),
+                                    "--mppi-clearance"])
+    clr = run.index["controller"].get("clearance") or {}
+    path = Path(clr.get("path", ""))
+    _require(path == (run.out / "clearance_model.npz").resolve() and path.is_file()
+             and hashlib.sha256(path.read_bytes()).hexdigest() == clr.get("sha256"),
+             f"index controller.clearance {clr}")
+    want = {"ur_min_m": harness.CLEARANCE_ARG_DEFAULTS["mppi_clearance_ur_min_mm"] * 1e-3,
+            "franka_min_m": harness.CLEARANCE_ARG_DEFAULTS["mppi_clearance_franka_min_mm"] * 1e-3}
+    _require(all(abs(clr[k] - v) < 1e-12 for k, v in want.items()) and clr["n_points"]["ur"] > 0,
+             f"thresholds / points {clr}")
+    _require(run.index["args"].get("mppi_clearance") is True, "args lack mppi_clearance")
+    row = run.rows[0]
+    _require(row["status"] == "ok" and row["controller_exit"] in (0, -signal.SIGINT),
+             f"row {row['status']} {row.get('reason')} exit {row['controller_exit']}")
+    log = (run.out / row["controller_log"]).read_text()
+    _require("[mppi] clearance " in log and str(path) in log, "node log lacks the clearance model")
+    solves = [json.loads(x) for x in (run.out / row["mppi"]["solve_log"]).read_text().splitlines()]
+    _require(solves and all(all(k in r for k in H10_CLEAR_ROW) for r in solves),
+             f"solve rows lack {H10_CLEAR_ROW}")
+    m = row["mppi"]
+    _require("clear_min_mm" in m and "clear_violating_plans" in m and m["solve_ms"]["p95"],
+             f"row mppi {m}")
+    note = "H8 not run"
+    h8 = getattr(ctx, "h8", None)
+    if h8 is not None:
+        r8 = h8.rows[0]
+        rows8 = [json.loads(x) for x in (h8.out / r8["mppi"]["solve_log"]).read_text()
+                 .splitlines()]
+        _require("clearance" not in h8.index["controller"]
+                 and not any(k.startswith("mppi_clearance") for k in h8.index["args"])
+                 and "clear_min_mm" not in r8["mppi"]
+                 and not any(k.startswith("clear") for r in rows8 for k in r)
+                 and not (h8.out / "clearance_model.npz").exists(), "H8 run has clearance keys")
+        note = "H8 (no flag): no clearance keys / file"
+    return (f"clearance_model.npz written (UR {clr['n_points']['ur']} / Franka "
+            f"{clr['n_points']['franka']} points, sha in index), node started with it; "
+            f"{len(solves)} solves with {', '.join(H10_CLEAR_ROW)}; plan clearance min UR "
+            f"{m['clear_min_mm']['ur']:.1f} / Franka {m['clear_min_mm']['franka']:.1f} mm, "
+            f"{m['clear_violating_plans']} plans violating; solve p50/p95 "
+            f"{m['solve_ms']['p50']:.1f}/{m['solve_ms']['p95']:.1f} ms; {note}")
 
 
 @check("H6 hygiene")

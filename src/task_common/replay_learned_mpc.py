@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from loguru import logger
 
+from task_common.belt_cloud import known_large_pulley_pose7, quat_wxyz_matrix
 from task_common.latent_encoder import LatentDecoder
 from task_common.recording import Recording
 from task_common.replay_metrics import FRANKA_BASE_BODY, quat_rotate
@@ -34,7 +35,6 @@ LAYER_LABELS = {"planned_belt": "Planned belt", "planned_ee": "Planned EE",
                 "actions": "Planned actions", "target_belt": "Target belt"}
 DEFAULT_DEBUG_CHANNEL = "LEARNED_MPC_DEBUG"
 FRANKA_PLAN_CHANNEL = "TARGET_CARTESIAN_POSE_TRAJECTORY"
-N_LATENT = 16
 ROOT = "/replay/learned_mpc"
 ACTION_SCALE_MAX = 100.0
 ACTION_SCALE_DEFAULT = 9.0
@@ -55,6 +55,7 @@ ACT_ALPHA = (0.75, 0.2)  # step 1 -> step N-1; u0 is opaque
 
 # One hue per category; the recorded belt is gold, so no yellow/orange here.
 PLAN_BLUE = (37, 99, 235)
+NOW_CLOUD = (14, 165, 233)
 TARGET_GREEN = (22, 163, 74)
 FRANKA_PLAN = (6, 182, 212)
 AUG_MARKER = (31, 41, 55)
@@ -143,7 +144,8 @@ class Solve:
     ee_franka: np.ndarray  # (N+1, 3) x_sol Franka rows
     ee_ur: np.ndarray  # (N+1, 3) x_sol UR rows
     franka_knots: np.ndarray | None = None  # (K, 3) published plan knots
-    belts: np.ndarray | None = None  # (N+1, 150, 3) float32 decoded x_sol[:16, i]
+    belts: np.ndarray | None = None  # (N+1, P, 3) float32 decoded x_sol latents, world
+    goal_belt: np.ndarray | None = None  # (P, 3) decoded z_ref[:, 0] (MPPI target fallback)
 
     @property
     def n(self) -> int:
@@ -418,6 +420,9 @@ class LearnedMpcPanel:
         else:
             self.demo_belts = None
             why = f"{why}; recorded goals: {recorded}"
+        if why is not None and block.get("controller") == "mppi" and self.decoder is not None:
+            why, self.target_source = None, "z_ref"  # no demo goal files: the tracked latent
+            self.notes.append("target belt: decoded MPPI goal latent (z_ref, active stage)")
         self.available["target_belt"] = why
 
     def _recorded_goals(self, block: dict) -> str | None:
@@ -498,8 +503,7 @@ class LearnedMpcPanel:
                           frame=rec.frame_at_step(msg.step),
                           t=np.asarray(msg.payload["blocks"]["x_sol"]["t"], dtype=np.float64),
                           x_sol=x, u_sol=b["u_sol"], z_ref=b["z_ref"], p_ref=b["p_ref"],
-                          scalars=s, ee_franka=x[N_LATENT:N_LATENT + 3].T.copy(),
-                          ee_ur=x[N_LATENT + 3:N_LATENT + 6].T.copy())
+                          scalars=s, ee_franka=x[-6:-3].T.copy(), ee_ur=x[-3:].T.copy())
             solves.append(solve)
             keys.add(_t0_key(solve.t[0]))
         plans: dict[tuple[str, int], Any] = {}
@@ -530,7 +534,14 @@ class LearnedMpcPanel:
             return
         # One latent per call: decode_batch may round differently from decode (BLAS blocking).
         for s in self.solves:
-            s.belts = np.stack([self.decoder.decode(z) for z in s.x_sol[:N_LATENT].T])
+            s.belts = np.stack([self.decoder.decode(z) for z in s.x_sol[:-6].T])  # x = [z; p_f; p_ur]
+            s.goal_belt = self.decoder.decode(s.z_ref[:, 0])
+        if self.decoder.frame != "world":  # belt_cloud_pointnet: unordered pulley-frame points
+            pose = known_large_pulley_pose7()
+            rot = quat_wxyz_matrix(pose[3:])
+            for s in self.solves:
+                s.belts = (s.belts @ rot.T + pose[:3]).astype(np.float32)
+                s.goal_belt = (s.goal_belt @ rot.T + pose[:3]).astype(np.float32)
 
     def _show_status(self, start: float) -> None:
         lines = []
@@ -613,7 +624,13 @@ class LearnedMpcPanel:
             self.handles[name].visible = False
 
     def _draw_planned_belt(self, app: ReplayApp, s: Solve) -> None:
-        self._tubes(app, "planned_belt/step_", s.belts[1:], PLAN_TUBE_M, PLAN_BLUE, PLAN_ALPHA)
+        if self.decoder.frame == "world":
+            self._tubes(app, "planned_belt/step_", s.belts[1:], PLAN_TUBE_M, PLAN_BLUE,
+                        PLAN_ALPHA)
+            return
+        last = len(s.belts) - 1  # unordered clouds: knot 0 (now) and the plan's last knot only
+        self._points(app, "planned_belt/now", s.belts[0], NOW_CLOUD)
+        self._points(app, "planned_belt/end", s.belts[last], PLAN_BLUE)
 
     def _draw_planned_ee(self, app: ReplayApp, s: Solve) -> None:
         if s.franka_knots is not None and len(s.franka_knots):
@@ -682,6 +699,9 @@ class LearnedMpcPanel:
         return np.where(np.arange(len(self.goal_frames)) == cur, *TARGET_ALPHA)
 
     def _draw_target_belt(self, app: ReplayApp, s: Solve) -> None:
+        if self.target_source == "z_ref":
+            self._points(app, "target_belt/z_ref", s.goal_belt, TARGET_GREEN)
+            return
         loops = self.demo_belts[self.goal_frames]
         for i, (pts, a) in enumerate(zip(loops, self.target_opacities(s), strict=True)):
             if a <= 0.0:

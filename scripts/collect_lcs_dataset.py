@@ -107,6 +107,8 @@ from round_belt_task.outcome import (
     slant_metrics,
 )
 from round_belt_task.waypoints import MAGNA_PARAMS_SIM_YAML, load_pre_mpc_segment
+from task_common import belt_cloud as bc
+from task_common import belt_cloud_features as bcf
 from task_common import lcs_dataset as lcs
 from task_common import sim_snapshot
 from task_common.osc_process import check_private_url
@@ -148,7 +150,9 @@ NEW_ARG_DEFAULTS = {"approach": None, "approach_range": None, "place3_mode": "in
                     "engaged_share": 0.40, "place3_box": None, "place3_box_ur": None,
                     "place3_values": None,
                     "tail": None, "tail_families": None, "tail_gentle": "auto",
-                    "tail_cap": "3,25,3,25", "tail_stretch_cap_pct": 2.0, "row_tag": None}
+                    "tail_cap": "3,25,3,25", "tail_stretch_cap_pct": 2.0, "row_tag": None,
+                    "cloud_noise": "off", "belt_seg": False}
+CLOUD_NOISE_RNG = 11
 
 
 def configure_logging(level: str = "INFO") -> None:
@@ -273,6 +277,11 @@ def create_parser() -> argparse.ArgumentParser:
                    help="per-step cmd_delta caps of the tail")
     p.add_argument("--tail-stretch-cap-pct", type=float, default=d["tail_stretch_cap_pct"])
     p.add_argument("--row-tag", default=d["row_tag"], help="recorded as row['tag']")
+    p.add_argument("--cloud-noise", default=d["cloud_noise"], metavar="PRESET|JSON",
+                   help=f"store the noised cloud as pcd/pcd_rgb: {sorted(bc.CLOUD_NOISE_PRESETS)}"
+                        " or a .json of CloudNoiseSpec fields (RNG [seed, i, 11])")
+    p.add_argument("--belt-seg", action="store_true", default=d["belt_seg"],
+                   help="also store pcd_belt_seg (colour-segmented belt, known pulley frame)")
     return p
 
 
@@ -711,6 +720,51 @@ class EpisodeSampler:
             self.sample(i + 1, info["franka_cmd"], info["ur_cmd"], phase, info["body_q"])
 
 
+def sim_camera_origins(sim) -> np.ndarray:
+    """``(C, 3)`` world origins of the cropped cloud's cameras (the sim's ``CameraSpec``s)."""
+    spec = sim.info.point_clouds[0]
+    by_name = {c.name: c for c in sim.info.cameras}
+    return np.array([[float(v) for v in by_name[name].X_WC.p] for name in spec.cameras])
+
+
+def cloud_options(args) -> dict | None:
+    """``--cloud-noise`` / ``--belt-seg`` resolved; ``None`` when both are off."""
+    noise = bc.cloud_noise_spec(getattr(args, "cloud_noise", "off"))
+    seg = bool(getattr(args, "belt_seg", False))
+    if noise.is_off() and not seg:
+        return None
+    if args.no_pcd:
+        raise ValueError("--cloud-noise / --belt-seg need the point cloud (drop --no-pcd)")
+    return {"noise": noise, "seg": bc.BeltSegSpec() if seg else None,
+            "pose": bc.known_large_pulley_pose7()}
+
+
+def apply_cloud_options(frames: list[dict], opts: dict | None, rng: np.random.Generator,
+                        origins: np.ndarray) -> dict:
+    """Replace each frame's ``pcd``/``pcd_rgb`` by the sensor cloud (+ ``pcd_belt_seg``), in
+    frame order; returns the ``sim_meta`` additions."""
+    if opts is None:
+        return {}
+    seg = opts["seg"] or bc.DEFAULT_SEG
+    for fr in frames:
+        jaws = bc.jaw_centres_from_poses(fr["ee_f"], fr["ee_u"])
+        out = bc.belt_seg_frame(fr["pcd"], fr["pcd_rgb"], opts["noise"], seg, rng, origins,
+                                jaws, opts["pose"])
+        fr["pcd"], fr["pcd_rgb"] = out["pcd"], out["pcd_rgb"]
+        if opts["seg"] is not None:
+            fr["pcd_belt_seg"] = out["pcd_belt_seg"]
+    meta = {"cloud_noise": {**opts["noise"].to_dict(), "camera_origins": origins.tolist()}}
+    if opts["seg"] is not None:
+        meta["belt_seg"] = bc.belt_seg_meta(opts["noise"], opts["seg"], "record", opts["pose"])
+    return meta
+
+
+def cloud_feature_extras(fr: dict) -> dict:
+    """``cloud_*`` extras of a ``--belt-seg`` frame (``belt_cloud_features``); else none."""
+    seg = fr.get("pcd_belt_seg")
+    return {} if seg is None else bcf.cloud_extras(seg)
+
+
 def build_writer(frames: list[dict], n: int, pcd: bool) -> lcs.EpisodeWriter:
     writer = lcs.EpisodeWriter(sample_steps=n)
     T = len(frames)
@@ -725,7 +779,8 @@ def build_writer(frames: list[dict], n: int, pcd: bool) -> lcs.EpisodeWriter:
         cloud = lcs.camera_points(fr["pcd"]) if pcd else np.zeros((1, 3), np.float32)
         writer.add_frame(fr["sim_step"], fr["time"], state, action, cloud,
                          lcs.belt_points_ordered(fr["belt"]), lcs.kinematic_points(),
-                         pcd_rgb=fr.get("pcd_rgb") if pcd else None, extras={
+                         pcd_rgb=fr.get("pcd_rgb") if pcd else None,
+                         pcd_belt_seg=fr.get("pcd_belt_seg"), extras={
                              "phase": np.int16(fr["phase"]), "ee_franka": fr["ee_f"],
                              "ee_ur": fr["ee_u"], "ee_cmd_franka": fr["cmd_f"],
                              "ee_cmd_ur": fr["cmd_u"], "belt_xyz": fr["belt"].astype(np.float32),
@@ -735,6 +790,7 @@ def build_writer(frames: list[dict], n: int, pcd: bool) -> lcs.EpisodeWriter:
                              "tracking_err_mm": fr["track_mm"], "grasp_ok": fr["grasp_ok"],
                              "episode_step": np.int64(fr["step"]),
                              "board_clearance_mm": np.float32(fr["clearance_mm"]),
+                             **cloud_feature_extras(fr),
                          })
     return writer
 
@@ -832,6 +888,7 @@ def collect(args: argparse.Namespace, ranges: dict | None = None,
     thresholds = parse_thresholds(args.thresholds)
     intents = ["nominal"] if scenario == "nominal" else _csv(args.intents)
     new_opts = new_options(args)
+    cloud_opts = cloud_options(args)
     if new_opts and backend != "osc":
         raise ValueError("--approach* / --place3-* / --tail / --row-tag need --backend osc")
     p3_cfg = new_opts.get("place3_cfg")
@@ -899,6 +956,8 @@ def collect(args: argparse.Namespace, ranges: dict | None = None,
         "belt_tangent": tangent, "min_clearance_mm": args.min_clearance,
         "clearance_every": CLEARANCE_EVERY, "excitation": excite, **opts, "episodes": [],
     }
+    if cloud_opts is not None:
+        index["cloud_noise_spec"] = cloud_opts["noise"].to_dict()
     index_path = out / "index.json"
     _write_json(index_path, index)
 
@@ -913,6 +972,9 @@ def collect(args: argparse.Namespace, ranges: dict | None = None,
 
         sim = RoundBeltOfflineSimulation.build(arm_ke=args.arm_ke, arm_kd=args.arm_kd)
     sim.args.record_state_every = RECORD_STATE_EVERY
+    if cloud_opts is not None:
+        # After index["args"]: these attributes are not CLI flags.
+        args.cloud_opts, args.cloud_origins = cloud_opts, sim_camera_origins(sim)
     t_run = time.perf_counter()
     timings = []
     try:
@@ -1142,6 +1204,9 @@ def run_episode(sim, i: int, p: pert.Perturbation, args, out: Path, n: int, thre
         "clearance_source": "2F-85 colliders vs the board plate box and the two pulleys, "
                             f"sampled every {CLEARANCE_EVERY} control steps",
     }
+    extras_meta.update(apply_cloud_options(frames, getattr(args, "cloud_opts", None),
+                                           np.random.default_rng([args.seed, i, CLOUD_NOISE_RNG]),
+                                           getattr(args, "cloud_origins", None)))
     path = out / row["file"]
     wrap, h_med = _write_episode(
         i, p, path, build_writer(frames, n, pcd=not args.no_pcd), label, extras_meta, metrics,
@@ -1292,7 +1357,8 @@ def build_osc_writer(frames: list[dict], n: int, pcd: bool,
         cloud = lcs.camera_points(fr["pcd"]) if pcd else np.zeros((1, 3), np.float32)
         writer.add_frame(fr["sim_step"], fr["time"], state, action, cloud,
                          lcs.belt_points_ordered(fr["belt"]), lcs.kinematic_points(),
-                         pcd_rgb=fr.get("pcd_rgb") if pcd else None, extras={
+                         pcd_rgb=fr.get("pcd_rgb") if pcd else None,
+                         pcd_belt_seg=fr.get("pcd_belt_seg"), extras={
                              "ee_franka": fr["ee_f"], "ee_ur": fr["ee_u"],
                              "cmd_knot0_franka": fr["knot0"], "cmd_knot1_franka": fr["knot1"],
                              "cmd_knots_franka": fr["knots"], "cmd_ur_t": fr["ur_t"],
@@ -1317,6 +1383,7 @@ def build_osc_writer(frames: list[dict], n: int, pcd: bool,
                              "excite_ur_rotvec": fr["excite_ur"][3:],
                              "excite_ur_raw": fr["excite_ur_raw"],
                              "ur_excite_scale": np.float64(fr["ur_excite_scale"]),
+                             **cloud_feature_extras(fr),
                          })
     return writer, track
 
@@ -1752,6 +1819,9 @@ def run_osc_episode(sim, ctx: OscContext, i: int, p: pert.Perturbation,
                                                         tail, rods, int(pre.sum()))
         extras_meta.update(new_meta)
         osc_post.update(new_post)
+    extras_meta.update(apply_cloud_options(frames, getattr(args, "cloud_opts", None),
+                                           np.random.default_rng([args.seed, i, CLOUD_NOISE_RNG]),
+                                           getattr(args, "cloud_origins", None)))
     path = ctx.out / row["file"]
     writer, track = build_osc_writer(frames, n, pcd=not args.no_pcd, definition=definition)
     steps = frames[-1]["step"] + 1

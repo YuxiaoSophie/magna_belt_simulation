@@ -50,12 +50,24 @@ from task_common import sim_snapshot
 DEFAULT_OUT = sim_snapshot.DEFAULT_START_STATE_DIR / "ee_offsets"
 CHECK_EVERY = 10  # steps between grasp checks during the move/settle
 
-# id: (arm, kind, world axis, magnitudes tried in order; mm or deg); rot_tool_z = about the tip z.
+# id: (arm, kind, world axis, magnitudes tried in order; mm or deg); rot_tool_<x|y|z> = about that tip axis.
 VARIANTS = {
     "ee_f_x+8": ("franka", "trans", (1.0, 0.0, 0.0), (8.0, 5.0)),
     "ee_f_z+8": ("franka", "trans", (0.0, 0.0, 1.0), (8.0, 5.0)),
     "ee_ur_y-8": ("ur", "trans", (0.0, -1.0, 0.0), (8.0, 5.0)),
     "ee_f_rot5": ("franka", "rot_tool_z", None, (5.0, 3.0)),
+    # UR height: tilts the held belt toward (-) / away from (+) the UR fingers
+    "ee_ur_z-10": ("ur", "trans", (0.0, 0.0, 1.0), (-10.0, -7.0)),
+    "ee_ur_z-20": ("ur", "trans", (0.0, 0.0, 1.0), (-20.0, -15.0)),
+    "ee_ur_z-30": ("ur", "trans", (0.0, 0.0, 1.0), (-30.0, -25.0)),
+    "ee_ur_z+15": ("ur", "trans", (0.0, 0.0, 1.0), (15.0, 10.0)),
+    # UR jaw rotated about its tip: the belt leaves the fingers at another angle
+    "ee_ur_rx+15": ("ur", "rot_tool_x", None, (15.0, 10.0)),
+    "ee_ur_rx-15": ("ur", "rot_tool_x", None, (-15.0, -10.0)),
+    "ee_ur_ry+15": ("ur", "rot_tool_y", None, (15.0, 10.0)),
+    "ee_ur_ry-15": ("ur", "rot_tool_y", None, (-15.0, -10.0)),
+    "ee_ur_rz+15": ("ur", "rot_tool_z", None, (15.0, 10.0)),
+    "ee_ur_rz-15": ("ur", "rot_tool_z", None, (-15.0, -10.0)),
 }
 
 
@@ -68,8 +80,9 @@ def target_pose(X0: np.ndarray, kind: str, axis, mag: float) -> np.ndarray:
     X = X0.copy()
     if kind == "trans":
         X[:3, 3] += np.asarray(axis, float) * mag * 1e-3
-    else:
-        X[:3, :3] = X0[:3, :3] @ rot_axis_angle((0.0, 0.0, 1.0), math.radians(mag))
+    else:  # rot_tool_<x|y|z>: about that tool axis through the tool origin
+        ax = {"x": (1.0, 0.0, 0.0), "y": (0.0, 1.0, 0.0), "z": (0.0, 0.0, 1.0)}[kind[-1]]
+        X[:3, :3] = X0[:3, :3] @ rot_axis_angle(ax, math.radians(mag))
     return X
 
 
@@ -149,6 +162,10 @@ def build_one(sim, snap, ref_poses, ref_belt, ref_meas, vid, spec, mag, args) ->
             s = min_jerk((k + 1) / move_steps)
             Xs = Xc0.copy()
             Xs[:3, 3] = Xc0[:3, 3] + s * (Xc1[:3, 3] - Xc0[:3, 3])
+            r = rotvec(Xc0[:3, :3].T @ Xc1[:3, :3])  # zero for translations
+            if np.linalg.norm(r) > 0.0:
+                Xs[:3, :3] = Xc0[:3, :3] @ rot_axis_angle(r / np.linalg.norm(r),
+                                                          s * np.linalg.norm(r))
             q, ep, er, _ = ik(UrTracking, Xs, q_prev[0], pos_tol=1e-6, rot_tol=1e-5)
             if ep > 1e-5 or er > 1e-4:
                 raise RuntimeError(f"UR IK err {ep:.2e} m {er:.2e} rad")

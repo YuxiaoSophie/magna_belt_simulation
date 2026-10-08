@@ -4,6 +4,8 @@
 ``run_round_belt_assembly_controller`` (from the ``magna-deploy-learned-lcs`` worktree: only it
 has ``--local_lcm_url``) and reads its stdout markers. magna binaries resolve
 ``systems/parameters/*.yaml`` relative to their CWD, so each runs from its magna root.
+:class:`MppiControllerProcess` runs ``scripts/lcs/mppi_controller_node.py`` (same markers) with
+the same log API.
 """
 
 from __future__ import annotations
@@ -13,11 +15,14 @@ import os
 import re
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 MAGNA_WORKTREE = Path("/home/hienbui/git/magna-deploy-learned-lcs")
 CONTROLLER_REL = Path("bazel-bin/systems/controllers/run_round_belt_assembly_controller")
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MPPI_NODE = REPO_ROOT / "scripts" / "lcs" / "mppi_controller_node.py"
 SHARED_LCM_MARKERS = ("239.255.76.67", "7667")
 CONTROLLER_STARTED = "Assembly controller started"
 # Substrings of the controller's stdout lines that mark phase/stage transitions.
@@ -125,34 +130,18 @@ class MagnaProcess:
         }
 
 
-class AssemblyControllerProcess(MagnaProcess):
-    """magna's round-belt assembly controller with both LCM URLs set to one private URL."""
+class _ControllerLog(MagnaProcess):
+    """Incremental reading of this run's part of an append-mode controller log."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.params_yaml: Path | None = None
         self._log_offset = 0
         self._read_offset = 0
         self._partial = b""
 
-    def start(self, lcm_url: str, params_yaml, log_path: Path, magna_root: Path = MAGNA_WORKTREE,
-              extra_args=(), binary: Path | None = None) -> int:
-        """``params_yaml`` is relative to ``magna_root`` (the controller's CWD)."""
-        root = Path(magna_root)
-        rel = Path(params_yaml)
-        if rel.is_absolute():
-            rel = rel.relative_to(root)
-        if not (root / rel).is_file():
-            raise FileNotFoundError(root / rel)
-        self.params_yaml = rel
-        url = check_private_url(lcm_url)
-        args = [f"--lcm_url={url}", f"--local_lcm_url={url}",
-                f"--assembly_controller_params={rel}", *extra_args]
+    def _mark_log(self, log_path: Path) -> None:
         self._log_offset = Path(log_path).stat().st_size if Path(log_path).exists() else 0
         self._read_offset, self._partial = self._log_offset, b""
-        return self.launch(root / CONTROLLER_REL if binary is None else binary, args, root,
-                           log_path, url, "bazel build //systems/controllers:"
-                           "run_round_belt_assembly_controller in the worktree")
 
     def own_log(self) -> str:
         """This run's part of the (append-mode) log."""
@@ -184,12 +173,71 @@ class AssemblyControllerProcess(MagnaProcess):
                 raise TimeoutError(f"no {substring!r} after {timeout_s:g} s; log {self.log_path}")
             time.sleep(0.02)
 
+
+class AssemblyControllerProcess(_ControllerLog):
+    """magna's round-belt assembly controller with both LCM URLs set to one private URL."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.params_yaml: Path | None = None
+
+    def start(self, lcm_url: str, params_yaml, log_path: Path, magna_root: Path = MAGNA_WORKTREE,
+              extra_args=(), binary: Path | None = None) -> int:
+        """``params_yaml`` is relative to ``magna_root`` (the controller's CWD)."""
+        root = Path(magna_root)
+        rel = Path(params_yaml)
+        if rel.is_absolute():
+            rel = rel.relative_to(root)
+        if not (root / rel).is_file():
+            raise FileNotFoundError(root / rel)
+        self.params_yaml = rel
+        url = check_private_url(lcm_url)
+        args = [f"--lcm_url={url}", f"--local_lcm_url={url}",
+                f"--assembly_controller_params={rel}", *extra_args]
+        self._mark_log(log_path)
+        return self.launch(root / CONTROLLER_REL if binary is None else binary, args, root,
+                           log_path, url, "bazel build //systems/controllers:"
+                           "run_round_belt_assembly_controller in the worktree")
+
     def describe(self) -> dict:
         info = super().describe()
         params = (None if self.cwd is None or self.params_yaml is None
                   else self.cwd / self.params_yaml)
         info.update(params_yaml=None if params is None else str(params),
                     params_sha256=None if params is None else sha256(params))
+        return info
+
+
+class MppiControllerProcess(_ControllerLog):
+    """``mppi_controller_node.py`` (this repo's venv python, CWD = repo) on one private URL."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.node: Path = MPPI_NODE
+        self.config: Path | None = None
+        self.deploy: Path | None = None
+
+    def start(self, lcm_url: str, deploy, config, log_path: Path, goal: str = "deploy",
+              stages: str = "last", max_duration_s: float = 30.0, extra_args=()) -> int:
+        """``goal``: ``deploy`` or ``demo_goals:PATH`` (the node's ``--goal``)."""
+        self.deploy, self.config = Path(deploy).resolve(), Path(config).resolve()
+        for path in (self.node, self.deploy, self.config):
+            if not path.is_file():
+                raise FileNotFoundError(path)
+        url = check_private_url(lcm_url)
+        args = [str(self.node), "--lcm-url", url, "--deploy", str(self.deploy), "--config",
+                str(self.config), "--goal", goal, "--stages", stages, "--max-duration-s",
+                f"{float(max_duration_s):g}", *extra_args]
+        self._mark_log(log_path)
+        return self.launch(Path(sys.executable), args, REPO_ROOT, log_path, url)
+
+    def describe(self) -> dict:
+        info = super().describe()
+        info.update(node=str(self.node), node_sha256=sha256(self.node),
+                    config=None if self.config is None else str(self.config),
+                    config_sha256=None if self.config is None else sha256(self.config),
+                    deploy=None if self.deploy is None else str(self.deploy),
+                    deploy_sha256=None if self.deploy is None else sha256(self.deploy))
         return info
 
 

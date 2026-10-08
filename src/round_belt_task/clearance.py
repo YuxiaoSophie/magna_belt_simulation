@@ -245,6 +245,46 @@ def gripper_geometry(model, body_qs, X_W_track: np.ndarray, margin: float = PRUN
                    by_jaw={int(k): stacked[i + 1] for i, k in enumerate(jaw_keys)})
 
 
+FRANKA_HAND_BODIES = ("panda_hand", "panda_leftfinger", "panda_rightfinger")
+
+
+def franka_hand_geometry(model, body_q: np.ndarray, X_W_tip: np.ndarray,
+                         margin: float = PRUNE_MARGIN) -> Gripper:
+    """The Franka hand's mesh colliders frozen in the ``finger_tip`` frame at ``X_W_tip``, pruned
+    to the points within ``margin`` of the lowest one (as :func:`gripper_geometry`).
+
+    Primitive colliders (the hand's spheres) are skipped; raises if no mesh collider is found.
+    """
+    collide = int(newton.ShapeFlags.COLLIDE_SHAPES)
+    flags = model.shape_flags.numpy()
+    shape_body = model.shape_body.numpy()
+    types = model.shape_type.numpy()
+    bodies = {b for b in range(model.body_count)
+              if (model.body_label[b] or "").rsplit("/", 1)[-1] in FRANKA_HAND_BODIES}
+    X_W_tip = np.asarray(X_W_tip, dtype=np.float64)
+    rows = []
+    for shape in range(model.shape_count):
+        body = int(shape_body[shape])
+        if (body not in bodies or not int(flags[shape]) & collide
+                or int(types[shape]) != int(newton.GeoType.MESH)):
+            continue
+        X_bs = wp_transform_to_mat4(model.shape_transform.numpy()[shape])
+        in_body = _shape_vertices(model, shape) @ X_bs[:3, :3].T + X_bs[:3, 3]
+        X_wb = wp_transform_to_mat4(body_q[body])
+        world = in_body @ X_wb[:3, :3].T + X_wb[:3, 3]
+        rows.append((body, model.shape_label[shape], in_body, (world - X_W_tip[:3, 3])
+                     @ X_W_tip[:3, :3]))
+    if not rows:
+        raise RuntimeError("no Franka hand mesh colliders found")
+    floor = min(float(local[:, 2].min()) for *_, local in rows) + margin
+    kept = [(b, lab, pts[local[:, 2] <= floor], local[local[:, 2] <= floor])
+            for b, lab, pts, local in rows if np.any(local[:, 2] <= floor)]
+    return Gripper(bodies=tuple(int(b) for b, *_ in kept),
+                   shape_points=tuple(p for _, _, p, _ in kept),
+                   shape_labels=tuple(str(lab) for _, lab, _, _ in kept),
+                   local=np.vstack([local for *_, local in kept]))
+
+
 @dataclass
 class ClampReport:
     """What :func:`clamp_waypoints` had to change to keep the gripper clear."""

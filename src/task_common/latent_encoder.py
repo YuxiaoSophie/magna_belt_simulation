@@ -1,9 +1,11 @@
 """Torch-free learned latent encoder, learned-LCS step and the ``LATENT_STATE`` LCM message.
 
 ``LatentEncoder`` reproduces ``lcs_learning``'s ``PointNetObsAutoEncoder.encode`` from an exported
-``deploy.npz`` (BatchNorm folded, float32 inside); ``LearnedLcs`` is the trained PGD forward step
-(float64); ``DemoGoals`` loads the harness's ``demo_goals.npz``; ``LatentDecoder`` maps a latent back to
-belt points (``decoder.npz``, exporter ``--decoder-out``). numpy + LCM types only.
+``deploy.npz`` (BatchNorm folded, float32 inside); ``BeltMlpEncoder`` and
+``BeltCloudPointNetEncoder`` are opt-in ``encoder_type`` variants; ``LearnedLcs`` is the trained
+PGD forward step (float64); ``DemoGoals`` loads the harness's ``demo_goals.npz``; ``LatentDecoder``
+maps a latent back to belt points (``decoder.npz``, exporter ``--decoder-out``). numpy + LCM types
+only.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from dairlib import (
     lcmt_timestamped_saved_traj,
     lcmt_trajectory_block,
 )
+from task_common.belt_cloud import SEG_FRAME, resample_deterministic
 from task_common.lcs_dataset import BELT_BODIES, BELT_POINTS, STATE_DIM
 
 LATENT_STATE_CHANNEL = "LATENT_STATE"
@@ -27,6 +30,7 @@ LATENT_METADATA_NAME = "latent_encoder"
 LATENT_BLOCK_NAMES = ("latent", "ee_pose_franka", "ee_pose_ur", "proprio")
 _ENC = "encoder__"
 _DEC = "decoder__"
+BELT_CLOUD_TYPE = "belt_cloud_pointnet"
 
 
 def resize_points_ordered(xyz, n_points: int) -> np.ndarray:
@@ -53,15 +57,16 @@ def _scalar(x):
     return np.asarray(x).item()
 
 
-def _fold_bn(w: dict, conv: str, bn: str, eps: float) -> tuple[np.ndarray, np.ndarray]:
+def _fold_bn(w: dict, conv: str, bn: str, eps: float, dtype=np.float32
+             ) -> tuple[np.ndarray, np.ndarray]:
     weight = w[f"{_ENC}pc_ae__{conv}__weight"][:, :, 0]
     bias = w[f"{_ENC}pc_ae__{conv}__bias"]
     gamma, beta = w[f"{_ENC}pc_ae__{bn}__weight"], w[f"{_ENC}pc_ae__{bn}__bias"]
     mean, var = w[f"{_ENC}pc_ae__{bn}__running_mean"], w[f"{_ENC}pc_ae__{bn}__running_var"]
     scale = gamma / np.sqrt(var + eps)
     # Transposed so the per-point layer is ``x @ W``.
-    return ((weight * scale[:, None]).T.astype(np.float32),
-            (scale * (bias - mean) + beta).astype(np.float32))
+    return ((weight * scale[:, None]).T.astype(dtype),
+            (scale * (bias - mean) + beta).astype(dtype))
 
 
 class LatentEncoder:
@@ -84,10 +89,12 @@ class LatentEncoder:
             raise ValueError(f"encoder weights do not match the dims (fused {fused})")
 
     @classmethod
-    def load(cls, deploy_npz) -> LatentEncoder | BeltMlpEncoder:
+    def load(cls, deploy_npz) -> LatentEncoder | BeltMlpEncoder | BeltCloudPointNetEncoder:
         weights = _load_npz(deploy_npz)
         if "encoder_type" in weights and str(_scalar(weights["encoder_type"])) == "belt_mlp":
             return BeltMlpEncoder(weights)
+        if "encoder_type" in weights and str(_scalar(weights["encoder_type"])) == BELT_CLOUD_TYPE:
+            return BeltCloudPointNetEncoder(weights)
         return cls(weights)
 
     def preprocess(self, pc_raw) -> np.ndarray:
@@ -178,8 +185,80 @@ class BeltMlpEncoder:
         return self._mlp(np.stack([self._belt(b) for b in belts])).astype(np.float64)
 
 
+class BeltCloudPointNetEncoder:
+    """Belt cloud only (``encoder_type`` belt_cloud_pointnet): the colour-segmented belt cloud in
+    the known pulley frame (any M) -> ``belt_cloud.resample_deterministic`` -> PointNet (folded
+    BN) + fusion MLP, float64. ``prop40``/``belt150`` are ignored; ``last_empty`` flags M == 0."""
+
+    def __init__(self, weights: dict) -> None:
+        self.num_points = int(_scalar(weights["n_points"]))
+        self.frame = str(_scalar(weights["frame"]))
+        self.proprio_dim = int(_scalar(weights["encoder_proprio_dim"]))
+        self.belt_num_points = int(_scalar(weights["encoder_belt_num_points"]))
+        self.point_feat_dim = int(_scalar(weights["encoder_point_feat_dim"]))
+        if self.frame != SEG_FRAME:
+            raise ValueError(f"{BELT_CLOUD_TYPE}: frame {self.frame!r} != {SEG_FRAME!r}")
+        if self.proprio_dim or self.belt_num_points:
+            raise ValueError(f"{BELT_CLOUD_TYPE}: proprio/belt inputs must be 0")
+        if int(_scalar(weights["encoder_num_points"])) != self.num_points:
+            raise ValueError(f"{BELT_CLOUD_TYPE}: encoder_num_points != n_points")
+        eps = float(_scalar(weights["encoder_bn_epsilon"]))
+        self._layers = [_fold_bn(weights, f"conv{i}", f"bn{i}", eps, np.float64)
+                        for i in (1, 2, 3)]
+        self._w0 = weights[f"{_ENC}fuse_mlp__0__weight"].T.astype(np.float64)
+        self._b0 = weights[f"{_ENC}fuse_mlp__0__bias"].astype(np.float64)
+        self._w2 = weights[f"{_ENC}fuse_mlp__2__weight"].T.astype(np.float64)
+        self._b2 = weights[f"{_ENC}fuse_mlp__2__bias"].astype(np.float64)
+        self.latent_dim = int(self._b2.shape[0])
+        if (self._w0.shape[0] != self.point_feat_dim
+                or self._layers[2][1].shape[0] != self.point_feat_dim):
+            raise ValueError(f"encoder weights do not match point_feat_dim {self.point_feat_dim}")
+        self.n_points = self.num_points
+        self.last_empty = False
+
+    def preprocess(self, pc_raw) -> np.ndarray:
+        """``(num_points, 3)`` float32 (zeros for an empty cloud)."""
+        return resample_deterministic(pc_raw, self.num_points)[0]
+
+    def pc_global(self, pc_resized) -> np.ndarray:
+        """``(..., num_points, 3)`` resampled cloud(s) -> ``(..., point_feat_dim)`` float64."""
+        x = np.asarray(pc_resized, dtype=np.float64)
+        (w1, b1), (w2, b2), (w3, b3) = self._layers
+        x = np.maximum(x @ w1 + b1, 0.0)
+        x = np.maximum(x @ w2 + b2, 0.0)
+        return np.max(x @ w3 + b3, axis=-2)
+
+    def _fuse(self, g: np.ndarray) -> np.ndarray:
+        return np.maximum(g @ self._w0 + self._b0, 0.0) @ self._w2 + self._b2
+
+    def encode(self, pc_raw, prop40=None, belt150=None) -> np.ndarray:
+        """``z (latent_dim,)`` float64 of a pulley-frame belt cloud ``(M, 3)``."""
+        pc, self.last_empty = resample_deterministic(pc_raw, self.num_points)
+        return self._fuse(self.pc_global(pc))
+
+    def encode_batch(self, pc_list, props=None, belts=None) -> np.ndarray:
+        """``(B, latent_dim)`` float64; ``last_empty`` becomes a ``(B,)`` bool array."""
+        pcs, empty = zip(*(resample_deterministic(pc, self.num_points) for pc in pc_list))
+        self.last_empty = np.asarray(empty, dtype=bool)
+        return self._fuse(self.pc_global(np.stack(pcs)))
+
+
+def encoder_input(encoder, frame: dict) -> np.ndarray:
+    """The cloud ``encoder.encode`` takes: ``frame["pcd_belt_seg"]`` (pulley-frame segmented belt)
+    for ``BeltCloudPointNetEncoder``, else ``frame["cloud"]`` (camera cloud)."""
+    if isinstance(encoder, BeltCloudPointNetEncoder):
+        seg = frame.get("pcd_belt_seg")
+        if seg is None:
+            raise ValueError(f"{BELT_CLOUD_TYPE} encoder needs the segmented belt cloud "
+                             "(pcd_belt_seg, --belt-seg)")
+        return seg
+    return frame["cloud"]
+
+
 class LatentDecoder:
-    """``dec_mlp`` + ``dec_pc`` of the checkpoint: ``z (16,) -> belt points (150, 3)``, float32."""
+    """``dec_mlp`` + ``dec_pc`` of the checkpoint: ``z (16,) -> belt points (num_points, 3)``,
+    float32: 150 ordered world-frame points, or for ``belt_cloud_pointnet`` 256 unordered
+    points in the known pulley frame."""
 
     def __init__(self, weights: dict) -> None:
         self._layers = [
@@ -189,6 +268,7 @@ class LatentDecoder:
         self.num_points = int(_scalar(weights["reconstruction_num_points"]))
         self.latent_dim = int(self._layers[0][0].shape[0])
         self.checkpoint_sha256 = str(_scalar(weights["checkpoint_sha256"]))
+        self.frame = str(_scalar(weights["frame"])) if "frame" in weights else "world"
         if self._layers[-1][1].shape[0] != 3 * self.num_points:
             raise ValueError(f"dec_pc output {self._layers[-1][1].shape[0]} != 3 x "
                              f"{self.num_points} points")

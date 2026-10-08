@@ -12,6 +12,8 @@ Sim (with ``round_belt_lcm_simulation.py --cameras --publish-point-cloud --publi
         --ur-state-channel UR_STATE_SIM --state-match exact
 Hardware mapping: ``--ur-state-channel UR_STATE --state-match nearest --belt-input points150``
 (the estimator's 150 vertices, resized like the loader; the model was trained on 48 bodies).
+A ``belt_cloud_pointnet`` deploy encodes the segmented pulley-frame belt cloud and needs
+``--belt-seg``.
 """
 
 from __future__ import annotations
@@ -39,10 +41,13 @@ from magna import lcmt_round_belt_state
 from round_belt_task.arm_kinematics import FrankaTip, UrTracking
 from round_belt_task.episode_io import pose7_mat
 from round_belt_task.waypoints import MAGNA_PARAMS_SIM_YAML, board_pose
+from task_common import belt_cloud as bc
 from task_common import lcs_dataset as lcs
 from task_common.latent_encoder import (
     LATENT_STATE_CHANNEL,
+    BeltCloudPointNetEncoder,
     LatentEncoder,
+    encoder_input,
     latent_state_message,
     resize_points_ordered,
 )
@@ -61,6 +66,17 @@ UR_POSITION_NAMES = _UR_JOINT_NAMES
 STATE_BUFFER_US = 2_000_000
 PAIR_TIMEOUT_US = 2_000_000
 BELT_INPUTS = ("bodies48", "points150")
+CLOUD_NOISE_RNG = 11
+
+
+def cloud_rgb(msg: lcmt_point_cloud) -> np.ndarray:
+    """``(N, 3)`` uint8 of the ``rgb`` field (bytes r, g, b, pad; ``point_cloud_msg``)."""
+    field = next((f for f in msg.fields if f.name == "rgb"), None)
+    if field is None:
+        raise ValueError("point cloud lacks an rgb field")
+    n, step = int(msg.width) * int(msg.height), int(msg.point_step)
+    raw = np.frombuffer(msg.data, dtype=np.uint8, count=n * step).reshape(n, step)
+    return raw[:, int(field.byte_offset):int(field.byte_offset) + 3].copy()
 
 
 @dataclass
@@ -140,6 +156,9 @@ class LatentEncoderNode:
     def __init__(self, cli: argparse.Namespace, lc: lcm.LCM | None = None) -> None:
         self.cli = cli
         self.encoder = LatentEncoder.load(cli.deploy)
+        if isinstance(self.encoder, BeltCloudPointNetEncoder) and not getattr(cli, "belt_seg",
+                                                                              False):
+            raise SystemExit(f"{cli.deploy}: a belt_cloud_pointnet deploy needs --belt-seg")
         self.X_WB = board_pose(Path(cli.params))
         self.lc = lc or lcm.LCM(cli.lcm_url)
         self.franka, self.ur = StateRing(), StateRing()
@@ -147,12 +166,34 @@ class LatentEncoderNode:
         self.belts: dict[int, np.ndarray] = {}
         self.last_utime: int | None = None
         self.min_period_us = round(cli.min_period_s * 1e6)
+        self.cloud_opts = self._cloud_options(cli)
+        self.cloud_rgb: dict[int, np.ndarray] = {}
+        self.belt_seg: tuple[int, np.ndarray] | None = None  # (utime, (M, 3) pulley frame)
         self.published = self.misses = self.dropped = self.errors = 0
         self._reset_stats(time.perf_counter())
         self.lc.subscribe(cli.franka_state_channel, self._on_franka)
         self.lc.subscribe(cli.ur_state_channel, self._on_ur)
         self.lc.subscribe(cli.point_cloud_channel, self._on_cloud)
         self.lc.subscribe(cli.belt_state_channel, self._on_belt)
+
+    @staticmethod
+    def _cloud_options(cli: argparse.Namespace) -> dict | None:
+        noise = bc.cloud_noise_spec(getattr(cli, "cloud_noise", "off"))
+        seg = bool(getattr(cli, "belt_seg", False))
+        if noise.is_off() and not seg:
+            return None
+        return {"noise": noise, "seg": bc.BeltSegSpec(), "keep_seg": seg,
+                "pose": bc.known_large_pulley_pose7(), "origins": bc.scene_camera_origins(),
+                "rng": np.random.default_rng([noise.seed, CLOUD_NOISE_RNG])}
+
+    def _sensor_cloud(self, utime: int, cloud: np.ndarray, ee_f, ee_u) -> np.ndarray:
+        """The noised cloud the encoder sees; keeps the segmented belt in ``belt_seg``."""
+        c = self.cloud_opts
+        out = bc.belt_seg_frame(cloud, self.cloud_rgb[utime], c["noise"], c["seg"], c["rng"],
+                                c["origins"], bc.jaw_centres_from_poses(ee_f, ee_u), c["pose"])
+        if c["keep_seg"]:
+            self.belt_seg = (utime, out["pcd_belt_seg"])
+        return lcs.camera_points(out["pcd"])
 
     def _reset_stats(self, now: float) -> None:
         self._t0 = now
@@ -177,6 +218,8 @@ class LatentEncoderNode:
             return
         try:
             cloud = lcs.camera_points(point_cloud_xyz(msg))
+            if self.cloud_opts is not None:
+                self.cloud_rgb[int(msg.utime)] = cloud_rgb(msg)
         except ValueError as exc:
             self.errors += 1
             print(f"[NODE] cloud dropped: {exc}", flush=True)
@@ -187,8 +230,9 @@ class LatentEncoderNode:
     def _on_belt(self, _ch: str, data: bytes) -> None:
         msg = lcmt_round_belt_state.decode(data)
         try:
+            # belt_cloud_pointnet (0 belt points) ignores it; the belt state still pairs the cloud
             belt = belt_input(belt_world(msg, self.X_WB), self.cli.belt_input,
-                              self.encoder.belt_num_points)
+                              self.encoder.belt_num_points or lcs.BELT_POINTS)
         except ValueError as exc:
             self.errors += 1
             print(f"[NODE] belt state dropped: {exc}", flush=True)
@@ -223,12 +267,18 @@ class LatentEncoderNode:
     def _discard(self, utime: int) -> None:
         self.clouds.pop(utime, None)
         self.belts.pop(utime, None)
+        self.cloud_rgb.pop(utime, None)
 
     def _publish(self, utime: int, franka: ArmState, ur: ArmState) -> None:
         cloud, wall = self.clouds[utime]
         belt = self.belts[utime]
         ee_f, ee_u, prop = proprio(franka, ur)
-        z = self.encoder.encode(cloud, prop, belt)
+        frame = {"cloud": cloud}
+        if self.cloud_opts is not None:
+            frame["cloud"] = self._sensor_cloud(utime, cloud, ee_f, ee_u)
+            if self.belt_seg is not None and self.belt_seg[0] == utime:
+                frame["pcd_belt_seg"] = self.belt_seg[1]
+        z = self.encoder.encode(encoder_input(self.encoder, frame), prop, belt)
         msg = latent_state_message(utime, utime * 1e-6, z, ee_f, ee_u, prop)
         self.lc.publish(self.cli.latent_channel, msg.encode())
         self._discard(utime)
@@ -283,6 +333,11 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--state-match", choices=("exact", "nearest"), default="exact")
     p.add_argument("--min-period-s", type=float, default=0.075)
     p.add_argument("--stats-every", type=float, default=5.0, help="stats period [s]")
+    p.add_argument("--cloud-noise", default="off", metavar="PRESET|JSON",
+                   help=f"encode the noised cloud: {sorted(bc.CLOUD_NOISE_PRESETS)} or a .json "
+                        "(RNG [spec seed, 11]; jaws from this node's FK)")
+    p.add_argument("--belt-seg", action="store_true",
+                   help="keep the segmented belt cloud (pulley frame) as node.belt_seg")
     return p
 
 

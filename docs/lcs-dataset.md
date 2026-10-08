@@ -21,6 +21,7 @@ collector wins, because it produced the logs lcs_learning trains on.
 | `pcd_rgb` | object | `(T,)`, each `(N_t, 3)` uint8 | Colour of each `pcd` point |
 | `pcd_belt` | float32 | `(T, 150, 3)` | Belt points, temporally consistent per index (see §4) |
 | `pcd_kinematic` | float32 | `(T, K, 3)`; `K = 0` by default | Sampled rigid gripper/board geometry (off by default) |
+| `pcd_belt_seg` | object | `(T,)`, each `(M_t, 3)` float32 | Optional (`--belt-seg`): belt points colour-segmented from `pcd`, in the known large-pulley frame (§4) |
 | `state` | float64 | `(T, 40)` | Proprioception, §2 |
 | `actions` | float64 | `(T, 12)` | Commanded end-effector deltas, §3 |
 | `utime` | int64 | `(T,)` | Sim time of the sample in µs, spaced by exactly the sample period |
@@ -179,6 +180,23 @@ knot1)`), and for the UR `sim_cmd_ur_t1 - sim_cmd_ur_t` (the line at `t + dt` mi
   the old equal-current-arc-length resampling, whose index drifts up to ~0.9 body units (~12 mm)
   along the material as the belt stretches; `scripts/lcs/rewrite_belt_points.py RUN_DIR`
   rewrites them (idempotent, `--dry-run`).
+- `pcd_belt_seg` (optional; `src/task_common/belt_cloud.py`): the points of `pcd` that pass
+  the orange colour rule (`BeltSegSpec`; a frame with fewer than `min_points` such points
+  stores `(0, 3)`), expressed in the KNOWN large-pulley frame (`known_large_pulley_pose7()`:
+  the scene's board weld composed with the URDF pulley joint at angle 0; x/y in the groove
+  plane, z = h along the pulley +Z, metres). Written by `collect_lcs_dataset.py` and
+  `eval_learned_mpc.py` with `--belt-seg` and by `scripts/lcs/belt_seg_offline.py` (copies of
+  recorded episodes into a new root). `--cloud-noise PRESET|path.json` (`off` default,
+  `mild`, `real_like`, `harsh`; `CloudNoiseSpec`) makes the stored `pcd`/`pcd_rgb` the noised
+  sensor cloud (range noise along the camera ray, dropout, extra dropout and belt <-> non-belt
+  colour swaps within `boundary_mm` of the jaws and the pulley rim, outliers, RGB jitter); the
+  clean cloud is not stored, and the harness's encoder sees the noised cloud. RNG: collector
+  `[seed, episode, 11]`, harness `[crc32(start id), repeat, 11]`, offline `[seed,
+  crc32(relative path), 11]`. `sim_meta["belt_seg"] = {version: 1, frame: "pulley_large",
+  pulley_pose7_known (xyz_wxyz), noise_spec, seg_spec, source: "record" | "offline"}` and
+  `sim_meta["cloud_noise"]` (spec + camera origins) record the settings; `validate_episode`
+  checks the key's shape/dtype and the meta block when the key is present. Flags off: files
+  are unchanged.
 - `pcd_kinematic`: by default the collector does not record kinematic points
   (`record_kinematic_points=False`), so it stores `(0, 3)` per frame. `camera_plus_belt` does not
   use it. The sim writes the same empty `(T, 0, 3)` by default (`kinematic_points()`).

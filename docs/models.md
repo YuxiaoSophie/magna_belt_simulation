@@ -22,6 +22,10 @@ the campaign has a single model. Exceptions and mappings:
   variants (as agreed).
 - **Old names V1 / V2 of 2026-09-30** (the state-dependent-B models) are now **V7a / V7b**.
   "V1"/"V2" in the 2026-09-30 day log and in lcs_learning's v7 files mean V7a/V7b.
+- **Runs** (as opposed to models) are `V<campaign>-<nn>`, indexed in `docs/realfirst-campaign.md`:
+  V11-01 / V11-02 = the real-first loops in `data/lcs/realfirst/v1`, `v1_1` (models V11a-i);
+  V12-01… = the 2026-10-06 campaign (models V12a-u, V13a). Lowercase "v1" elsewhere in this
+  file means campaign V1's insertion data.
 
 **Descriptive tag = `<data>-<objective>-<dynamics>`:**
 
@@ -65,6 +69,9 @@ token list (§6).
 | | `rec6` / `rec4` | recorded replay sets (nominal + 3/2 of set1 + 2/1 of set3) |
 | | `eeoff4` / `long25` | EE-offset starts (4) / set1 gv_03 as one 35 s episode |
 | | `seat6-1goal30` | seat6 starts, seated goal only (stage 1 0.075 s), stage 2 30 s |
+| | `seat6-rf` | seat6 starts, the seed demo's two goals (pre_place_2 4 s, seated 30 s), MPPI node, belt-seg cloud real_like (V11) |
+| | `seat6-rf11` | seat6 starts, MPPI two stages on the latent (demo-spread tol, streak 3, 10 s / 30 s), clearance, belt-seg clean cloud |
+| | `seat6-rf12` | seat6 starts, MPPI on the latent, no prefix (V12 campaign cells: eval is always the full task), clearance, belt-seg clean cloud |
 | | `under12` | 12 belt-under-pulley snapshots (`data/lcs/contact/snapshots{,_heldout}`), seated goal only, 30 s |
 | | `cell-s30` | one seat6 cell re-run with the stage-2 timeout 10 → 30 s |
 | cost | `Qw` | whitened latent cost (default) |
@@ -128,6 +135,52 @@ note column.
 | V10l | `mix-gd+vg+rec0.001-fixB` | graphemb_rs_rec0.001 | rejected | V10a | + recon 0.001 (from scratch, seed 0) |
 | V10m | `mix-gd+vg+rec0.003-fixB` | graphemb_rs_rec0.003 | rejected (closest recon variant) | V10a | + recon 0.003 (from scratch, seed 0) |
 | V10n | `mix-gd+vg+rec0.01-fixB` | graphemb_rs_rec0.01 | rejected | V10a | + recon 0.01 (from scratch, seed 0) |
+| V11a | `rf-rmse+vg+aux-fixB` | - | candidate | - | real-first loop iteration 0: belt-cloud encoder + LCS, joint fresh refit on the buffer, box ub-tr0 |
+| V11b | `rf-rmse+vg+aux-fixB` | - | candidate | V11a | real-first loop iteration 1: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr1 |
+| V11c | `rf-rmse+vg+aux-fixB` | - | candidate | V11b | real-first loop iteration 2: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr2 |
+| V11d | `rf-sk10+vg+aux-fixB` | - | candidate | - | real-first loop iteration 0: belt-cloud encoder + LCS, joint fresh refit on the buffer, box ub-tr0 |
+| V11e | `rf-sk10+vg+aux-fixB` | - | candidate | V11d | real-first loop iteration 1: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr1 |
+| V11f | `rf-sk10+vg+aux-fixB` | - | candidate | V11e | real-first loop iteration 2: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr2 |
+| V11g | `rf-sk10+vg+aux-fixB` | - | candidate | V11f | real-first loop iteration 3: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr3 |
+| V11h | `rf-sk10+vg+aux-fixB` | - | candidate | V11g | real-first loop iteration 4: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr4 |
+| V11i | `rf-sk10+vg+aux-fixB` | - | candidate | V11h | real-first loop iteration 5: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr5 |
+| V12a | `rf-sk10+vg+aux-fixB-C2_prefix` | - | candidate | - | real-first loop iteration 0: belt-cloud encoder + LCS, joint fresh refit on the buffer, box ub-tr0 |
+| V12b | `rf-sk10+vg+aux-fixB-C2_prefix` | - | candidate | V12a | real-first loop iteration 1: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr1 |
+| V12c | `rf-sk10+vg+aux-fixB-C2_prefix` | - | candidate | V12b | real-first loop iteration 2: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr2 |
+| V12d | `rf-sk10+vg+aux-fixB-C3_both` | - | candidate | - | real-first loop iteration 0: belt-cloud encoder + LCS, joint fresh refit on the buffer, box ub-tr0 |
+| V12g | `rf-sk10+vg+aux-fixB-C1_transport` | - | candidate | - | real-first loop iteration 0: belt-cloud encoder + LCS, joint fresh refit on the buffer, box ub-tr0 |
+| V12h | `rf-sk10+vg+aux-fixB-C1_transport` | - | candidate | V12g | real-first loop iteration 1: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr1 |
+| V12j | `rf-sk10+vg+aux-fixB-full` | - | candidate | - | real-first loop iteration 0: belt-cloud encoder + LCS, joint fresh refit on the buffer, box ub-tr0 |
+| V12k | `rf-sk10+vg+aux-fixB-full` | - | candidate | V12j | real-first loop iteration 1: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr1 |
+| V12l | `rf-sk10+vg+aux-fixB-full` | - | candidate | V12k | real-first loop iteration 2: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr2 |
+| V12m | `rf-sk10+vg+aux-fixB-full` | - | candidate | V12l | real-first loop iteration 3: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr3 |
+| V12n | `rf-sk10+vg+aux-fixB-full` | - | candidate | V12m | real-first loop iteration 4: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr4 |
+| V12o | `rf-sk10+vg+aux-fixB-full` | - | candidate | V12n | real-first loop iteration 5: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr5 |
+| V12p | `rf-sk10+vg+aux-fixB-full` | - | candidate | V12o | real-first loop iteration 6: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr6 |
+| V12q | `rf-sk10+vg+aux-fixB-full` | - | candidate | V12p | real-first loop iteration 7: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr7 |
+| V12r | `rf-sk10+vg+aux-fixB-full` | - | candidate | V12q | real-first loop iteration 8: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr8 |
+| V12s | `rf-sk10+vg+aux-fixB-full` | - | candidate | V12r | real-first loop iteration 9: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr9 |
+| V13a | `rf-sk10+vg+aux-fixB-full2_lcsonly` | - | candidate | - | real-first loop iteration 0: belt-cloud encoder + LCS, joint fresh refit on the buffer, box ub-tr0 |
+| V12t | `rf-sk10+vg+aux-fixB-full2_gate` | - | candidate | - | real-first loop iteration 0: belt-cloud encoder + LCS, joint fresh refit on the buffer, box ub-tr0 |
+| V12u | `rf-sk10+vg+aux-fixB-full2_gate` | - | candidate | V12t | real-first loop iteration 1: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr1 |
+| V12v | `rf-sk10+vg+aux-fixB-v12_18` | - | candidate | - | real-first loop iteration 0: belt-cloud encoder + LCS, joint fresh refit on the buffer, box ub-tr0 |
+| V12w | `rf-sk10+vg+aux-fixB-v12_18` | - | candidate | V12v | real-first loop iteration 1: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr1 |
+| V12x | `rf-sk10+vg+aux-fixB-v12_18` | - | candidate | V12w | real-first loop iteration 2: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr2 |
+| V14a | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | - | real-first loop iteration 0: belt-cloud encoder + LCS, joint fresh refit on the buffer, box ub-tr0 |
+| V15a | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | - | real-first loop iteration 0: belt-cloud encoder + LCS, joint fresh refit on the buffer, box ub-tr0 |
+| V15b | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V15a | real-first loop iteration 2: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr2 |
+| V15c | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V15b | real-first loop iteration 3: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr3 |
+| V15d | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V15c | real-first loop iteration 4: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr4 |
+| V16a | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | - | real-first loop iteration 0: belt-cloud encoder + LCS, joint fresh refit on the buffer, box ub-tr0 |
+| V16b | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V16a | real-first loop iteration 1: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr1 |
+| V16c | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V16b | real-first loop iteration 2: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr2 |
+| V16d | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V16c | real-first loop iteration 3: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr3 |
+| V16e | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V16d | real-first loop iteration 4: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr4 |
+| V16f | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V16e | real-first loop iteration 5: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr5 |
+| V16g | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V16f | real-first loop iteration 6: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr6 |
+| V16h | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V16g | real-first loop iteration 7: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr7 |
+| V16i | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V16h | real-first loop iteration 8: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr8 |
+| V16j | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V16i | real-first loop iteration 9: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr9 |
 
 Side runs without an ID (`models.yaml` lists them under V6a/V6b): `t6a_w10` (`trafqf0l`) and
 `t6b_w1` (`6n5j9jvb`) stopped at epoch 30; `t6b_w10` (`q25alk7k`) segfaulted at epoch 216 and
@@ -182,6 +235,52 @@ without an ID (`runs/`: `graphemb`, `graphemb_dyn0.01..0.3`, `graphemb_rec0.003.
 | V10l | same | `… --recon-weight 0.001` | `runs/graphemb_rs_rec0.001` | - | 40k | `deploy_v10l` | ub-ins |
 | V10m | same | `… --recon-weight 0.003` | `runs/graphemb_rs_rec0.003` | - | 40k | `deploy_v10m` | ub-ins |
 | V10n | same | `… --recon-weight 0.01` | `runs/graphemb_rs_rec0.01` | - | 40k | `deploy_v10n` | ub-ins |
+| V11a | `sim_belt_v11_20261005` | `refit_from_buffer.py` | `iter0/refit/r0_seed` | - | epoch 60 | `iter0/deploy_v11a` | ub-tr0 |
+| V11b | `sim_belt_v11_20261005` | `refit_from_buffer.py` | `iter1/refit/r1_joint` | - | epoch 30 | `iter1/deploy_v11b` | ub-tr1 |
+| V11c | `sim_belt_v11_20261005` | `refit_from_buffer.py` | `iter2/refit/r2_joint` | - | epoch 30 | `iter2/deploy_v11c` | ub-tr2 |
+| V11d | `sim_belt_v11_20261006` | `refit_from_buffer.py` | `iter0/refit/r0_seed` | - | epoch 60 | `iter0/deploy_v11d` | ub-tr0 |
+| V11e | `sim_belt_v11_20261006` | `refit_from_buffer.py` | `iter1/refit/r1_joint` | - | epoch 30 | `iter1/deploy_v11e` | ub-tr1 |
+| V11f | `sim_belt_v11_20261006` | `refit_from_buffer.py` | `iter2/refit/r2_joint` | - | epoch 30 | `iter2/deploy_v11f` | ub-tr2 |
+| V11g | `sim_belt_v11_20261006` | `refit_from_buffer.py` | `iter3/refit/r3_joint` | - | epoch 30 | `iter3/deploy_v11g` | ub-tr3 |
+| V11h | `sim_belt_v11_20261006` | `refit_from_buffer.py` | `iter4/refit/r4_joint` | - | epoch 30 | `iter4/deploy_v11h` | ub-tr4 |
+| V11i | `sim_belt_v11_20261006` | `refit_from_buffer.py` | `iter5/refit/r5_joint` | - | epoch 30 | `iter5/deploy_v11i` | ub-tr5 |
+| V12a | `C2_prefix` | `refit_from_buffer.py` | `iter0/refit/r0_seed` | - | epoch 60 | `iter0/deploy_v12a` | ub-tr0 |
+| V12b | `C2_prefix` | `refit_from_buffer.py` | `iter1/refit/r1_joint` | - | epoch 30 | `iter1/deploy_v12b` | ub-tr1 |
+| V12c | `C2_prefix` | `refit_from_buffer.py` | `iter2/refit/r2_joint` | - | epoch 30 | `iter2/deploy_v12c` | ub-tr2 |
+| V12d | `C3_both` | `refit_from_buffer.py` | `iter0/refit/r0_seed` | - | epoch 60 | `iter0/deploy_v12d` | ub-tr0 |
+| V12g | `C1_transport` | `refit_from_buffer.py` | `iter0/refit/r0_seed` | - | epoch 60 | `iter0/deploy_v12g` | ub-tr0 |
+| V12h | `C1_transport` | `refit_from_buffer.py` | `iter1/refit/r1_joint` | - | epoch 30 | `iter1/deploy_v12h` | ub-tr1 |
+| V12j | `full` | `refit_from_buffer.py` | `iter0/refit/r0_seed` | - | epoch 60 | `iter0/deploy_v12j` | ub-tr0 |
+| V12k | `full` | `refit_from_buffer.py` | `iter1/refit/r1_joint` | - | epoch 30 | `iter1/deploy_v12k` | ub-tr1 |
+| V12l | `full` | `refit_from_buffer.py` | `iter2/refit/r2_joint` | - | epoch 30 | `iter2/deploy_v12l` | ub-tr2 |
+| V12m | `full` | `refit_from_buffer.py` | `iter3/refit/r3_joint` | - | epoch 30 | `iter3/deploy_v12m` | ub-tr3 |
+| V12n | `full` | `refit_from_buffer.py` | `iter4/refit/r4_joint` | - | epoch 30 | `iter4/deploy_v12n` | ub-tr4 |
+| V12o | `full` | `refit_from_buffer.py` | `iter5/refit/r5_joint` | - | epoch 30 | `iter5/deploy_v12o` | ub-tr5 |
+| V12p | `full` | `refit_from_buffer.py` | `iter6/refit/r6_joint` | - | epoch 30 | `iter6/deploy_v12p` | ub-tr6 |
+| V12q | `full` | `refit_from_buffer.py` | `iter7/refit/r7_joint` | - | epoch 30 | `iter7/deploy_v12q` | ub-tr7 |
+| V12r | `full` | `refit_from_buffer.py` | `iter8/refit/r8_joint` | - | epoch 30 | `iter8/deploy_v12r` | ub-tr8 |
+| V12s | `full` | `refit_from_buffer.py` | `iter9/refit/r9_joint` | - | epoch 30 | `iter9/deploy_v12s` | ub-tr9 |
+| V13a | `full2_lcsonly` | `refit_from_buffer.py` | `iter0/refit/r0_seed` | - | epoch 60 | `iter0/deploy_v13a` | ub-tr0 |
+| V12t | `full2_gate` | `refit_from_buffer.py` | `iter0/refit/r0_seed` | - | epoch 60 | `iter0/deploy_v12t` | ub-tr0 |
+| V12u | `full2_gate` | `refit_from_buffer.py` | `iter1/refit/r1_joint` | - | epoch 30 | `iter1/deploy_v12u` | ub-tr1 |
+| V12v | `v12_18` | `refit_from_buffer.py` | `iter0/refit/r0_seed` | - | epoch 60 | `iter0/deploy_v12v` | ub-tr0 |
+| V12w | `v12_18` | `refit_from_buffer.py` | `iter1/refit/r1_joint` | - | epoch 30 | `iter1/deploy_v12w` | ub-tr1 |
+| V12x | `v12_18` | `refit_from_buffer.py` | `iter2/refit/r2_joint` | - | epoch 30 | `iter2/deploy_v12x` | ub-tr2 |
+| V14a | `v12_27` | `refit_from_buffer.py` | `iter0/refit/r0_seed` | - | epoch 60 | `iter0/deploy_v14a` | ub-tr0 |
+| V15a | `v12_35` | `refit_from_buffer.py` | `iter0/refit/r0_seed` | - | epoch 60 | `iter0/deploy_v15a` | ub-tr0 |
+| V15b | `v12_35` | `refit_from_buffer.py` | `iter2/refit/r2_lcs_only` | - | epoch 30 | `iter2/deploy_v15b` | ub-tr2 |
+| V15c | `v12_35` | `refit_from_buffer.py` | `iter3/refit/r3_lcs_only` | - | epoch 30 | `iter3/deploy_v15c` | ub-tr3 |
+| V15d | `v12_35` | `refit_from_buffer.py` | `iter4/refit/r4_lcs_only` | - | epoch 30 | `iter4/deploy_v15d` | ub-tr4 |
+| V16a | `v12_36` | `refit_from_buffer.py` | `iter0/refit/r0_seed` | - | epoch 60 | `iter0/deploy_v16a` | ub-tr0 |
+| V16b | `v12_36` | `refit_from_buffer.py` | `iter1/refit/r1_lcs_only` | - | epoch 30 | `iter1/deploy_v16b` | ub-tr1 |
+| V16c | `v12_36` | `refit_from_buffer.py` | `iter2/refit/r2_lcs_only` | - | epoch 30 | `iter2/deploy_v16c` | ub-tr2 |
+| V16d | `v12_36` | `refit_from_buffer.py` | `iter3/refit/r3_lcs_only` | - | epoch 30 | `iter3/deploy_v16d` | ub-tr3 |
+| V16e | `v12_36` | `refit_from_buffer.py` | `iter4/refit/r4_lcs_only` | - | epoch 30 | `iter4/deploy_v16e` | ub-tr4 |
+| V16f | `v12_36` | `refit_from_buffer.py` | `iter5/refit/r5_lcs_only` | - | epoch 30 | `iter5/deploy_v16f` | ub-tr5 |
+| V16g | `v12_36` | `refit_from_buffer.py` | `iter6/refit/r6_lcs_only` | - | epoch 30 | `iter6/deploy_v16g` | ub-tr6 |
+| V16h | `v12_36` | `refit_from_buffer.py` | `iter7/refit/r7_lcs_only` | - | epoch 30 | `iter7/deploy_v16h` | ub-tr7 |
+| V16i | `v12_36` | `refit_from_buffer.py` | `iter8/refit/r8_lcs_only` | - | epoch 30 | `iter8/deploy_v16i` | ub-tr8 |
+| V16j | `v12_36` | `refit_from_buffer.py` | `iter9/refit/r9_lcs_only` | - | epoch 30 | `iter9/deploy_v16j` | ub-tr9 |
 
 Checkpoint date folders: V1 and V2 `2026-09-24` (V2's campaign folder is dated 20260925),
 V3 `2026-09-28`, V4/V5 `2026-09-29`, V6/V7 `2026-09-30`. V10 encoder runs (`phi.pt`, `z.npz`,
@@ -394,6 +493,27 @@ no per-folder table; their results are in the worktree
 | V10m · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10M_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | 0/6, closest (h 5.7-9.5, 5 slanted), RMSE 27.1 |
 | V10n · seat6 · Qi · ub-ins | `mpc_eval/20261001-v10/20261001_V10N_seat6_Qw_ub-ins` | 10-01 | 6 / 6 | `…/table.md` | 0/6, RMSE 49.0 |
 | V2 · cell-s30 · Qw · ub-ins | `mpc_eval/20261001-v10/20261001_V2_long30` | 10-01 | 2 / 2 | `…/*/index.json` | 09-26 params, stage 2 30 s: urtip strict (wrap 142.1°, h 0.03); gv_01 engaged (81.4°, h 1.94) |
+| V11b · seat6-rf · Qw · ub-tr1 | `data/lcs/realfirst/v1/iter1/eval` | 10-05 | 6 / 6 | `…/table.md` | V11 loop iteration 1, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 59.6 vs the demo belt, unsafe 6, solve p95 11 ms |
+| V11e · seat6-rf11 · Qw · ub-tr1 | `data/lcs/realfirst/v1_1/iter1/eval` | 10-05 | 6 / 6 | `…/table.md` | V11 loop iteration 1, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 141.9 vs the demo belt, unsafe 0, solve p95 14 ms |
+| V11g · seat6-rf11 · Qw · ub-tr3 | `data/lcs/realfirst/v1_1/iter3/eval` | 10-05 | 6 / 6 | `…/table.md` | V11 loop iteration 3, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 145.0 vs the demo belt, unsafe 0, solve p95 17 ms |
+| V11i · seat6-rf11 · Qw · ub-tr5 | `data/lcs/realfirst/v1_1/iter5/eval` | 10-05 | 6 / 6 | `…/table.md` | V11 loop iteration 5, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 121.2 vs the demo belt, unsafe 0, solve p95 17 ms |
+| V11i · seat6-rf11 · Qw · ub-tr7 | `data/lcs/realfirst/v1_1/iter7/eval` | 10-05 | 6 / 6 | `…/table.md` | V11 loop iteration 7, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 129.3 vs the demo belt, unsafe 0, solve p95 41 ms |
+| V12k · seat6-rf12 · Qw · ub-tr1 | `data/lcs/realfirst/cmp/full/iter1/eval` | 10-06 | 6 / 6 | `…/table.md` | V11 loop iteration 1, MPPI 2 stages (seed demo goals): 0/6 strict, 1/6 engaged, RMSE 90.5 vs the demo belt, unsafe 0, solve p95 16 ms |
+| V12m · seat6-rf12 · Qw · ub-tr3 | `data/lcs/realfirst/cmp/full/iter3/eval` | 10-06 | 6 / 6 | `…/table.md` | V11 loop iteration 3, MPPI 2 stages (seed demo goals): 1/6 strict, 1/6 engaged, RMSE 112.0 vs the demo belt, unsafe 0, solve p95 16 ms |
+| V12o · seat6-rf12 · Qw · ub-tr5 | `data/lcs/realfirst/cmp/full/iter5/eval` | 10-06 | 6 / 6 | `…/table.md` | V11 loop iteration 5, MPPI 2 stages (seed demo goals): 1/6 strict, 1/6 engaged, RMSE 80.1 vs the demo belt, unsafe 0, solve p95 30 ms |
+| V12q · seat6-rf12 · Qw · ub-tr7 | `data/lcs/realfirst/cmp/full/iter7/eval` | 10-06 | 6 / 6 | `…/table.md` | V11 loop iteration 7, MPPI 2 stages (seed demo goals): 2/6 strict, 2/6 engaged, RMSE 49.3 vs the demo belt, unsafe 0, solve p95 23 ms |
+| V12s · seat6-rf12 · Qw · ub-tr9 | `data/lcs/realfirst/cmp/full/iter9/eval` | 10-06 | 6 / 6 | `…/table.md` | V11 loop iteration 9, MPPI 2 stages (seed demo goals): 1/6 strict, 1/6 engaged, RMSE 70.2 vs the demo belt, unsafe 0, solve p95 16 ms |
+| V12u · seat6-rf12 · Qw · ub-tr1 | `data/lcs/realfirst/cmp/full2_gate/iter1/eval` | 10-06 | 6 / 6 | `…/table.md` | V11 loop iteration 1, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 138.1 vs the demo belt, unsafe 0, solve p95 14 ms |
+| V12u · seat6-rf12 · Qw · ub-tr3 | `data/lcs/realfirst/cmp/full2_gate/iter3/eval` | 10-06 | 6 / 6 | `…/table.md` | V11 loop iteration 3, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 136.4 vs the demo belt, unsafe 0, solve p95 14 ms |
+| V12w · seat6-rf12 · Qw · ub-tr1 | `data/lcs/realfirst/cmp/v12_18/iter1/eval` | 10-06 | 6 / 6 | `…/table.md` | V11 loop iteration 1, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 23.3 vs the demo belt, unsafe 0, solve p95 15 ms |
+| V12x · seat6-rf12 · Qw · ub-tr3 | `data/lcs/realfirst/cmp/v12_18/iter3/eval` | 10-06 | 6 / 6 | `…/table.md` | V11 loop iteration 3, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 20.9 vs the demo belt, unsafe 0, solve p95 15 ms |
+| V15a · seat6-rf12 · Qw · ub-tr1 | `data/lcs/realfirst/cmp/v12_35/iter1/eval` | 10-06 | 6 / 16 | `…/table.md` | V11 loop iteration 1, MPPI 2 stages (seed demo goals): 3/16 strict, 3/16 engaged, RMSE 23.2 vs the demo belt, unsafe 0, solve p95 16 ms |
+| V15c · seat6-rf12 · Qw · ub-tr3 | `data/lcs/realfirst/cmp/v12_35/iter3/eval` | 10-06 | 6 / 16 | `…/table.md` | V11 loop iteration 3, MPPI 2 stages (seed demo goals): 0/16 strict, 0/16 engaged, RMSE 30.6 vs the demo belt, unsafe 0, solve p95 16 ms |
+| V16b · seat6-rf12 · Qw · ub-tr1 | `data/lcs/realfirst/cmp/v12_36/iter1/eval` | 10-06 | 6 / 16 | `…/table.md` | V11 loop iteration 1, MPPI 2 stages (seed demo goals): 4/16 strict, 4/16 engaged, RMSE 12.5 vs the demo belt, unsafe 0, solve p95 14 ms |
+| V16d · seat6-rf12 · Qw · ub-tr3 | `data/lcs/realfirst/cmp/v12_36/iter3/eval` | 10-06 | 6 / 16 | `…/table.md` | V11 loop iteration 3, MPPI 2 stages (seed demo goals): 2/16 strict, 3/16 engaged, RMSE 13.6 vs the demo belt, unsafe 0, solve p95 15 ms |
+| V16f · seat6-rf12 · Qw · ub-tr5 | `data/lcs/realfirst/cmp/v12_36/iter5/eval` | 10-06 | 6 / 16 | `…/table.md` | V11 loop iteration 5, MPPI 2 stages (seed demo goals): 2/16 strict, 6/16 engaged, RMSE 11.9 vs the demo belt, unsafe 0, solve p95 15 ms |
+| V16h · seat6-rf12 · Qw · ub-tr7 | `data/lcs/realfirst/cmp/v12_36/iter7/eval` | 10-06 | 6 / 16 | `…/table.md` | V11 loop iteration 7, MPPI 2 stages (seed demo goals): 3/16 strict, 3/16 engaged, RMSE 11.5 vs the demo belt, unsafe 0, solve p95 15 ms |
+| V16j · seat6-rf12 · Qw · ub-tr9 | `data/lcs/realfirst/cmp/v12_36/iter9/eval` | 10-06 | 6 / 16 | `…/table.md` | V11 loop iteration 9, MPPI 2 stages (seed demo goals): 1/16 strict, 1/16 engaged, RMSE 24.3 vs the demo belt, unsafe 4, solve p95 15 ms |
 
 Fixed 2026-09-30: the empty `mpc_eval/20260924-202837-evalv2-v2full-set3` was deleted (its
 re-run is `…-203612`); `mpc_eval/20260924-234527-flateval-learned-set1/index.json` had 0

@@ -28,6 +28,9 @@ suites:
   cell-s30: one seat6 cell re-run with the stage-2 timeout 10 -> 30 s (episode cap 40 s)
   seat6-1goal30: seat6 starts, seated goal only (stage 1 shortened to 0.075 s), stage 2 30 s
   under12: 12 belt-under-pulley snapshots (data/lcs/contact/snapshots{,_heldout}/*final_under_osc.npz), seated goal only, 30 s
+  seat6-rf: 'seat6 starts, the seed demo''s two goals (pre_place_2 4 s, seated 30 s), MPPI node, --belt-seg --cloud-noise real_like (V11)'
+  seat6-rf11: 'seat6 starts, MPPI two stages on the latent (demo-spread tol, streak 3, 10 s / 30 s), clearance, belt-seg clean cloud'
+  seat6-rf12: 'seat6 starts, MPPI on the latent, no prefix (V12 campaign cells: eval is always the full task), clearance, belt-seg clean cloud'
 costs:
   Qw: whitened latent Q = w_q diag(1/z_std^2) (default)
   QA: metric A, learned global Q = L^T L
@@ -1387,6 +1390,1110 @@ models:
     closed_loop:
       seat6: 0/6, RMSE 49.0
       source: data/lcs/mpc_eval/20261001-v10/20261001_V10N*/table.md, index.json
+- id: V11a
+  tag: rf-rmse+vg+aux-fixB
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v11_20261005
+  config: ~/git/lcs_learning/outputs/sim_belt_v11_20261005/iter0/refit/r0_seed/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v11_20261005/iter0/refit/r0_seed/ckpt/2026-10-05/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v11_20261005/iter0/deploy_v11a
+  date: '2026-10-05'
+  parent: null
+  change: belt-cloud PointNet encoder (pcd_belt_seg, real_like noise) + latent LCS, joint fresh refit, 60 epochs on the real-first buffer B_0 (18 train / 2 held-out episodes); box ub-tr0; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr0
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 9.46 / 10.67 / 9.03
+      rho_A: 1.0189
+      B_fro_w: 56.5
+      separation_auc: 0.0
+      box_trans_rot_gm: 0.31 / 0.24
+      source: ~/git/lcs_learning/outputs/sim_belt_v11_20261005/iter0/refit/r0_seed/refit_report.json
+    closed_loop: null
+- id: V11b
+  tag: rf-rmse+vg+aux-fixB
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v11_20261005
+  config: ~/git/lcs_learning/outputs/sim_belt_v11_20261005/iter1/refit/r1_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v11_20261005/iter1/refit/r1_joint/ckpt/2026-10-05/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v11_20261005/iter1/deploy_v11b
+  date: '2026-10-05'
+  parent: V11a
+  change: belt-cloud PointNet encoder (pcd_belt_seg, real_like noise) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_1 (23 train / 2 held-out episodes); box ub-tr1; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr1
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 9.11 / 9.54 / 9.09
+      rho_A: 1.007
+      B_fro_w: 33.74
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.23 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v11_20261005/iter1/refit/r1_joint/refit_report.json
+    closed_loop: null
+- id: V11c
+  tag: rf-rmse+vg+aux-fixB
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v11_20261005
+  config: ~/git/lcs_learning/outputs/sim_belt_v11_20261005/iter2/refit/r2_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v11_20261005/iter2/refit/r2_joint/ckpt/2026-10-05/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v11_20261005/iter2/deploy_v11c
+  date: '2026-10-05'
+  parent: V11b
+  change: belt-cloud PointNet encoder (pcd_belt_seg, real_like noise) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_2 (27 train / 3 held-out episodes); box ub-tr2; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr2
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 9.06 / 9.52 / 9.01
+      rho_A: 1.0038
+      B_fro_w: 38.38
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.24 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v11_20261005/iter2/refit/r2_joint/refit_report.json
+    closed_loop: null
+- id: V11d
+  tag: rf-sk10+vg+aux-fixB
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v11_20261006
+  config: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter0/refit/r0_seed/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter0/refit/r0_seed/ckpt/2026-10-05/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter0/deploy_v11d
+  date: '2026-10-05'
+  parent: null
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint fresh refit, 60 epochs on the real-first buffer B_0 (23 train / 3 held-out episodes); box ub-tr0; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr0
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.69 / 4.16 / 2.63
+      rho_A: 0.9784
+      B_fro_w: 41.75
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.31 / 0.24
+      source: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter0/refit/r0_seed/refit_report.json
+    closed_loop: null
+- id: V11e
+  tag: rf-sk10+vg+aux-fixB
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v11_20261006
+  config: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter1/refit/r1_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter1/refit/r1_joint/ckpt/2026-10-05/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter1/deploy_v11e
+  date: '2026-10-05'
+  parent: V11d
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_1 (27 train / 4 held-out episodes); box ub-tr1; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr1
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.80 / 4.29 / 2.76
+      rho_A: 1.001
+      B_fro_w: 24.18
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.25 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter1/refit/r1_joint/refit_report.json
+    closed_loop: null
+- id: V11f
+  tag: rf-sk10+vg+aux-fixB
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v11_20261006
+  config: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter2/refit/r2_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter2/refit/r2_joint/ckpt/2026-10-05/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter2/deploy_v11f
+  date: '2026-10-05'
+  parent: V11e
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_2 (32 train / 4 held-out episodes); box ub-tr2; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr2
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.61 / 3.49 / 2.59
+      rho_A: 1.0034
+      B_fro_w: 28.02
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.24 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter2/refit/r2_joint/refit_report.json
+    closed_loop: null
+- id: V11g
+  tag: rf-sk10+vg+aux-fixB
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v11_20261006
+  config: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter3/refit/r3_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter3/refit/r3_joint/ckpt/2026-10-05/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter3/deploy_v11g
+  date: '2026-10-05'
+  parent: V11f
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_3 (37 train / 4 held-out episodes); box ub-tr3; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr3
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.64 / 3.62 / 2.62
+      rho_A: 1.0092
+      B_fro_w: 31.93
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.24 / 0.21
+      source: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter3/refit/r3_joint/refit_report.json
+    closed_loop: null
+- id: V11h
+  tag: rf-sk10+vg+aux-fixB
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v11_20261006
+  config: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter4/refit/r4_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter4/refit/r4_joint/ckpt/2026-10-05/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter4/deploy_v11h
+  date: '2026-10-05'
+  parent: V11g
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_4 (41 train / 5 held-out episodes); box ub-tr4; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr4
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 3.05 / 3.53 / 3.04
+      rho_A: 1.0114
+      B_fro_w: 35.18
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.24 / 0.21
+      source: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter4/refit/r4_joint/refit_report.json
+    closed_loop: null
+- id: V11i
+  tag: rf-sk10+vg+aux-fixB
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v11_20261006
+  config: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter5/refit/r5_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter5/refit/r5_joint/ckpt/2026-10-05/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter5/deploy_v11i
+  date: '2026-10-05'
+  parent: V11h
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_5 (45 train / 5 held-out episodes); box ub-tr5; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr5
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.86 / 3.38 / 2.85
+      rho_A: 1.0119
+      B_fro_w: 39.1
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.23 / 0.21
+      source: ~/git/lcs_learning/outputs/sim_belt_v11_20261006/iter5/refit/r5_joint/refit_report.json
+    closed_loop: null
+- id: V12a
+  tag: rf-sk10+vg+aux-fixB-C2_prefix
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix/iter0/refit/r0_seed/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix/iter0/refit/r0_seed/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix/iter0/deploy_v12a
+  date: '2026-10-06'
+  parent: null
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint fresh refit, 60 epochs on the real-first buffer B_0 (31 train / 3 held-out episodes); box ub-tr0; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr0
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.53 / 3.71 / 2.49
+      rho_A: 0.9892
+      B_fro_w: 32.96
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.31 / 0.24
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix/iter0/refit/r0_seed/refit_report.json
+    closed_loop: null
+- id: V12b
+  tag: rf-sk10+vg+aux-fixB-C2_prefix
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix/iter1/refit/r1_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix/iter1/refit/r1_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix/iter1/deploy_v12b
+  date: '2026-10-06'
+  parent: V12a
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_1 (34 train / 4 held-out episodes); box ub-tr1; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr1
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.59 / 3.59 / 2.57
+      rho_A: 1.0004
+      B_fro_w: 24.45
+      separation_auc: 0.75
+      box_trans_rot_gm: 0.28 / 0.23
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix/iter1/refit/r1_joint/refit_report.json
+    closed_loop: null
+- id: V12c
+  tag: rf-sk10+vg+aux-fixB-C2_prefix
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix/iter2/refit/r2_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix/iter2/refit/r2_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix/iter2/deploy_v12c
+  date: '2026-10-06'
+  parent: V12b
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_2 (38 train / 4 held-out episodes); box ub-tr2; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr2
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.60 / 3.39 / 2.59
+      rho_A: 1.0024
+      B_fro_w: 29.57
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.28 / 0.23
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C2_prefix/iter2/refit/r2_joint/refit_report.json
+    closed_loop: null
+- id: V12d
+  tag: rf-sk10+vg+aux-fixB-C3_both
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C3_both
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C3_both/iter0/refit/r0_seed/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C3_both/iter0/refit/r0_seed/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C3_both/iter0/deploy_v12d
+  date: '2026-10-06'
+  parent: null
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint fresh refit, 60 epochs on the real-first buffer B_0 (31 train / 3 held-out episodes); box ub-tr0; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr0
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.49 / 3.77 / 2.45
+      rho_A: 0.9802
+      B_fro_w: 29.75
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.31 / 0.24
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C3_both/iter0/refit/r0_seed/refit_report.json
+    closed_loop: null
+- id: V12g
+  tag: rf-sk10+vg+aux-fixB-C1_transport
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C1_transport
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C1_transport/iter0/refit/r0_seed/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C1_transport/iter0/refit/r0_seed/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C1_transport/iter0/deploy_v12g
+  date: '2026-10-06'
+  parent: null
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint fresh refit, 60 epochs on the real-first buffer B_0 (31 train / 3 held-out episodes); box ub-tr0; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr0
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.51 / 4.10 / 2.50
+      rho_A: 0.9761
+      B_fro_w: 30.89
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.31 / 0.24
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C1_transport/iter0/refit/r0_seed/refit_report.json
+    closed_loop: null
+- id: V12h
+  tag: rf-sk10+vg+aux-fixB-C1_transport
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C1_transport
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C1_transport/iter1/refit/r1_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C1_transport/iter1/refit/r1_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C1_transport/iter1/deploy_v12h
+  date: '2026-10-06'
+  parent: V12g
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_1 (35 train / 4 held-out episodes); box ub-tr1; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr1
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.66 / 3.58 / 2.66
+      rho_A: 1.002
+      B_fro_w: 32.29
+      separation_auc: 0.75
+      box_trans_rot_gm: 0.26 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/C1_transport/iter1/refit/r1_joint/refit_report.json
+    closed_loop: null
+- id: V12j
+  tag: rf-sk10+vg+aux-fixB-full
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter0/refit/r0_seed/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter0/refit/r0_seed/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter0/deploy_v12j
+  date: '2026-10-06'
+  parent: null
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint fresh refit, 60 epochs on the real-first buffer B_0 (31 train / 3 held-out episodes); box ub-tr0; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr0
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.49 / 4.37 / 2.47
+      rho_A: 1.0021
+      B_fro_w: 37.85
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.31 / 0.24
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter0/refit/r0_seed/refit_report.json
+    closed_loop: null
+- id: V12k
+  tag: rf-sk10+vg+aux-fixB-full
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter1/refit/r1_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter1/refit/r1_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter1/deploy_v12k
+  date: '2026-10-06'
+  parent: V12j
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_1 (35 train / 4 held-out episodes); box ub-tr1; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr1
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.51 / 3.68 / 2.51
+      rho_A: 1.0031
+      B_fro_w: 31.76
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.26 / 0.23
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter1/refit/r1_joint/refit_report.json
+    closed_loop: null
+- id: V12l
+  tag: rf-sk10+vg+aux-fixB-full
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter2/refit/r2_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter2/refit/r2_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter2/deploy_v12l
+  date: '2026-10-06'
+  parent: V12k
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_2 (40 train / 4 held-out episodes); box ub-tr2; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr2
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.51 / 3.42 / 2.49
+      rho_A: 1.0014
+      B_fro_w: 38.05
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.26 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter2/refit/r2_joint/refit_report.json
+    closed_loop: null
+- id: V12m
+  tag: rf-sk10+vg+aux-fixB-full
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter3/refit/r3_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter3/refit/r3_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter3/deploy_v12m
+  date: '2026-10-06'
+  parent: V12l
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_3 (44 train / 5 held-out episodes); box ub-tr3; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr3
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.99 / 3.62 / 2.96
+      rho_A: 1.0017
+      B_fro_w: 44.53
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.26 / 0.23
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter3/refit/r3_joint/refit_report.json
+    closed_loop: null
+- id: V12n
+  tag: rf-sk10+vg+aux-fixB-full
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter4/refit/r4_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter4/refit/r4_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter4/deploy_v12n
+  date: '2026-10-06'
+  parent: V12m
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_4 (45 train / 5 held-out episodes); box ub-tr4; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr4
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.88 / 3.52 / 2.86
+      rho_A: 1.0014
+      B_fro_w: 50.83
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.26 / 0.23
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter4/refit/r4_joint/refit_report.json
+    closed_loop: null
+- id: V12o
+  tag: rf-sk10+vg+aux-fixB-full
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter5/refit/r5_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter5/refit/r5_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter5/deploy_v12o
+  date: '2026-10-06'
+  parent: V12n
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_5 (45 train / 5 held-out episodes); box ub-tr5; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr5
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 3.25 / 3.61 / 3.23
+      rho_A: 1.0013
+      B_fro_w: 55.35
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.26 / 0.23
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter5/refit/r5_joint/refit_report.json
+    closed_loop: null
+- id: V12p
+  tag: rf-sk10+vg+aux-fixB-full
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter6/refit/r6_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter6/refit/r6_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter6/deploy_v12p
+  date: '2026-10-06'
+  parent: V12o
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_6 (45 train / 5 held-out episodes); box ub-tr6; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr6
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 3.42 / 3.68 / 3.42
+      rho_A: 1.0028
+      B_fro_w: 58.66
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.25 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter6/refit/r6_joint/refit_report.json
+    closed_loop: null
+- id: V12q
+  tag: rf-sk10+vg+aux-fixB-full
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter7/refit/r7_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter7/refit/r7_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter7/deploy_v12q
+  date: '2026-10-06'
+  parent: V12p
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_7 (46 train / 4 held-out episodes); box ub-tr7; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr7
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 3.08 / 3.29 / 3.07
+      rho_A: 1.0027
+      B_fro_w: 59.82
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.25 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter7/refit/r7_joint/refit_report.json
+    closed_loop: null
+- id: V12r
+  tag: rf-sk10+vg+aux-fixB-full
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter8/refit/r8_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter8/refit/r8_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter8/deploy_v12r
+  date: '2026-10-06'
+  parent: V12q
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_8 (45 train / 5 held-out episodes); box ub-tr8; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr8
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 3.10 / 3.43 / 3.08
+      rho_A: 1.0016
+      B_fro_w: 60.41
+      separation_auc: 0.8333333333333334
+      box_trans_rot_gm: 0.25 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter8/refit/r8_joint/refit_report.json
+    closed_loop: null
+- id: V12s
+  tag: rf-sk10+vg+aux-fixB-full
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter9/refit/r9_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter9/refit/r9_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter9/deploy_v12s
+  date: '2026-10-06'
+  parent: V12r
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_9 (45 train / 5 held-out episodes); box ub-tr9; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr9
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.99 / 3.17 / 3.00
+      rho_A: 1.0027
+      B_fro_w: 62.06
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.25 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full/iter9/refit/r9_joint/refit_report.json
+    closed_loop: null
+- id: V13a
+  tag: rf-sk10+vg+aux-fixB-full2_lcsonly
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v13_20261006/full2_lcsonly
+  config: ~/git/lcs_learning/outputs/sim_belt_v13_20261006/full2_lcsonly/iter0/refit/r0_seed/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v13_20261006/full2_lcsonly/iter0/refit/r0_seed/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v13_20261006/full2_lcsonly/iter0/deploy_v13a
+  date: '2026-10-06'
+  parent: null
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint fresh refit, 60 epochs on the real-first buffer B_0 (31 train / 3 held-out episodes); box ub-tr0; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr0
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.49 / 3.93 / 2.47
+      rho_A: 0.9598
+      B_fro_w: 52.86
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.31 / 0.24
+      source: ~/git/lcs_learning/outputs/sim_belt_v13_20261006/full2_lcsonly/iter0/refit/r0_seed/refit_report.json
+    closed_loop: null
+- id: V12t
+  tag: rf-sk10+vg+aux-fixB-full2_gate
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full2_gate
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full2_gate/iter0/refit/r0_seed/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full2_gate/iter0/refit/r0_seed/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full2_gate/iter0/deploy_v12t
+  date: '2026-10-06'
+  parent: null
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint fresh refit, 60 epochs on the real-first buffer B_0 (31 train / 3 held-out episodes); box ub-tr0; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr0
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.49 / 3.86 / 2.48
+      rho_A: 0.9823
+      B_fro_w: 42.15
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.31 / 0.24
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full2_gate/iter0/refit/r0_seed/refit_report.json
+    closed_loop: null
+- id: V12u
+  tag: rf-sk10+vg+aux-fixB-full2_gate
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full2_gate
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full2_gate/iter1/refit/r1_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full2_gate/iter1/refit/r1_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full2_gate/iter1/deploy_v12u
+  date: '2026-10-06'
+  parent: V12t
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_1 (35 train / 4 held-out episodes); box ub-tr1; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr1
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.84 / 4.02 / 2.82
+      rho_A: 1.0011
+      B_fro_w: 23.5
+      separation_auc: 0.75
+      box_trans_rot_gm: 0.26 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/full2_gate/iter1/refit/r1_joint/refit_report.json
+    closed_loop: null
+- id: V12v
+  tag: rf-sk10+vg+aux-fixB-v12_18
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18/iter0/refit/r0_seed/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18/iter0/refit/r0_seed/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18/iter0/deploy_v12v
+  date: '2026-10-06'
+  parent: null
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint fresh refit, 60 epochs on the real-first buffer B_0 (31 train / 3 held-out episodes); box ub-tr0; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr0
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.50 / 3.56 / 2.49
+      rho_A: 0.9873
+      B_fro_w: 31.72
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.31 / 0.24
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18/iter0/refit/r0_seed/refit_report.json
+    closed_loop: null
+- id: V12w
+  tag: rf-sk10+vg+aux-fixB-v12_18
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18/iter1/refit/r1_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18/iter1/refit/r1_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18/iter1/deploy_v12w
+  date: '2026-10-06'
+  parent: V12v
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_1 (35 train / 4 held-out episodes); box ub-tr1; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr1
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 2.49 / 3.51 / 2.48
+      rho_A: 0.9999
+      B_fro_w: 31.64
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.26 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18/iter1/refit/r1_joint/refit_report.json
+    closed_loop: null
+- id: V12x
+  tag: rf-sk10+vg+aux-fixB-v12_18
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18/iter2/refit/r2_joint/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18/iter2/refit/r2_joint/ckpt/2026-10-06/no_wandb/checkpoint_epoch_0030.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18/iter2/deploy_v12x
+  date: '2026-10-06'
+  parent: V12w
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_2 (40 train / 4 held-out episodes); box ub-tr2; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr2
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 3.12 / 4.15 / 3.10
+      rho_A: 1.0027
+      B_fro_w: 40.99
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.26 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_18/iter2/refit/r2_joint/refit_report.json
+    closed_loop: null
+- id: V14a
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_27
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_27/iter0/refit/r0_seed/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_27/iter0/refit/r0_seed/ckpt/2026-10-07/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_27/iter0/deploy_v14a
+  date: '2026-10-06'
+  parent: null
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint fresh refit, 60 epochs on the real-first buffer B_0 (345 train / 38 held-out episodes); box ub-tr0; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr0
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 3.82 / 6.49 / 3.83
+      rho_A: 0.9917
+      B_fro_w: 45.0
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.31 / 0.24
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_27/iter0/refit/r0_seed/refit_report.json
+    closed_loop: null
+- id: V15a
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter0/refit/r0_seed/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter0/refit/r0_seed/ckpt/2026-10-07/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter0/deploy_v15a
+  date: '2026-10-06'
+  parent: null
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint fresh refit, 60 epochs on the real-first buffer B_0 (317 train / 35 held-out episodes); box ub-tr0; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr0
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 3.38 / 5.74 / 3.30
+      rho_A: 0.9982
+      B_fro_w: 41.17
+      separation_auc: null
+      box_trans_rot_gm: 0.31 / 0.24
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter0/refit/r0_seed/refit_report.json
+    closed_loop: null
+- id: V15b
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter2/refit/r2_lcs_only/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter2/refit/r2_lcs_only/checkpoint_lcs_only.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter2/deploy_v15b
+  date: '2026-10-06'
+  parent: V15a
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_2 (325 train / 37 held-out episodes); box ub-tr2; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr2
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 4.95 / 15.01 / 5.16
+      rho_A: 1.1557
+      B_fro_w: 70.58
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.22 / 0.21
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter2/refit/r2_lcs_only/refit_report.json
+    closed_loop: null
+- id: V15c
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter3/refit/r3_lcs_only/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter3/refit/r3_lcs_only/checkpoint_lcs_only.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter3/deploy_v15c
+  date: '2026-10-06'
+  parent: V15b
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_3 (330 train / 37 held-out episodes); box ub-tr3; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr3
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 5.31 / 14.87 / 5.64
+      rho_A: 1.1672
+      B_fro_w: 86.98
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.24 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter3/refit/r3_lcs_only/refit_report.json
+    closed_loop: null
+- id: V15d
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter4/refit/r4_lcs_only/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter4/refit/r4_lcs_only/checkpoint_lcs_only.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter4/deploy_v15d
+  date: '2026-10-06'
+  parent: V15c
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_4 (334 train / 38 held-out episodes); box ub-tr4; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr4
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 5.69 / 12.92 / 6.13
+      rho_A: 1.1678
+      B_fro_w: 101.47
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.25 / 0.23
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_35/iter4/refit/r4_lcs_only/refit_report.json
+    closed_loop: null
+- id: V16a
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter0/refit/r0_seed/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter0/refit/r0_seed/ckpt/2026-10-07/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter0/deploy_v16a
+  date: '2026-10-06'
+  parent: null
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint fresh refit, 60 epochs on the real-first buffer B_0 (317 train / 35 held-out episodes); box ub-tr0; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr0
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 3.27 / 5.97 / 3.21
+      rho_A: 0.9987
+      B_fro_w: 30.78
+      separation_auc: null
+      box_trans_rot_gm: 0.31 / 0.24
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter0/refit/r0_seed/refit_report.json
+    closed_loop: null
+- id: V16b
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter1/refit/r1_lcs_only/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter1/refit/r1_lcs_only/checkpoint_lcs_only.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter1/deploy_v16b
+  date: '2026-10-06'
+  parent: V16a
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_1 (322 train / 35 held-out episodes); box ub-tr1; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr1
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 3.23 / 7.86 / 3.17
+      rho_A: 1.0316
+      B_fro_w: 45.26
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.21 / 0.20
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter1/refit/r1_lcs_only/refit_report.json
+    closed_loop: null
+- id: V16c
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter2/refit/r2_lcs_only/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter2/refit/r2_lcs_only/checkpoint_lcs_only.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter2/deploy_v16c
+  date: '2026-10-06'
+  parent: V16b
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_2 (325 train / 37 held-out episodes); box ub-tr2; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr2
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 5.67 / 7.35 / 5.99
+      rho_A: 1.1228
+      B_fro_w: 49.68
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.21 / 0.21
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter2/refit/r2_lcs_only/refit_report.json
+    closed_loop: null
+- id: V16d
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter3/refit/r3_lcs_only/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter3/refit/r3_lcs_only/checkpoint_lcs_only.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter3/deploy_v16d
+  date: '2026-10-06'
+  parent: V16c
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_3 (330 train / 37 held-out episodes); box ub-tr3; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr3
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 4.57 / 7.06 / 4.60
+      rho_A: 1.1164
+      B_fro_w: 55.08
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.22 / 0.21
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter3/refit/r3_lcs_only/refit_report.json
+    closed_loop: null
+- id: V16e
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter4/refit/r4_lcs_only/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter4/refit/r4_lcs_only/checkpoint_lcs_only.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter4/deploy_v16e
+  date: '2026-10-06'
+  parent: V16d
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_4 (334 train / 38 held-out episodes); box ub-tr4; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr4
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 5.60 / 6.64 / 5.63
+      rho_A: 1.0956
+      B_fro_w: 58.83
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.23 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter4/refit/r4_lcs_only/refit_report.json
+    closed_loop: null
+- id: V16f
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter5/refit/r5_lcs_only/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter5/refit/r5_lcs_only/checkpoint_lcs_only.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter5/deploy_v16f
+  date: '2026-10-06'
+  parent: V16e
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_5 (339 train / 38 held-out episodes); box ub-tr5; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr5
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 4.94 / 6.30 / 5.00
+      rho_A: 1.1452
+      B_fro_w: 63.08
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.23 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter5/refit/r5_lcs_only/refit_report.json
+    closed_loop: null
+- id: V16g
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter6/refit/r6_lcs_only/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter6/refit/r6_lcs_only/checkpoint_lcs_only.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter6/deploy_v16g
+  date: '2026-10-06'
+  parent: V16f
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_6 (344 train / 38 held-out episodes); box ub-tr6; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr6
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 5.53 / 7.54 / 5.77
+      rho_A: 1.1757
+      B_fro_w: 65.23
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.23 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter6/refit/r6_lcs_only/refit_report.json
+    closed_loop: null
+- id: V16h
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter7/refit/r7_lcs_only/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter7/refit/r7_lcs_only/checkpoint_lcs_only.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter7/deploy_v16h
+  date: '2026-10-06'
+  parent: V16g
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_7 (348 train / 39 held-out episodes); box ub-tr7; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr7
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 6.44 / 7.85 / 6.75
+      rho_A: 1.2021
+      B_fro_w: 67.58
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.23 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter7/refit/r7_lcs_only/refit_report.json
+    closed_loop: null
+- id: V16i
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter8/refit/r8_lcs_only/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter8/refit/r8_lcs_only/checkpoint_lcs_only.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter8/deploy_v16i
+  date: '2026-10-06'
+  parent: V16h
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_8 (353 train / 39 held-out episodes); box ub-tr8; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr8
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 5.33 / 6.43 / 5.43
+      rho_A: 1.1604
+      B_fro_w: 71.3
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.23 / 0.22
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter8/refit/r8_lcs_only/refit_report.json
+    closed_loop: null
+- id: V16j
+  tag: rf-sk10+vg+aux-fixB-v12_27
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter9/refit/r9_lcs_only/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter9/refit/r9_lcs_only/checkpoint_lcs_only.pt
+  step: 30
+  exports:
+  - ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter9/deploy_v16j
+  date: '2026-10-06'
+  parent: V16i
+  change: belt-cloud PointNet encoder (pcd_belt_seg, off (clean) cloud, Sinkhorn-correspondence RMSE recon, latent 10) + latent LCS, joint warm refit, 30 epochs on the real-first buffer B_9 (357 train / 40 held-out episodes); box ub-tr9; MPPI node
+  encoder: belt_cloud_pointnet
+  u_bounds: ub-tr9
+  status: candidate
+  status_note: V11 real-first loop model
+  results:
+    offline:
+      heldout_one_step_h7_recon_mm: 13.13 / 14.05 / 13.55
+      rho_A: 1.3157
+      B_fro_w: 71.24
+      separation_auc: 1.0
+      box_trans_rot_gm: 0.23 / 0.23
+      source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_36/iter9/refit/r9_lcs_only/refit_report.json
+    closed_loop: null
 evals:
 - label: BL · nom · - · -
   model: BL
@@ -2956,3 +4063,276 @@ evals:
   n_episodes: 2
   table: data/lcs/mpc_eval/20261001-v10/20261001_V2_long30/*/index.json
   note: '09-26 params, stage 2 30 s: urtip strict (wrap 142.1, h 0.03); gv_01 engaged (81.4, h 1.94)'
+- label: V11b · seat6-rf · Qw · ub-tr1
+  model: V11b
+  suite: seat6-rf
+  cost: Qw
+  limits: ub-tr1
+  controller: mppi
+  path: data/lcs/realfirst/v1/iter1/eval
+  date: '2026-10-05'
+  log_day: '2026-10-05'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/realfirst/v1/iter1/eval/table.md
+  note: 'V11 loop iteration 1, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 59.6 vs the demo belt, unsafe 6, solve p95 11 ms'
+- label: V11e · seat6-rf11 · Qw · ub-tr1
+  model: V11e
+  suite: seat6-rf11
+  cost: Qw
+  limits: ub-tr1
+  controller: mppi
+  path: data/lcs/realfirst/v1_1/iter1/eval
+  date: '2026-10-05'
+  log_day: '2026-10-05'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/realfirst/v1_1/iter1/eval/table.md
+  note: 'V11 loop iteration 1, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 141.9 vs the demo belt, unsafe 0, solve p95 14 ms'
+- label: V11g · seat6-rf11 · Qw · ub-tr3
+  model: V11g
+  suite: seat6-rf11
+  cost: Qw
+  limits: ub-tr3
+  controller: mppi
+  path: data/lcs/realfirst/v1_1/iter3/eval
+  date: '2026-10-05'
+  log_day: '2026-10-05'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/realfirst/v1_1/iter3/eval/table.md
+  note: 'V11 loop iteration 3, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 145.0 vs the demo belt, unsafe 0, solve p95 17 ms'
+- label: V11i · seat6-rf11 · Qw · ub-tr5
+  model: V11i
+  suite: seat6-rf11
+  cost: Qw
+  limits: ub-tr5
+  controller: mppi
+  path: data/lcs/realfirst/v1_1/iter5/eval
+  date: '2026-10-05'
+  log_day: '2026-10-05'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/realfirst/v1_1/iter5/eval/table.md
+  note: 'V11 loop iteration 5, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 121.2 vs the demo belt, unsafe 0, solve p95 17 ms'
+- label: V11i · seat6-rf11 · Qw · ub-tr7
+  model: V11i
+  suite: seat6-rf11
+  cost: Qw
+  limits: ub-tr7
+  controller: mppi
+  path: data/lcs/realfirst/v1_1/iter7/eval
+  date: '2026-10-05'
+  log_day: '2026-10-05'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/realfirst/v1_1/iter7/eval/table.md
+  note: 'V11 loop iteration 7, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 129.3 vs the demo belt, unsafe 0, solve p95 41 ms'
+- label: V12k · seat6-rf12 · Qw · ub-tr1
+  model: V12k
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr1
+  controller: mppi
+  path: data/lcs/realfirst/cmp/full/iter1/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/realfirst/cmp/full/iter1/eval/table.md
+  note: 'V11 loop iteration 1, MPPI 2 stages (seed demo goals): 0/6 strict, 1/6 engaged, RMSE 90.5 vs the demo belt, unsafe 0, solve p95 16 ms'
+- label: V12m · seat6-rf12 · Qw · ub-tr3
+  model: V12m
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr3
+  controller: mppi
+  path: data/lcs/realfirst/cmp/full/iter3/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/realfirst/cmp/full/iter3/eval/table.md
+  note: 'V11 loop iteration 3, MPPI 2 stages (seed demo goals): 1/6 strict, 1/6 engaged, RMSE 112.0 vs the demo belt, unsafe 0, solve p95 16 ms'
+- label: V12o · seat6-rf12 · Qw · ub-tr5
+  model: V12o
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr5
+  controller: mppi
+  path: data/lcs/realfirst/cmp/full/iter5/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/realfirst/cmp/full/iter5/eval/table.md
+  note: 'V11 loop iteration 5, MPPI 2 stages (seed demo goals): 1/6 strict, 1/6 engaged, RMSE 80.1 vs the demo belt, unsafe 0, solve p95 30 ms'
+- label: V12q · seat6-rf12 · Qw · ub-tr7
+  model: V12q
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr7
+  controller: mppi
+  path: data/lcs/realfirst/cmp/full/iter7/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/realfirst/cmp/full/iter7/eval/table.md
+  note: 'V11 loop iteration 7, MPPI 2 stages (seed demo goals): 2/6 strict, 2/6 engaged, RMSE 49.3 vs the demo belt, unsafe 0, solve p95 23 ms'
+- label: V12s · seat6-rf12 · Qw · ub-tr9
+  model: V12s
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr9
+  controller: mppi
+  path: data/lcs/realfirst/cmp/full/iter9/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/realfirst/cmp/full/iter9/eval/table.md
+  note: 'V11 loop iteration 9, MPPI 2 stages (seed demo goals): 1/6 strict, 1/6 engaged, RMSE 70.2 vs the demo belt, unsafe 0, solve p95 16 ms'
+- label: V12u · seat6-rf12 · Qw · ub-tr1
+  model: V12u
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr1
+  controller: mppi
+  path: data/lcs/realfirst/cmp/full2_gate/iter1/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/realfirst/cmp/full2_gate/iter1/eval/table.md
+  note: 'V11 loop iteration 1, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 138.1 vs the demo belt, unsafe 0, solve p95 14 ms'
+- label: V12u · seat6-rf12 · Qw · ub-tr3
+  model: V12u
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr3
+  controller: mppi
+  path: data/lcs/realfirst/cmp/full2_gate/iter3/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/realfirst/cmp/full2_gate/iter3/eval/table.md
+  note: 'V11 loop iteration 3, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 136.4 vs the demo belt, unsafe 0, solve p95 14 ms'
+- label: V12w · seat6-rf12 · Qw · ub-tr1
+  model: V12w
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr1
+  controller: mppi
+  path: data/lcs/realfirst/cmp/v12_18/iter1/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/realfirst/cmp/v12_18/iter1/eval/table.md
+  note: 'V11 loop iteration 1, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 23.3 vs the demo belt, unsafe 0, solve p95 15 ms'
+- label: V12x · seat6-rf12 · Qw · ub-tr3
+  model: V12x
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr3
+  controller: mppi
+  path: data/lcs/realfirst/cmp/v12_18/iter3/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 6
+  table: data/lcs/realfirst/cmp/v12_18/iter3/eval/table.md
+  note: 'V11 loop iteration 3, MPPI 2 stages (seed demo goals): 0/6 strict, 0/6 engaged, RMSE 20.9 vs the demo belt, unsafe 0, solve p95 15 ms'
+- label: V15a · seat6-rf12 · Qw · ub-tr1
+  model: V15a
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr1
+  controller: mppi
+  path: data/lcs/realfirst/cmp/v12_35/iter1/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 16
+  table: data/lcs/realfirst/cmp/v12_35/iter1/eval/table.md
+  note: 'V11 loop iteration 1, MPPI 2 stages (seed demo goals): 3/16 strict, 3/16 engaged, RMSE 23.2 vs the demo belt, unsafe 0, solve p95 16 ms'
+- label: V15c · seat6-rf12 · Qw · ub-tr3
+  model: V15c
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr3
+  controller: mppi
+  path: data/lcs/realfirst/cmp/v12_35/iter3/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 16
+  table: data/lcs/realfirst/cmp/v12_35/iter3/eval/table.md
+  note: 'V11 loop iteration 3, MPPI 2 stages (seed demo goals): 0/16 strict, 0/16 engaged, RMSE 30.6 vs the demo belt, unsafe 0, solve p95 16 ms'
+- label: V16b · seat6-rf12 · Qw · ub-tr1
+  model: V16b
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr1
+  controller: mppi
+  path: data/lcs/realfirst/cmp/v12_36/iter1/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 16
+  table: data/lcs/realfirst/cmp/v12_36/iter1/eval/table.md
+  note: 'V11 loop iteration 1, MPPI 2 stages (seed demo goals): 4/16 strict, 4/16 engaged, RMSE 12.5 vs the demo belt, unsafe 0, solve p95 14 ms'
+- label: V16d · seat6-rf12 · Qw · ub-tr3
+  model: V16d
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr3
+  controller: mppi
+  path: data/lcs/realfirst/cmp/v12_36/iter3/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 16
+  table: data/lcs/realfirst/cmp/v12_36/iter3/eval/table.md
+  note: 'V11 loop iteration 3, MPPI 2 stages (seed demo goals): 2/16 strict, 3/16 engaged, RMSE 13.6 vs the demo belt, unsafe 0, solve p95 15 ms'
+- label: V16f · seat6-rf12 · Qw · ub-tr5
+  model: V16f
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr5
+  controller: mppi
+  path: data/lcs/realfirst/cmp/v12_36/iter5/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 16
+  table: data/lcs/realfirst/cmp/v12_36/iter5/eval/table.md
+  note: 'V11 loop iteration 5, MPPI 2 stages (seed demo goals): 2/16 strict, 6/16 engaged, RMSE 11.9 vs the demo belt, unsafe 0, solve p95 15 ms'
+- label: V16h · seat6-rf12 · Qw · ub-tr7
+  model: V16h
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr7
+  controller: mppi
+  path: data/lcs/realfirst/cmp/v12_36/iter7/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 16
+  table: data/lcs/realfirst/cmp/v12_36/iter7/eval/table.md
+  note: 'V11 loop iteration 7, MPPI 2 stages (seed demo goals): 3/16 strict, 3/16 engaged, RMSE 11.5 vs the demo belt, unsafe 0, solve p95 15 ms'
+- label: V16j · seat6-rf12 · Qw · ub-tr9
+  model: V16j
+  suite: seat6-rf12
+  cost: Qw
+  limits: ub-tr9
+  controller: mppi
+  path: data/lcs/realfirst/cmp/v12_36/iter9/eval
+  date: '2026-10-06'
+  log_day: '2026-10-06'
+  n_cells: 6
+  n_episodes: 16
+  table: data/lcs/realfirst/cmp/v12_36/iter9/eval/table.md
+  note: 'V11 loop iteration 9, MPPI 2 stages (seed demo goals): 1/16 strict, 1/16 engaged, RMSE 24.3 vs the demo belt, unsafe 4, solve p95 15 ms'

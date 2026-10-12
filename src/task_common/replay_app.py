@@ -35,7 +35,7 @@ MAX_TICK_DT_S = 0.1
 DEFAULT_RENDER_FPS = 25.0
 DEFAULT_DEVICE = "cpu"
 STATS_PERIOD_S = 10.0
-DEFAULT_POINT_SIZE_MM = 1.0
+DEFAULT_POINT_SIZE_MM = 0.5
 CAMERA_TEXT_PERIOD_S = 0.2
 
 # A private model (on CUDA when available: ~5 ms a frame vs ~0.5 s on CPU) plus its clouds.
@@ -439,6 +439,8 @@ class ReplayApp:
     def add_hook(self, hook: ReplayHook) -> None:
         """Register a panel; it is caught up with the current run and frame at once."""
         self.hooks.append(hook)
+        if getattr(hook, "uses_point_size", False):
+            self._point_size_slider.disabled = False
         hook.build_gui(self)
         if self.recording is not None:
             hook.on_run_loaded(self, self.recording)
@@ -680,7 +682,7 @@ class ReplayApp:
             self._cloud_box = gui.add_checkbox("Point cloud", False,
                                                disabled=self._build_point_clouds is None)
             self._point_size_slider = gui.add_slider(
-                "Point size [mm]", min=0.2, max=2.0, step=0.05,
+                "Point size [mm]", min=0.2, max=1.0, step=0.05,
                 initial_value=DEFAULT_POINT_SIZE_MM,
                 disabled=self._build_point_clouds is None)
 

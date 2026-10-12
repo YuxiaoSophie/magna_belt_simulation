@@ -70,6 +70,25 @@ onpolicy_weighting): the `buffer` step gives each new MPC row ``frame_weights`` 
 latent_waypoints.npz tube, plus ``off_track`` stats; anchor shares then use frame-weighted
 frames; buffer.json ``onpolicy_weighting``. ``refit.from_seed`` (bool): every refit starts from
 theta_0's checkpoint (the seed) instead of theta_{i-1}.
+External seed (V12-46; opt-in): ``seed_model`` ({checkpoint, refit_report[, source]}): the `seed`
+step adopts this checkpoint and its refit_from_buffer report as theta_0 (no seed refit; the
+merged seed buffer, gates.json, model.json, refit.json as usual), so ``refit.from_seed`` refits
+start from it. ``response_gate`` ({stride, max_cos}; report-only): in `report`, the V12-44
+response-direction statistic of deploy_i on iteration i's collect states (response_gate.py) ->
+iter<i>/response_gate.json and a learning-curve section.
+V12-57 keys (opt-in): ``refit.extra_args`` ([str]): appended to every refit_from_buffer.py command.
+``graph`` ({rebuild, stride, weight, device, extra, buffers}, GRAPH_LOOP_DEFAULTS): before each
+refit (i >= 1) build_cloud_graph.py on B_i (+ ``buffers``; ``extra`` = its extra args) ->
+iter<i>/graph/graph.{npz,json}, passed as --graph-file (+ --graph-weight); stats in refit.json and
+the learning curve (lcs_only: the encoder is frozen, the graph only enters metrics.graph).
+``deploy_policy`` ({mode keep_best | latest, metric eval_engaged | eval_strict, min_gain}):
+keep_best evaluates theta_i (exported to iter<i>/cand/) before `collect` when eval is due (always
+at i = 0) and the new `deploy` step deploys it iff score >= the deployed model's + min_gain, else
+keeps the deployed model; iter<i>/deploy.json is the deployed model's export (collect, buffer,
+report); iter<i>/deploy_policy.json. ``eval_suite`` ({name: hard, repeats}): the eval runs are
+run_hard_suite.SUITE (11 starts, its scripted-reset seeds) instead of ``eval_runs``; an eval run's
+``reset_seed`` = scripted resets with that seed. ``eval_every: 1`` = every iteration. JEPA
+checkpoints (report train_objective jepa) export with LCS_CACHE_REPRO_TOL_REL=1e-5.
 C3+ controller (V12-40; opt-in): ``controller: c3plus`` (default mppi) runs magna's C++ learned
 MPC (worktree magna-deploy-learned-lcs, projection C3+) in `collect` / `eval` instead of the MPPI
 node: per run c3plus_params.py writes the LCS + params yaml into the worktree
@@ -121,8 +140,8 @@ for _p in (REPO / "src", REPO / "scripts" / "lcs"):
         sys.path.insert(0, str(_p))
 
 
-STEPS = ["seed", "refit", "trust", "export", "collect", "label", "buffer", "eval", "report",
-         "register"]
+STEPS = ["seed", "refit", "trust", "export", "collect", "label", "buffer", "eval", "deploy",
+         "report", "register"]
 LETTERS = "abcdefghijklmnopqrstuvwxyz"
 START_SETTLE_S = 0.5  # eval_learned_mpc.START_SETTLE_S: settle after every restore / reset
 LAST_N = 13
@@ -230,6 +249,13 @@ SBOX_DEFAULTS = {"kinds": ["demo", "success"], "lo_pct": 0.0, "hi_pct": 100.0, "
                  "weight": 0.5, "hard_margin_mm": None}
 GOAL_SET_DEFAULTS = {"kinds": ["demo"], "include_successes": False, "all_demos": False,
                      "strict": False, "softmin_tau": 0.0}
+SEED_MODEL_KEYS = {"checkpoint", "refit_report", "source"}
+RGATE_DEFAULTS = {"stride": 20, "max_cos": 0.3}
+GRAPH_LOOP_DEFAULTS = {"rebuild": True, "stride": 3, "weight": None, "device": "cuda", "extra": [],
+                       "buffers": []}
+DEPLOY_POLICY_DEFAULTS = {"mode": "latest", "metric": "eval_engaged", "min_gain": 0}
+EVAL_SUITE_DEFAULTS = {"name": "hard", "repeats": 2}
+JEPA_ENV = {"LCS_CACHE_REPRO_TOL_REL": "1e-5"}  # unit-scale JEPA latents fail the 1e-6 cache check
 # V12-40 controller c3plus: costs of the last C3+ campaign (V8/V10); exact_tol = E3 at 1e-2
 N_C3 = 7  # the LCS yaml's N (C3 horizon)
 C3PLUS_DEFAULTS = {"variant": "wp2", "w_q": 1.0, "w_r": 0.3, "admm_iter": 2, "box_z": False,
@@ -398,6 +424,22 @@ def check_cfg(cfg: dict) -> None:
     fs = cfg["refit"].get("from_seed", False)
     if not isinstance(fs, bool) or (fs and cfg["refit"].get("fresh_each_iter")):
         raise SystemExit(f"refit.from_seed {fs!r}: bool; not with refit.fresh_each_iter")
+    sm = cfg.get("seed_model")
+    if sm is not None and (not isinstance(sm, dict) or not set(sm) <= SEED_MODEL_KEYS
+                           or not all(isinstance(sm.get(k), str) and sm[k]
+                                      for k in ("checkpoint", "refit_report"))
+                           or not isinstance(sm.get("source", ""), str)):
+        raise SystemExit(f"seed_model {sm!r}: {{checkpoint, refit_report[, source]}} (paths)")
+    rgc = cfg.get("response_gate")
+    rgm = rgc if isinstance(rgc, dict) else {}
+    rgm = {**RGATE_DEFAULTS, **rgm}
+    if rgc is not None and (not isinstance(rgc, dict) or set(rgm) != set(RGATE_DEFAULTS)
+                            or isinstance(rgm["stride"], bool)
+                            or not isinstance(rgm["stride"], int) or rgm["stride"] < 1
+                            or isinstance(rgm["max_cos"], bool)
+                            or not isinstance(rgm["max_cos"], (int, float))):
+        raise SystemExit(f"response_gate {rgc!r}: {{stride: int >= 1, max_cos: float}}")
+    check_v12_57(cfg)
     ow = cfg.get("onpolicy_weighting")
     if ow is not None:
         from task_common import onpolicy_weighting
@@ -418,6 +460,75 @@ def check_cfg(cfg: dict) -> None:
         raise SystemExit(f"prefix fracs outside [0, 2]: {fr}")
     if pc.get("schedule") and pc["start_frac"] not in pc["schedule"]:
         raise SystemExit(f"prefix.start_frac {pc['start_frac']} not in the schedule")
+
+
+def _strs(x) -> bool:
+    return isinstance(x, list) and all(isinstance(s, str) for s in x)
+
+
+def _int(x) -> bool:
+    return isinstance(x, int) and not isinstance(x, bool)
+
+
+def check_v12_57(cfg: dict) -> None:
+    """``refit.extra_args``, ``graph``, ``deploy_policy``, ``eval_suite``, ``eval_every``."""
+    ea = cfg["refit"].get("extra_args")
+    if ea is not None and not _strs(ea):
+        raise SystemExit(f"refit.extra_args {ea!r}: a list of strings")
+    gc = cfg.get("graph")
+    if gc is not None:
+        g = {**GRAPH_LOOP_DEFAULTS, **gc} if isinstance(gc, dict) else {}
+        if (not isinstance(gc, dict) or set(g) != set(GRAPH_LOOP_DEFAULTS)
+                or not isinstance(g["rebuild"], bool) or not _int(g["stride"]) or g["stride"] < 1
+                or (g["weight"] is not None and (isinstance(g["weight"], bool) or not isinstance(
+                    g["weight"], (int, float)) or g["weight"] < 0))
+                or not isinstance(g["device"], str) or not _strs(g["extra"])
+                or not _strs(g["buffers"])):
+            raise SystemExit(f"graph {gc!r}: keys {sorted(GRAPH_LOOP_DEFAULTS)}; rebuild bool, "
+                             "stride int >= 1, weight >= 0 | null, device str, extra / buffers "
+                             "lists of str")
+    dp = cfg.get("deploy_policy")
+    if dp is not None:
+        d = {**DEPLOY_POLICY_DEFAULTS, **dp} if isinstance(dp, dict) else {}
+        if (not isinstance(dp, dict) or set(d) != set(DEPLOY_POLICY_DEFAULTS)
+                or d["mode"] not in ("latest", "keep_best")
+                or d["metric"] not in ("eval_engaged", "eval_strict")
+                or not _int(d["min_gain"]) or d["min_gain"] < 0):
+            raise SystemExit(f"deploy_policy {dp!r}: mode latest | keep_best, metric eval_engaged "
+                             "| eval_strict, min_gain int >= 0")
+        if d["mode"] == "keep_best" and (not cfg["eval_every"] or c3_on(cfg)):
+            raise SystemExit("deploy_policy keep_best needs eval_every >= 1 (the candidates' "
+                             "evals); not with controller c3plus")
+    es = cfg.get("eval_suite")
+    if es is not None:
+        e = {**EVAL_SUITE_DEFAULTS, **es} if isinstance(es, dict) else {}
+        if (not isinstance(es, dict) or set(e) != set(EVAL_SUITE_DEFAULTS) or e["name"] != "hard"
+                or not _int(e["repeats"]) or e["repeats"] < 1):
+            raise SystemExit(f"eval_suite {es!r}: {{name: hard, repeats: int >= 1}}")
+    ev = cfg["eval_every"]
+    if ev is not None and (not _int(ev) or ev < 0):
+        raise SystemExit(f"eval_every {ev!r}: int >= 0 | null")
+    for er in cfg["eval_runs"]:
+        rs = er.get("reset_seed")
+        if rs is not None and not _int(rs):
+            raise SystemExit(f"eval run {er['run']}: reset_seed {rs!r} (int | null)")
+
+
+def keep_best(cfg: dict) -> bool:
+    return (cfg.get("deploy_policy") or {}).get("mode") == "keep_best"
+
+
+def eval_runs_of(cfg: dict) -> list[dict]:
+    """``eval_suite`` hard: run_hard_suite.SUITE (one run per start, its reset seeds), else
+    ``eval_runs``."""
+    es = cfg.get("eval_suite")
+    if es is None:
+        return cfg["eval_runs"]
+    import run_hard_suite as rhs
+
+    n = int({**EVAL_SUITE_DEFAULTS, **es}["repeats"])
+    return [{"run": f"hs_{k}", "start_states": s, "variants": v or None, "repeats": n,
+             "cells": [k], "floors": None, "reset_seed": seed} for k, s, v, seed in rhs.SUITE]
 
 
 class Ctx:
@@ -466,6 +577,21 @@ class Ctx:
         return self.out / f"iter{self.i if i is None else i}"
 
 
+class CandCtx(Ctx):
+    """keep_best: iteration i's candidate theta_i, exported / evaluated under iter<i>/cand/."""
+
+    def __init__(self, ctx: Ctx):
+        self.__dict__.update(ctx.__dict__)
+
+    def it(self, i=None) -> Path:
+        d = super().it(i)
+        return d / "cand" if i is None or i == self.i else d
+
+    def lout(self, i=None) -> Path:
+        d = super().lout(i)
+        return d / "cand" if i is None or i == self.i else d
+
+
 # ---------------------------------------------------------------- state
 
 
@@ -509,13 +635,16 @@ def move_aside(paths):
             print(f"  moved {p} -> {p}.prev{n}")
 
 
-def run(cmd, log: Path, cwd=REPO, ctx=None, step=None) -> int:
-    """Subprocess with its own log (appended); pid recorded in the state while it runs."""
+def run(cmd, log: Path, cwd=REPO, ctx=None, step=None, env=None) -> int:
+    """Subprocess with its own log (appended); pid recorded in the state while it runs;
+    ``env``: extra environment variables."""
     log.parent.mkdir(parents=True, exist_ok=True)
     with open(log, "a") as f:
-        f.write(f"\n# {now()} {' '.join(map(str, cmd))}\n")
+        f.write(f"\n# {now()} {''.join(f'{k}={v} ' for k, v in (env or {}).items())}"
+                f"{' '.join(map(str, cmd))}\n")
         f.flush()
-        p = subprocess.Popen([str(c) for c in cmd], cwd=cwd, stdout=f, stderr=subprocess.STDOUT)
+        p = subprocess.Popen([str(c) for c in cmd], cwd=cwd, stdout=f, stderr=subprocess.STDOUT,
+                             env={**os.environ, **env} if env else None)
         if ctx is not None and step:
             set_step(ctx, ctx.i, step, pids=get_state(ctx, ctx.i)["steps"].get(step, {}).get(
                 "pids", []) + [p.pid])
@@ -593,7 +722,7 @@ def refit_cmd(ctx: Ctx, i: int, init: str, epochs: int, tag: str, gate_ref=None)
     # refit_from_buffer gates recon <= 6 mm by default since P2; v1 had no such gate
     mx = r.get("recon_max_mm")
     cmd += ["--recon-max-mm", "none" if mx is None else str(mx)]
-    return cmd
+    return cmd + list(r.get("extra_args") or [])
 
 
 def run_refit(ctx: Ctx, cmd, tag: str, step: str) -> dict:
@@ -652,12 +781,17 @@ def st_seed(ctx: Ctx, dry: bool):
     if ctx.i != 0:
         print("  seed is iteration 0 only")
         return {"status": "skipped"}
-    r = ctx.cfg["refit"]
+    r, sm = ctx.cfg["refit"], ctx.cfg.get("seed_model")
     tag = "r0_seed"
     cmd = refit_cmd(ctx, 0, "none", r["seed_epochs"], tag)
     if dry:
         if ctx.cfg["seed_buffer_merged"]:
             print(f"  merge {[rel(b) for b in ctx.seed_buffers]} -> {rel(ctx.seed_buffer)}")
+        if sm:
+            print(f"  seed_model: theta_0 = {sm['checkpoint']} (report {sm['refit_report']}"
+                  f"{'; ' + sm['source'] if sm.get('source') else ''}); no seed refit; G2 "
+                  f"numbers of its report -> {rel(ctx.it(0))}/gates.json")
+            return {}
         show(cmd, LCS)
         print(f"  -> theta_0 = {ctx.lout(0)}/refit/{tag}; G2 numbers -> "
               f"{rel(ctx.it(0))}/gates.json")
@@ -666,15 +800,19 @@ def st_seed(ctx: Ctx, dry: bool):
     assert all(isinstance(x["label_human"], bool) for x in seed["rollouts"])
     jdump(ctx.it(0) / "buffer_seed.json", {**seed, "imported_from": rel(ctx.seed_buffer),
                                            "imported_sha256": sha(ctx.seed_buffer)})
-    rep = run_refit(ctx, cmd, tag, "seed")
+    rep_p = str(ctx.lout(0) / "refit" / tag / "refit_report.json")
+    if sm:
+        rep, rep_p, same = seed_model_report(ctx, sm, seed)
+        tag = rep["tag"]
+    else:
+        rep = run_refit(ctx, cmd, tag, "seed")
     ck = rep["checkpoint"]
     a_init = ckpt_arg(ck, "belt_a_init")
     if not ctx.smoke and abs(float(a_init) - r["belt_a_init"]) > 1e-12:
         raise SystemExit(f"belt_a_init {a_init} != {r['belt_a_init']}")
     m = rep["metrics"]
     rg = recon_gate(ctx, rep)
-    gates = {"gate": "G2 (seed refit)",
-             "source": str(ctx.lout(0) / "refit" / tag / "refit_report.json"),
+    gates = {"gate": "G2 (seed refit)", "source": rep_p,
              "separation_auc": m["separation_auc"], "separation_auc_set": m["separation_auc_set"],
              "auc_min": ctx.cfg["g2_auc_min"],
              "auc_ok": None if m["separation_auc"] is None
@@ -688,13 +826,19 @@ def st_seed(ctx: Ctx, dry: bool):
                                  "clean clouds (no clean cloud is recorded with --cloud-noise)")
     else:
         gates.update(gate="G2' (seed refit, clean clouds)", **g2_gates(ctx, m, rep, rg))
+    if sm:
+        gates["seed_model"] = {**sm, "same_buffer_rows": same}
     jdump(ctx.it(0) / "gates.json", gates)
     mid, letter = new_model_id(ctx, 0)
     model = {"id": mid, "letter": letter, "iter": 0, "new": True, "checkpoint": ck,
-             "refit_report": str(ctx.lout(0) / "refit" / tag / "refit_report.json"),
+             "refit_report": rep_p,
              "refit_tag": tag, "decision": "seed", "buffer": str(ctx.seed_buffer),
              "belt_a_init": a_init, "epochs": rep["epochs"], "mode": rep["mode"],
              "source": f"seed refit (fresh, {rep['epochs']} epochs) on the e1 seed buffer"}
+    if sm:
+        model.update(seed_model=sm, seed_model_same_buffer_rows=same, source=(
+            f"seed_model {sm.get('source') or ck}: {rep['mode']} {rep['epochs']} epochs on "
+            f"{rep['buffer']}, adopted without a seed refit"))
     jdump(ctx.it(0) / "model.json", model)
     jdump(ctx.it(0) / "refit.json", {"decision": "seed", "loop_decision": "accepted",
                                      "report_decision": rep["decision"], "recon_gate": rg,
@@ -706,13 +850,92 @@ def st_seed(ctx: Ctx, dry: bool):
     return {"outputs": [str(ctx.it(0) / "model.json"), str(ctx.it(0) / "gates.json")]}
 
 
+def seed_model_report(ctx: Ctx, sm: dict, seed: dict) -> tuple[dict, str, bool]:
+    """``seed_model``'s report (its checkpoint must be the given one) and whether it was
+    trained on the seed buffer's rows (episode, kind, label, weight)."""
+    rp = Path(sm["refit_report"]).resolve()
+    rep = jload(rp)
+    ck = Path(sm["checkpoint"]).resolve()
+    if not ck.is_file() or Path(rep["checkpoint"]).resolve() != ck:
+        raise SystemExit(f"seed_model: checkpoint {ck} missing or != its report's "
+                         f"{rep['checkpoint']}")
+
+    def key(rows):
+        return [(x["episode"], x["kind"], x["label_human"], float(x.get("weight", 1.0)))
+                for x in rows]
+
+    same = Path(rep["buffer"]).is_file() and key(jload(rep["buffer"])["rollouts"]) == key(
+        seed["rollouts"])
+    if not same:
+        print(f"  WARNING seed_model: trained on {rep['buffer']}, not the rows of "
+              f"{rel(ctx.seed_buffer)}")
+    return rep, str(rp), same
+
+
+def graph_rule(cfg: dict) -> dict | None:
+    g = cfg.get("graph")
+    g = g is not None and {**GRAPH_LOOP_DEFAULTS, **g}
+    return g if g and g["rebuild"] else None
+
+
+def graph_npz(ctx: Ctx, i=None) -> Path:
+    return ctx.it(i) / "graph" / "graph.npz"
+
+
+def graph_buffers(ctx: Ctx) -> list[str]:
+    return [str(b) for b in (buffer_in(ctx, ctx.i), *[REPO / x for x in
+                                                       graph_rule(ctx.cfg)["buffers"]])]
+
+
+def graph_cmd(ctx: Ctx) -> list:
+    """build_cloud_graph.py on B_i (+ ``graph.buffers``) -> iter<i>/graph/graph.npz."""
+    g = graph_rule(ctx.cfg)
+    return [PY_LCS, "scripts/build_cloud_graph.py",
+            *[x for b in graph_buffers(ctx) for x in ("--buffer", b)], "--out", graph_npz(ctx),
+            "--stride", str(g["stride"]), "--device", g["device"], *g["extra"]]
+
+
+def graph_args(ctx: Ctx) -> list[str]:
+    w = graph_rule(ctx.cfg)["weight"]
+    return ["--graph-file", str(graph_npz(ctx))] + ([] if w is None else ["--graph-weight", str(w)])
+
+
+def build_graph(ctx: Ctx) -> dict:
+    """The graph of B_i (rebuilt when its buffers changed) -> summary stats."""
+    npz, cmd, want = graph_npz(ctx), graph_cmd(ctx), graph_buffers(ctx)
+    js = npz.with_suffix(".json")
+    if npz.is_file() and js.is_file() and jload(js)["args"]["buffer"] == want:
+        wall = None
+    else:
+        if npz.parent.exists():
+            move_aside([npz.parent])
+        t0 = time.time()
+        if run(cmd, ctx.logs() / "graph.log", cwd=LCS, ctx=ctx, step="refit"):
+            raise SystemExit(f"build_cloud_graph failed (see {rel(ctx.logs() / 'graph.log')})")
+        wall = time.time() - t0
+    st = jload(js)["stats"]
+    rc = st["coverage"]["rejected_candidates"]
+    return {"npz": str(npz), "sha256": sha(npz), "buffers": want, "n_nodes": st["n_nodes"],
+            "n_edges": st["n_edges"], "n_episodes": st["n_episodes"], "n_goal": st["n_goal"],
+            "n_rejected": rc["n"], "rejected_frac": rc["frac"],
+            "n_components": st["n_components"],
+            "largest_component_frac": st["largest_component_frac"],
+            "unreachable_frac": st["unreachable_frac"],
+            "build_s": st["timings_s"]["total"] + st["timings_s"].get("coverage", 0.0),
+            "wall_s": wall, "rule": graph_rule(ctx.cfg)}
+
+
 def st_refit(ctx: Ctx, dry: bool):
     if ctx.i == 0:
         print("  refit: iteration 0 uses the seed step")
         return {"status": "skipped"}
     i = ctx.i
-    prev = model_of(ctx, i - 1) if not dry or (ctx.it(i - 1) / "model.json").is_file() else {
-        "checkpoint": "<theta_{i-1}>", "refit_report": "<theta_{i-1} report>", "id": "?"}
+    sm = ctx.cfg.get("seed_model")
+    sm0 = sm and {"checkpoint": sm["checkpoint"], "refit_report": sm["refit_report"],
+                  "id": "theta_0 (seed_model)"}  # dry-run before the seed step
+    prev = model_of(ctx, i - 1) if not dry or (ctx.it(i - 1) / "model.json").is_file() else (
+        sm0 if i == 1 and sm else {"checkpoint": "<theta_{i-1}>",
+                                   "refit_report": "<theta_{i-1} report>", "id": "?"})
     tag = f"r{i}_{ctx.cfg['refit']['mode']}"
     fresh = bool(ctx.cfg["refit"].get("fresh_each_iter"))
     from_seed = bool(ctx.cfg["refit"].get("from_seed"))
@@ -724,10 +947,18 @@ def st_refit(ctx: Ctx, dry: bool):
                 and prev.get("rejected") else prev["checkpoint"])
         if from_seed:  # no drift accumulation: theta_0 + all of B_i every time
             seed = (model_of(ctx, 0) if not dry or (ctx.it(0) / "model.json").is_file()
-                    else {"checkpoint": "<theta_0>", "id": "?"})
+                    else sm0 or {"checkpoint": "<theta_0>", "id": "?"})
             init = seed["checkpoint"]
         cmd = refit_cmd(ctx, i, init, ctx.cfg["refit"]["epochs"], tag, prev["refit_report"])
+    gr = graph_rule(ctx.cfg)
+    if gr:
+        cmd += graph_args(ctx)
     if dry:
+        if gr:
+            show(graph_cmd(ctx), LCS)
+            if ctx.cfg["refit"]["mode"] == "lcs_only" and not fresh:
+                print("  graph: lcs_only refit (frozen encoder): the graph enters metrics.graph "
+                      "only")
         if from_seed:
             print(f"  refit.from_seed: init = theta_0 ({seed['id']}), gates vs theta_{i - 1}")
         show(cmd, LCS)
@@ -741,6 +972,7 @@ def st_refit(ctx: Ctx, dry: bool):
                 show(c, LCS if c[0] == PY_LCS else REPO)
             print("  then accept iff behaviour_gate.py accepts")
         return {}
+    gs = build_graph(ctx) if gr else None
     rep = run_refit(ctx, cmd, tag, "refit")
     rg = recon_gate(ctx, rep)
     ok = rep["decision"] == "accepted" and rg["ok"] is True
@@ -761,6 +993,12 @@ def st_refit(ctx: Ctx, dry: bool):
         res["behaviour_gate"] = bg
     if from_seed:
         res["from_seed"] = {"id": seed["id"], "checkpoint": init}
+    if "train_objective" in rep:
+        res["train_objective"] = rep["train_objective"]
+    if gs is not None:
+        res["graph"] = {**gs, "refit_metrics": {k: (rep["metrics"].get("graph") or {}).get(k)
+                                                for k in ("stress", "far", "pearson", "spearman",
+                                                          "spearman_goal")}}
     if ok:
         mid, letter = new_model_id(ctx, i)
         model = {"id": mid, "letter": letter, "iter": i, "new": True,
@@ -788,6 +1026,10 @@ def st_refit(ctx: Ctx, dry: bool):
     jdump(ctx.it() / "model.json", model)
     print(f"  refit {res['decision']} (gates {verdict}, report {rep['decision']}, recon ok {rg['ok']}"
           + (f", behaviour {bg['line']}" if bg is not None else "") + f"): model {model['id']}")
+    if gs is not None:
+        print(f"  graph {gs['n_nodes']} nodes, {gs['n_edges']} edges, rejected "
+              f"{gs['rejected_frac']:.2%}, components {gs['n_components']}; held-out stress "
+              f"{res['graph']['refit_metrics']['stress']}")
     return {"outputs": [str(ctx.it() / "refit.json"), str(ctx.it() / "model.json")]}
 
 
@@ -1143,18 +1385,66 @@ def bank_cmd(ctx: Ctx, deploy) -> list:
             rel(ctx.it() / "waypoint_bank")]
 
 
-def st_export(ctx: Ctx, dry: bool):
+def is_jepa(model: dict) -> bool:
+    p = model.get("refit_report")
+    return bool(p) and Path(p).is_file() and jload(p).get("train_objective") == "jepa"
+
+
+def export_env(ctx: Ctx, model: dict) -> dict | None:
+    """JEPA_ENV for a JEPA checkpoint (a dry-run placeholder: seed_model's objective, which
+    refits inherit), else None."""
+    sm = ctx.cfg.get("seed_model")
+    if "refit_report" not in model and sm:
+        model = {"refit_report": sm["refit_report"]}
+    return dict(JEPA_ENV) if is_jepa(model) and not all(
+        os.environ.get(k) for k in JEPA_ENV) else None
+
+
+def show_env(cmd, env, cwd=REPO):
+    show([*(f"{k}={v}" for k, v in (env or {}).items()), *cmd], cwd)
+
+
+def prepare_cand(ctx: Ctx) -> CandCtx:
+    """iter<i>/cand/ with theta_i's model.json and box_i (keep_best)."""
+    c = CandCtx(ctx)
+    c.it().mkdir(parents=True, exist_ok=True)
+    jdump(c.it() / "model.json", model_of(ctx, ctx.i))
+    (c.it() / f"box_{ctx.i}.json").write_bytes((ctx.it() / f"box_{ctx.i}.json").read_bytes())
+    return c
+
+
+def export_candidate(ctx: Ctx, dry: bool):
+    """keep_best `export`: theta_i -> iter<i>/cand/ when its eval is due."""
+    if not eval_due(ctx):
+        print(f"  keep_best: theta_{ctx.i} is not evaluated at iteration {ctx.i} (eval every "
+              f"{ctx.cfg['eval_every']}): no candidate export; `deploy` exports the deployed "
+              "model")
+        return {"status": "skipped"}
+    if dry:
+        mp, sm = ctx.it() / "model.json", ctx.cfg.get("seed_model")
+        print(f"  keep_best: candidate theta_{ctx.i} -> {rel(CandCtx(ctx).it())}")
+        return st_export(CandCtx(ctx), True, jload(mp) if mp.is_file() else {
+            "checkpoint": sm["checkpoint"] if ctx.i == 0 and sm else f"<theta_{ctx.i}>",
+            "id": f"theta_{ctx.i}", "letter": "?"})
+    return st_export(prepare_cand(ctx), False)
+
+
+def st_export(ctx: Ctx, dry: bool, model: dict | None = None):
+    """``model``: export this model (keep_best `deploy`) instead of theta_i."""
+    if keep_best(ctx.cfg) and model is None and not isinstance(ctx, CandCtx):
+        return export_candidate(ctx, dry)
     gep = REPO / ctx.cfg["goal_episode"]
     gf = goal_frames(gep)
     box = ctx.it() / f"box_{ctx.i}.json"
     files_txt = ctx.it() / "export_files.txt"
     if dry:
         mp = ctx.it() / "model.json"
-        model = jload(mp) if mp.is_file() else {"checkpoint": "<theta_i>", "id": "V11?",
-                                                  "letter": "?"}
+        model = model or (jload(mp) if mp.is_file() else {"checkpoint": "<theta_i>", "id": "V11?",
+                                                          "letter": "?"})
         dep = ctx.lout() / f"deploy_{ctx.cfg['model_id_prefix'].lower()}{model.get('letter', '?')}"
+        env = export_env(ctx, model)
         for c in export_cmds(ctx, model, dep, files_txt, box, gf):
-            show(c, LCS if c[0] == PY_LCS else REPO)
+            show_env(c, env if c[0] == PY_LCS else None, LCS if c[0] == PY_LCS else REPO)
         if ctx.cfg["stage_tol"]:
             c = stage_tol_cmd(ctx, dep / "deploy.npz")
             show(c[:c.index("--demos") + 1] + [f"<{len(stage_demos(ctx))} seed demos>"]
@@ -1170,7 +1460,8 @@ def st_export(ctx: Ctx, dry: bool):
                  + c[c.index("--stride"):])
         print(f"  goal: {rel(gep)} frames {gf['frames']} ({gf['labels']})")
         return {}
-    model = model_of(ctx, ctx.i)
+    model = model or model_of(ctx, ctx.i)
+    env = export_env(ctx, model)
     dep = ctx.lout() / f"deploy_{ctx.cfg['model_id_prefix'].lower()}{model['letter']}"
     buf = jload(buffer_in(ctx, ctx.i))
     files_txt.write_text("\n".join(r["episode"] for r in buf["rollouts"]) + "\n")
@@ -1178,7 +1469,7 @@ def st_export(ctx: Ctx, dry: bool):
     log = ctx.logs() / "export.log"
     t0 = time.time()
     if not (ctx.lout() / "cache_buffer.npz").is_file() and run(cache, log, cwd=LCS, ctx=ctx,
-                                                               step="export"):
+                                                               step="export", env=env):
         raise SystemExit("encode_latents_cache failed")
     clog = ctx.logs() / "check_latent_encoder.log"
     tries, check = [], None
@@ -1190,7 +1481,7 @@ def st_export(ctx: Ctx, dry: bool):
             if dep.exists():
                 move_aside([dep])
             if run(exp + (["--seed", str(seed)] if n_seeds > 1 else []), log, cwd=LCS,
-                   ctx=ctx, step="export"):
+                   ctx=ctx, step="export", env=env):
                 tail = log.read_text().split("\n# ")[-1].strip().splitlines()[-1:]
                 tries.append({"seed": seed, "export": "FAIL", "error": tail})
                 continue
@@ -1209,7 +1500,8 @@ def st_export(ctx: Ctx, dry: bool):
     if check is None:
         raise SystemExit(f"export / check_latent_encoder failed for seeds 0..{n_seeds - 1}"
                          f": {tries}")
-    if not (dep / "decoder.npz").is_file() and run(dec, log, cwd=LCS, ctx=ctx, step="export"):
+    if not (dep / "decoder.npz").is_file() and run(dec, log, cwd=LCS, ctx=ctx, step="export",
+                                                   env=env):
         raise SystemExit("decoder export failed")
     gpu_s = time.time() - t0
     with np.load(ctx.lout() / "cache_buffer.npz") as c:
@@ -1257,7 +1549,7 @@ def st_export(ctx: Ctx, dry: bool):
               "box_json": str(box), "goal_json": str(ctx.it() / "goal.json"),
               "cache": str(ctx.lout() / "cache_buffer.npz"), "check_latent_encoder": check,
               "export_attempts": tries,
-              "gpu_s": gpu_s}
+              "gpu_s": gpu_s, **({"env": env} if env else {})}
     jdump(ctx.it() / "deploy.json", deploy)
     print(f"  export {model['id']} ub-tr{ctx.i} -> {dep}; goal frames {gfr}, stage distance "
           f"{goal['stage_dist_whitened']:.2f} (tol {tol:.2f}); encoder check {check}"
@@ -1318,7 +1610,9 @@ def mppi_yaml(ctx: Ctx, path: Path, noise: float, seed: int, floors=None, dry=Fa
             ov["seat_tol"] = float(jload(gj)["tol_2"]) if gj.is_file() else float("nan")
         doc["overshoot"] = ov
         extra.append("overshoot (mppi_overshoot)")
-    if ctx.cfg["support_box"]:
+    if ctx.cfg["support_box"] and dry and not buffer_in(ctx, ctx.i).is_file():
+        print(f"  {path.name}: support box of {rel(buffer_in(ctx, ctx.i))} (not built yet)")
+    elif ctx.cfg["support_box"]:
         sb = support_box(ctx, dry)
         doc["support_box"] = {k: sb[k] for k in ("lo", "hi", "weight", "hard_margin_m")}
         extra.append(f"support_box ({rel(ctx.it() / 'support_box.json')})")
@@ -1988,8 +2282,9 @@ def n_frames(ep) -> int:
 
 
 def eval_due(ctx: Ctx) -> bool:
-    every = ctx.cfg["eval_every"]  # 0 / null: never (V12 screening cells)
-    return ctx.smoke or ctx.a.force == "eval" or bool(every) and ctx.i % every == 1
+    every = ctx.cfg["eval_every"]  # 0 / null: never (V12 screening cells); 1: every iteration
+    return (ctx.smoke or ctx.a.force == "eval" or bool(every) and ctx.i % every == 1 % every
+            or keep_best(ctx.cfg) and ctx.i == 0)  # keep_best: theta_0's eval is the baseline
 
 
 def demo_final_belt(ctx: Ctx) -> np.ndarray:
@@ -2006,23 +2301,41 @@ def belt_rmse_mm(a: np.ndarray, b: np.ndarray) -> tuple[float, float]:
     return direct, best
 
 
+def eval_candidate(ctx: Ctx, dry: bool):
+    """keep_best `eval` (before `collect`): theta_i's export under iter<i>/cand/ (exported here
+    when missing) -> cand/eval.json, copied to iter<i>/eval.json."""
+    c = CandCtx(ctx)
+    if dry:
+        print(f"  keep_best: eval of the candidate theta_{ctx.i} ({rel(c.it())})")
+        return st_eval(c, True)
+    if not (c.it() / "deploy.json").is_file():
+        st_export(prepare_cand(ctx), False)
+    st_eval(c, False)
+    jdump(ctx.it() / "eval.json", {**jload(c.it() / "eval.json"), "candidate": True})
+    write_budget(ctx)
+    return {"outputs": [str(ctx.it() / "eval.json"), str(c.it() / "eval.json")]}
+
+
 def st_eval(ctx: Ctx, dry: bool):
     if not eval_due(ctx):
         print(f"  eval skipped (iteration {ctx.i}: every {ctx.cfg['eval_every']}, odd i)")
         return {"status": "skipped"}
+    if keep_best(ctx.cfg) and not isinstance(ctx, CandCtx):
+        return eval_candidate(ctx, dry)
     dj = ctx.it() / "deploy.json"
     deploy = jload(dj)["deploy"] if dj.is_file() else "<deploy_i>"
     base = ctx.it() / "eval"
     runs, c3s = [], {}
-    for er in ctx.cfg["eval_runs"]:  # full task, no prefix, all stages (V12 too)
+    for er in eval_runs_of(ctx.cfg):  # full task, no prefix, all stages (V12 too)
         cfg = mppi_yaml(ctx, base / f"mppi_eval_{er['run']}.yaml", 0.0, ctx.cfg["seed"],
                         er.get("floors"), dry=dry)
         if c3_on(ctx.cfg):
             cfg = c3s[er["run"]] = c3plus_params(ctx, f"eval_{er['run']}", er.get("floors"),
                                                  dry=dry)
+        rs = er.get("reset_seed")  # hard suite: grasp starts reset by script after episode 1
         cmd = harness_cmd(ctx, ctx.url_eval, deploy, cfg, er["start_states"], er["variants"],
                           er["repeats"], base / er["run"], f"V11_iter{ctx.i}_eval_{er['run']}",
-                          False, 0)
+                          rs is not None, rs or 0)
         runs.append((er, cmd))
     if dry:
         for _, c in runs:
@@ -2115,6 +2428,91 @@ def eval_table_md(ev: dict) -> str:
                 f"{s['cloud_success']}, RMSE {s['rmse_mean_mm']:.1f} mm, unsafe "
                 f"{s['n_unsafe']}, solve p95 {s['solve_p95_ms'] or 0:.1f} ms**")]
     return "\n".join(md) + "\n"
+
+
+# ---------------------------------------------------------------- deploy policy (V12-57)
+
+
+def keep_best_pick(inc: dict | None, cand: dict, min_gain: int) -> tuple[dict, str]:
+    """``inc`` (the deployed model; None at iteration 0) / ``cand`` (theta_i): {id, iter, score
+    (None: not evaluated), n} -> (the model to deploy, reason). Ties go to the candidate when
+    min_gain is 0."""
+    if inc is None:
+        return cand, "initial (theta_0)"
+    if cand["score"] is None:
+        return inc, "keep (candidate not evaluated)"
+    if cand["id"] == inc["id"]:
+        return inc, "keep (same model)"
+    if inc["score"] is None:
+        return cand, "deploy (deployed model not evaluated)"
+    gain = cand["score"] - inc["score"]
+    if gain >= min_gain:
+        return cand, f"deploy (gain {gain:+d} >= {min_gain})"
+    return inc, f"keep (gain {gain:+d} < {min_gain})"
+
+
+def policy_score(ev: dict, metric: str) -> int:
+    return int(ev["summary"]["engaged" if metric == "eval_engaged" else "strict"])
+
+
+def st_deploy(ctx: Ctx, dry: bool):
+    """keep_best: deploy theta_i or keep the deployed model (keep_best_pick on the evals) ->
+    iter<i>/deploy_policy.json; the deployed model is exported to iter<i>/ (box_i)."""
+    if not keep_best(ctx.cfg):
+        print("  deploy: deploy_policy keep_best only (else `export` deploys theta_i)")
+        return {"status": "skipped"}
+    rule = {**DEPLOY_POLICY_DEFAULTS, **ctx.cfg["deploy_policy"]}
+    i, met = ctx.i, rule["metric"]
+    pp = ctx.it(i - 1) / "deploy_policy.json" if i > 0 else None
+    inc = jload(pp)["deployed"] if pp is not None and pp.is_file() else None
+    mp, ep = ctx.it() / "model.json", ctx.it() / "eval.json"
+    model = jload(mp) if mp.is_file() else None
+    ev = jload(ep) if ep.is_file() else None
+    cand = None if model is None else {"id": model["id"], "iter": i, "score": None, "n": None}
+    if cand is not None and ev is not None and ev["model"] == model["id"]:
+        cand.update(score=policy_score(ev, met), n=ev["summary"]["n"])
+    if dry:
+        print(f"  deploy_policy keep_best ({met}, min_gain {rule['min_gain']}): deployed before "
+              + ("none" if i == 0 else f"{inc['id']} (iter {inc['iter']}, {inc['score']}/"
+                 f"{inc['n']})" if inc else f"<{rel(pp)}>") + f"; theta_{i} "
+              + (("<eval>" if ev is None else f"{cand['score']}/{cand['n']}")
+                 if eval_due(ctx) else "not evaluated"))
+        sm = ctx.cfg.get("seed_model")
+        th = model or {"checkpoint": sm["checkpoint"] if i == 0 and sm else f"<theta_{i}>",
+                       "id": f"theta_{i}", "letter": "?"}
+        if cand is not None and (i == 0 or inc) and (cand["score"] is not None
+                                                     or not eval_due(ctx)):
+            pick, why = keep_best_pick(inc, cand, rule["min_gain"])
+            dm = model if pick is cand else pick["model"]
+        elif i == 0:
+            why, dm = "initial (theta_0)", th
+        elif not eval_due(ctx):
+            why = "keep (candidate not evaluated)"
+            dm = inc["model"] if inc else {"checkpoint": f"<deployed_{i - 1}>", "id": "?",
+                                           "letter": "?"}
+        else:
+            why = (f"deploy theta_{i} iff its {met} >= deployed_{i - 1}'s + {rule['min_gain']}, "
+                   f"else keep deployed_{i - 1}")
+            dm = {"checkpoint": f"<theta_{i} | deployed_{i - 1}>", "id": "?", "letter": "?"}
+        print(f"  -> deploy {dm['id']}: {why}")
+        st_export(ctx, True, dm)
+        return {}
+    if i > 0 and inc is None:
+        raise SystemExit(f"{rel(pp)} missing: run --iter {i - 1} --step deploy")
+    model = model_of(ctx, i)
+    pick, why = keep_best_pick(inc, cand, rule["min_gain"])
+    dm = model if pick is cand else pick["model"]
+    rec = {"iter": i, "rule": rule, "candidate": cand,
+           "incumbent": None if inc is None else {k: inc[k] for k in ("id", "iter", "score", "n")},
+           "deployed": {**{k: pick[k] for k in ("id", "iter", "score", "n")}, "model": dm},
+           "decision": why, "eval": None if ev is None else rel(ep), "decided": now()}
+    jdump(ctx.it() / "deploy_policy.json", rec)
+    print(f"  deploy_policy: theta_{i} {model['id']} {met} {cand['score']}/{cand['n']}; deployed_"
+          f"{i - 1} " + ("-" if inc is None else f"{inc['id']} {inc['score']}/{inc['n']}")
+          + f" -> deploy {pick['id']}: {why}")
+    r = st_export(ctx, False, dm)
+    return {"outputs": [str(ctx.it() / "deploy_policy.json"), *r["outputs"],
+                        str(ctx.lout() / "cache_buffer.npz")]}
 
 
 # ---------------------------------------------------------------- budget
@@ -2408,9 +2806,27 @@ def lc_row(ctx: Ctx, i: int, budget: dict) -> dict:
         ps = jload(it / "policy_screen.json")
         row["policy_screen"] = {k: ps.get(k) for k in ("n", "both_down", "both_up",
                                                         "fz_mean_mm", "uz_mean_mm")}
+    if (it / "response_gate.json").is_file():
+        rq = jload(it / "response_gate.json")
+        row["response_gate"] = {"pass": rq["pass"], "n_states": rq["n_states"],
+                                **{k: v["cos_median"] for k, v in rq["channels"].items()}}
     if (it / "refit.json").is_file():
         row["recon_clean_mm"] = jload(jload(it / "refit.json")["report"])["metrics"][
             "recon_chamfer_mm"]
+        rf = jload(it / "refit.json")
+        if "train_objective" in rf:
+            row["train_objective"] = rf["train_objective"]
+        if "graph" in rf:
+            row["graph"] = {k: rf["graph"][k] for k in (
+                "n_nodes", "n_edges", "n_episodes", "rejected_frac", "n_components",
+                "largest_component_frac", "unreachable_frac", "build_s", "refit_metrics")}
+    if (it / "deploy_policy.json").is_file():
+        dp = jload(it / "deploy_policy.json")
+        row["deploy_policy"] = {"trained": model_of(ctx, i)["id"], "candidate": dp["candidate"],
+                                "incumbent": dp["incumbent"],
+                                "deployed": {k: dp["deployed"][k] for k in ("id", "iter",
+                                                                            "score", "n")},
+                                "decision": dp["decision"]}
     row["separation"] = separation(ctx, i)
     cum = next((p["cum"] for p in budget["per_iter"] if p["iter"] == i), None)
     row["budget"] = cum
@@ -2505,6 +2921,9 @@ def st_report(ctx: Ctx, dry: bool):
                            ctx.it() / "mppi_collect.yaml", cn if cn.is_file() else None)
         jdump(ctx.it() / "policy_screen.json", {**ps, "deploy": jload(dj)["deploy"],
                                                 "buffer": str(bj)})
+    if ctx.cfg.get("response_gate") is not None and dj.is_file() \
+            and (ctx.it() / "attempts.json").is_file():
+        response_gate_of(ctx)
     rows = [lc_row(ctx, j, budget) for j in iters_present(ctx)
             if (ctx.it(j) / "model.json").is_file() and j <= ctx.i]
     v = verdict(ctx, rows)
@@ -2519,6 +2938,21 @@ def st_report(ctx: Ctx, dry: bool):
     plot(ctx.root / "learning_curve.png", rows)
     print(md)
     return {"outputs": [str(ctx.root / "learning_curve.md")]}
+
+
+def response_gate_of(ctx: Ctx) -> dict:
+    """``response_gate``: deploy_i on iteration i's collect episodes (response_gate.py) ->
+    iter<i>/response_gate.json (report-only)."""
+    import response_gate as rgm
+
+    c = {**RGATE_DEFAULTS, **ctx.cfg["response_gate"]}
+    dep = jload(ctx.it() / "deploy.json")
+    eps = [a["episode"] for a in jload(ctx.it() / "attempts.json")["attempts"] if a["episode"]]
+    res = rgm.compute(dep["deploy"], eps, int(c["stride"]), float(c["max_cos"]))
+    res.update(model=dep["model"], deploy_sha256=dep["deploy_sha256"], line=rgm.line(res))
+    jdump(ctx.it() / "response_gate.json", res)
+    print(f"  response gate {dep['model']}: {res['line']}")
+    return res
 
 
 def learning_curve_md(ctx: Ctx, rows, budget, v, g4) -> str:
@@ -2624,6 +3058,54 @@ def learning_curve_md(ctx: Ctx, rows, budget, v, g4) -> str:
                       f"{nw['frames_down']} / {nw['frames']} ({fmt(nw['share_down'], '.0%')}) | "
                       f"{pl['frames_down']} / {pl['frames']} ({fmt(pl['share_down'], '.0%')}) | "
                       f"{fmt(pl['mass_kept'], '.2f')} | {fmt(o.get('anchor_share'), '.2f')} |")
+    if any("response_gate" in r for r in rows):
+        mc = {**RGATE_DEFAULTS, **(ctx.cfg.get("response_gate") or {})}["max_cos"]
+        md += ["", ("Response-direction gate (V12-44, report-only): median cosine of the one-step "
+                    "whitened response to a 1 mm Franka +x / +y input with the direction to the "
+                    "seated goal, deploy_i on iteration i's collect states; pass iff both <= "
+                    f"{mc:g}."),
+               "", "| iter | model | F+x | F+y | states | gate |", "|---" * 6 + "|"]
+        for r in rows:
+            q = r.get("response_gate")
+            if q:
+                md.append(f"| {r['iter']} | {r['model']} | {fmt(q.get('F+x'), '+.2f')} | "
+                          f"{fmt(q.get('F+y'), '+.2f')} | {q['n_states']} | "
+                          f"{'-' if q['pass'] is None else 'pass' if q['pass'] else 'FAIL'} |")
+    if any("deploy_policy" in r for r in rows):
+        met = {**DEPLOY_POLICY_DEFAULTS, **(ctx.cfg.get("deploy_policy") or {})}["metric"]
+        md += ["", (f"Keep-best deployment (deploy_policy, {met}): theta_i = the model trained at "
+                    "iteration i (the main table's model), its eval before collection, the model "
+                    "deployed before it, and the model deployed for this iteration's collection "
+                    "(eval column of the main table = theta_i)."), "",
+               ("| iter | trained | trained eval | deployed before | deployed (iter, eval) | "
+                "decision |"), "|---" * 6 + "|"]
+
+        def sc(x):
+            return "-" if not x or x["score"] is None else f"{x['score']}/{x['n']}"
+
+        for r in rows:
+            d = r.get("deploy_policy")
+            if d:
+                inc, dep = d["incumbent"], d["deployed"]
+                md.append(f"| {r['iter']} | {d['trained']} | {sc(d['candidate'])} | "
+                          + ("-" if not inc else f"{inc['id']} ({sc(inc)})")
+                          + f" | **{dep['id']}** ({dep['iter']}, {sc(dep)}) | {d['decision']} |")
+    if any("graph" in r for r in rows):
+        md += ["", ("Cloud graph per refit (build_cloud_graph.py on B_i, iter<i>/graph/): nodes, "
+                    "edges, episodes, rejected candidate edges, components (largest share), "
+                    "unreachable (node, landmark) share, build s; held-out graph stress / "
+                    "Spearman(d, D) of the refit's encoder vs this graph."), "",
+               ("| iter | objective | nodes | edges | episodes | rejected | components | "
+                "unreachable | build s | stress | spearman |"), "|---" * 11 + "|"]
+        for r in rows:
+            g = r.get("graph")
+            if g:
+                m = g.get("refit_metrics") or {}
+                md.append(f"| {r['iter']} | {r.get('train_objective', '-')} | {g['n_nodes']} | "
+                          f"{g['n_edges']} | {g['n_episodes']} | {g['rejected_frac']:.2%} | "
+                          f"{g['n_components']} ({g['largest_component_frac']:.3f}) | "
+                          f"{g['unreachable_frac']:.3f} | {g['build_s']:.0f} | "
+                          f"{fmt(m.get('stress'), '.4f')} | {fmt(m.get('spearman'), '.3f')} |")
     if any("prefix_frac" in r for r in rows):
         md += ["", ("V12 curriculum: demo-prefix frac of the iteration (iter<i>/curriculum.json),"
                     " the decision that set it, prefix replays ok / rollouts, successes, "
@@ -2702,14 +3184,16 @@ def register_model(ctx: Ctx, m: dict, log) -> bool:
     mt = rep["metrics"]
     tr = jload(ctx.it() / "trust_region.json") if (ctx.it() / "trust_region.json").is_file() \
         else None
-    dep = jload(ctx.it() / "deploy.json")
+    dep = next((jload(p) for p in (ctx.it() / "deploy.json", ctx.it() / "cand" / "deploy.json")
+                if p.is_file() and jload(p)["model"] == m["id"]), None)  # keep_best: or none
     reg = ctx.cfg["registry"]
     tag = reg["tag"]
     entry = {"id": m["id"], "tag": tag,
              "run_dir": str(ctx.out).replace(str(HOME), "~"),
              "config": str(Path(m["refit_report"]).parent / "config.yaml").replace(str(HOME), "~"),
              "checkpoint": m["checkpoint"].replace(str(HOME), "~"), "step": rep["epochs"],
-             "exports": [dep["deploy_dir"].replace(str(HOME), "~")], "date": reg["date"],
+             "exports": [dep["deploy_dir"].replace(str(HOME), "~")] if dep else [],
+             "date": reg["date"],
              "parent": m.get("parent"),
              "change": (f"belt-cloud PointNet encoder (pcd_belt_seg, {reg['cloud']} cloud"
                         f"{', ' + reg['model_note'] if reg.get('model_note') else ''}) "
@@ -2744,7 +3228,8 @@ def register_model(ctx: Ctx, m: dict, log) -> bool:
     md_append_row(lines, "| ID | run folder", (
         f"| {m['id']} | `{ctx.out.name}` | `refit_from_buffer.py` | "
         f"`iter{m['iter']}/refit/{m['refit_tag']}` | - | epoch {rep['epochs']} | "
-        f"`iter{m['iter']}/{Path(dep['deploy_dir']).name}` | ub-tr{m['iter']} |"))
+        + (f"`iter{m['iter']}/{Path(dep['deploy_dir']).name}`" if dep else "-")
+        + f" | ub-tr{m['iter']} |"))
     mdp.write_text("\n".join(lines) + "\n")
     print(f"  registered model {m['id']}", file=log)
     return True
@@ -2763,9 +3248,10 @@ def register_eval(ctx: Ctx, ev: dict, log) -> bool:
             f" strict, {s['engaged']}/{s['n']} engaged, RMSE {s['rmse_mean_mm']:.1f} vs the demo "
             f"belt, unsafe {s['n_unsafe']}, solve p95 {s['solve_p95_ms'] or 0:.0f} ms")
     suite = reg["suite"]
+    nc = len(eval_runs_of(ctx.cfg)) if ctx.cfg.get("eval_suite") else 6
     entry = {"label": ev["label"], "model": ev["model"], "suite": suite, "cost": "Qw",
              "limits": ev["box_id"], "controller": ev.get("controller", "mppi"), "path": ev["dir"],
-             "date": reg["date"], "log_day": reg["date"], "n_cells": 6,
+             "date": reg["date"], "log_day": reg["date"], "n_cells": nc,
              "n_episodes": s["n"], "table": f"{ev['dir']}/table.md", "note": note}
     if f"  {suite}:" not in text:
         q = reg["suite_text"].replace("'", "''")
@@ -2780,7 +3266,7 @@ def register_eval(ctx: Ctx, ev: dict, log) -> bool:
                 if ln.startswith(("| | `seat6-1goal30`", "| | `seat6-rf")))
         lines.insert(k + 1, f"| | `{suite}` | {reg['suite_text']} |")
     md_append_row(lines, "| label | path | date", (
-        f"| {ev['label']} | `{ev['dir']}` | {reg['date'][5:]} | 6 / {s['n']} | `…/table.md` | "
+        f"| {ev['label']} | `{ev['dir']}` | {reg['date'][5:]} | {nc} / {s['n']} | `…/table.md` | "
         f"{note} |"))
     mdp.write_text("\n".join(lines) + "\n")
     print(f"  registered eval {ev['label']}", file=log)
@@ -2808,7 +3294,7 @@ def st_register(ctx: Ctx, dry: bool):
 
 FUNCS = {"seed": st_seed, "refit": st_refit, "trust": st_trust, "export": st_export,
          "collect": st_collect, "label": st_label, "buffer": st_buffer, "eval": st_eval,
-         "report": st_report, "register": st_register}
+         "deploy": st_deploy, "report": st_report, "register": st_register}
 
 
 def do_step(ctx: Ctx, step: str, dry: bool):
@@ -2849,6 +3335,8 @@ def run_all(ctx: Ctx, dry: bool):
               f"{rel(ctx.root)}; lcs outputs {ctx.lout()}")
     steps = ["seed" if ctx.i == 0 else "refit", "trust", "export", "collect", "label", "buffer",
              "eval", "report", "register"]
+    if keep_best(ctx.cfg):  # theta_i's eval decides the deployed model before collect
+        steps = steps[:3] + ["eval", "deploy"] + steps[3:6] + steps[7:]
     for s in steps:
         do_step(ctx, s, dry)
 

@@ -5,7 +5,8 @@
 ``BeltCloudPointNetEncoder`` are opt-in ``encoder_type`` variants; ``LearnedLcs`` is the trained
 PGD forward step (float64); ``DemoGoals`` loads the harness's ``demo_goals.npz``; ``LatentDecoder``
 maps a latent back to belt points (``decoder.npz``, exporter ``--decoder-out``). numpy + LCM types
-only.
+only, except ``BeltCloudPointMAEEncoder`` (``encoder_type`` belt_cloud_pointmae), which imports
+torch (``task_common.pointmae_encoder``) when such a deploy is loaded.
 """
 
 from __future__ import annotations
@@ -31,6 +32,7 @@ LATENT_BLOCK_NAMES = ("latent", "ee_pose_franka", "ee_pose_ur", "proprio")
 _ENC = "encoder__"
 _DEC = "decoder__"
 BELT_CLOUD_TYPE = "belt_cloud_pointnet"
+POINTMAE_TYPE = "belt_cloud_pointmae"
 
 
 def resize_points_ordered(xyz, n_points: int) -> np.ndarray:
@@ -89,12 +91,17 @@ class LatentEncoder:
             raise ValueError(f"encoder weights do not match the dims (fused {fused})")
 
     @classmethod
-    def load(cls, deploy_npz) -> LatentEncoder | BeltMlpEncoder | BeltCloudPointNetEncoder:
+    def load(cls, deploy_npz, device=None
+             ) -> LatentEncoder | BeltMlpEncoder | BeltCloudPointNetEncoder:
+        """``device``: torch device of a belt_cloud_pointmae encoder (default cuda if
+        available, else cpu); ignored by the numpy encoders."""
         weights = _load_npz(deploy_npz)
         if "encoder_type" in weights and str(_scalar(weights["encoder_type"])) == "belt_mlp":
             return BeltMlpEncoder(weights)
         if "encoder_type" in weights and str(_scalar(weights["encoder_type"])) == BELT_CLOUD_TYPE:
             return BeltCloudPointNetEncoder(weights)
+        if "encoder_type" in weights and str(_scalar(weights["encoder_type"])) == POINTMAE_TYPE:
+            return BeltCloudPointMAEEncoder(weights, device)
         return cls(weights)
 
     def preprocess(self, pc_raw) -> np.ndarray:
@@ -241,6 +248,47 @@ class BeltCloudPointNetEncoder:
         pcs, empty = zip(*(resample_deterministic(pc, self.num_points) for pc in pc_list))
         self.last_empty = np.asarray(empty, dtype=bool)
         return self._fuse(self.pc_global(np.stack(pcs)))
+
+
+class BeltCloudPointMAEEncoder(BeltCloudPointNetEncoder):
+    """``encoder_type`` belt_cloud_pointmae: the same belt-cloud input and interface as
+    ``BeltCloudPointNetEncoder`` (a subclass, so every belt-cloud code path takes it), encoded by
+    the pretrained Point-MAE backbone + MLP head in torch (``pointmae_encoder``). ``pc_global``
+    is the head input (max+mean tokens, centroid, scale; ``point_feat_dim`` 772). Not invariant to
+    the order of the resampled points (FPS starts at index 0); ``preprocess`` sorts them."""
+
+    encoder_type = POINTMAE_TYPE
+
+    def __init__(self, weights: dict, device=None) -> None:
+        from task_common.pointmae_encoder import PointMAETorchEncoder
+
+        self.num_points = int(_scalar(weights["n_points"]))
+        self.frame = str(_scalar(weights["frame"]))
+        self.proprio_dim = int(_scalar(weights["encoder_proprio_dim"]))
+        self.belt_num_points = int(_scalar(weights["encoder_belt_num_points"]))
+        if self.frame != SEG_FRAME:
+            raise ValueError(f"{POINTMAE_TYPE}: frame {self.frame!r} != {SEG_FRAME!r}")
+        if self.proprio_dim or self.belt_num_points:
+            raise ValueError(f"{POINTMAE_TYPE}: proprio/belt inputs must be 0")
+        if int(_scalar(weights["encoder_num_points"])) != self.num_points:
+            raise ValueError(f"{POINTMAE_TYPE}: encoder_num_points != n_points")
+        self._net = PointMAETorchEncoder(weights, device)
+        self.device = self._net.device
+        self.point_feat_dim = self._net.feat_dim
+        if int(_scalar(weights["encoder_point_feat_dim"])) != self.point_feat_dim:
+            raise ValueError(f"{POINTMAE_TYPE}: encoder_point_feat_dim != {self.point_feat_dim}")
+        self.latent_dim = self._net.latent_dim
+        self.n_points = self.num_points
+        self.last_empty = False
+
+    def pc_global(self, pc_resized) -> np.ndarray:
+        """``(..., num_points, 3)`` resampled cloud(s) -> ``(..., 772)`` float64."""
+        x = np.asarray(pc_resized, dtype=np.float32)
+        return self._net.features(x.reshape(-1, self.num_points, 3)).reshape(*x.shape[:-2], -1)
+
+    def _fuse(self, g: np.ndarray) -> np.ndarray:
+        g = np.asarray(g)
+        return self._net.head(g.reshape(-1, g.shape[-1])).reshape(*g.shape[:-1], -1)
 
 
 def encoder_input(encoder, frame: dict) -> np.ndarray:

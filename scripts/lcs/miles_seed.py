@@ -103,6 +103,14 @@ DEMOS = {"gv_00": (V11 / "seed" / "demo" / "episode_0000.npz", "set2", "gv_00"),
          "gv_02": (V11 / "seed_ext" / "demo" / "episode_0004.npz", "set2", "gv_02"),
          "s3_gv_02": (CMP / "demos_ext2" / "demo" / "episode_0004.npz", "set3", "gv_02"),
          "s3_gv_03": (CMP / "demos_ext2" / "demo" / "episode_0006.npz", "set3", "gv_03")}
+
+
+def demo_start_file(name: str) -> Path:
+    """Start snapshot of a registered demo (``--extra-demo`` entries carry their own)."""
+    ep, set_name, vid, *start = DEMOS[name]
+    return Path(start[0]) if start else GV / set_name / f"{vid}_osc.npz"
+
+
 TAU_BUFFERS = (V11 / "seed" / "buffer.json", V11 / "seed_ext" / "buffer.json")
 LCS_ROOT = Path.home() / "git" / "lcs_learning"
 PY_LCS = LCS_ROOT / ".venv" / "bin" / "python"
@@ -544,8 +552,8 @@ class Collector:
 
     def _run_demo(self, di: int, name: str) -> dict:
         args, sim, ctx = self.args, self.sim, self.ctx
-        ep, set_name, vid = DEMOS[name]
-        start_file = GV / set_name / f"{vid}_osc.npz"
+        ep, set_name, vid = DEMOS[name][:3]
+        start_file = demo_start_file(name)
         demo = dp.load_demo(ep)
         with np.load(ep, allow_pickle=True) as d:
             demo.update(seg=d["pcd_belt_seg"], belt=np.asarray(d["sim_belt_xyz"], np.float64),
@@ -880,6 +888,8 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", type=Path, required=True, help="new dir")
     p.add_argument("--lcm-url", required=True)
     p.add_argument("--demos", default=",".join(DEMOS), help=f"comma list of {sorted(DEMOS)}")
+    p.add_argument("--extra-demo", action="append", default=[], metavar="NAME=EPISODE,START",
+                   help="register another demo: its episode .npz and start snapshot .npz")
     p.add_argument("--waypoints", type=lambda s: [int(x) for x in s.split(",")], default=None,
                    help="explicit demo frames (default: the stride rule)")
     p.add_argument("--wp-stride", type=int, default=5)
@@ -925,6 +935,12 @@ def main() -> int:
     args = create_parser().parse_args()
     cli.configure_logging()
     harness.check_private_url(args.lcm_url)
+    for x in args.extra_demo:
+        name, rest = x.split("=", 1)
+        ep, start = (REPO_ROOT / Path(v.strip()) for v in rest.split(","))
+        if not (ep.is_file() and start.is_file()):
+            raise SystemExit(f"--extra-demo {x}: missing episode or start file")
+        DEMOS[name] = (ep, start.parent.name, start.name.removesuffix("_osc.npz"), start)
     names = [x.strip() for x in args.demos.split(",") if x.strip()]
     if unknown := [x for x in names if x not in DEMOS]:
         raise SystemExit(f"--demos {unknown}: not in {sorted(DEMOS)}")
@@ -977,7 +993,7 @@ def main() -> int:
     try:
         warm = sim.start_osc(out / "osc.log", binary=osc_binary, cwd=osc_root)
         index["osc"] = {**sim.osc.describe(), "warm_up_s": warm}
-        sim.restore(sim_snapshot.load(GV / DEMOS[names[0]][1] / f"{DEMOS[names[0]][2]}_osc.npz"))
+        sim.restore(sim_snapshot.load(demo_start_file(names[0])))
         jaws = sorted({w.ur_gripper_byte for w in nominal if w.ur_gripper_byte is not None})
         board, gripper = sim.clearance_geometry(jaw_bytes=tuple(jaws))
         plate = board.plate

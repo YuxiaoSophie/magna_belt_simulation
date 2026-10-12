@@ -67,7 +67,8 @@ DT_US = 75_000
 LATER = (("stage_skip_ahead", False), ("stage_no_timeout_into", None))
 POLICY = (("prior_mode", "demo"), ("bc_prior", None),
           ("stage_start", None), ("goal_set", None), ("goal_set_tau", 0.0),
-          ("value", None))  # later fields (P-M3, V12-30, V12-31, V12-39)
+          ("value", None), ("latent_support", None),
+          ("ee_support", None))  # later fields (P-M3, V12-30/31/39)
 
 
 def load_pair(d: Path | None, tag: str):

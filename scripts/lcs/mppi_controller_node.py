@@ -38,6 +38,11 @@ the first solve).
 Config ``value`` (``MppiParams.value``, off by default): + weight x the learned cost-to-go V(z)
 (``train_value.py``; refused unless trained on this deploy's encoder / z_std) in every stage;
 JSONL ``v_now`` = V(current latent), ``value_H`` = V(plan's last knot).
+Config ``latent_support`` (``MppiParams.latent_support``, off by default): + weight x hinge^2 of
+the rollout latents' whitened nearest-training-latent distance beyond a radius; JSONL
+``support_d0`` / ``support_dmax`` = that distance now / max over the plan's knots 1..H.
+Config ``ee_support`` (``MppiParams.ee_support``, off by default): the same on the 6-D EE
+position (mm, nearest training EE position); JSONL ``ee_support_d0`` / ``ee_support_dmax``.
 
     uv run --frozen python scripts/lcs/mppi_controller_node.py \\
         --lcm-url 'udpm://239.255.76.162:7762?ttl=0' --config data/lcs/realfirst/v1/mppi.yaml \\
@@ -90,6 +95,8 @@ from task_common.lcm_contract import LcmChannels
 from task_common.lcs_dataset import delta_rotvec
 from task_common.magna_process import check_private_url
 from task_common.mppi_lcs import (
+    EE_SUPPORT_DEFAULTS,
+    LATENT_SUPPORT_DEFAULTS,
     MppiParams,
     OvershootGuard,
     PolicyPrior,
@@ -838,6 +845,14 @@ def main() -> int:
     if node.vfn is not None:
         print(f"[mppi] value {p.value['path']}: weight {float(p.value['weight']):g}, "
               f"{p.value.get('where', 'terminal')}, V_max {node.vfn.v_max:g} s", flush=True)
+    if p.latent_support:
+        ls = {**LATENT_SUPPORT_DEFAULTS, **p.latent_support}
+        print(f"[mppi] latent support {ls['file']}: radius {float(ls['radius']):g}, weight "
+              f"{float(ls['weight']):g}, max points {ls['max_points']}, {ls['where']}", flush=True)
+    if p.ee_support:
+        es = {**EE_SUPPORT_DEFAULTS, **p.ee_support}
+        print(f"[mppi] ee support {es['file']}: radius {float(es['radius_mm']):g} mm, weight "
+              f"{float(es['weight']):g}, max points {es['max_points']}, {es['where']}", flush=True)
     if p.clearance:
         c = clearance_for(node.lcs, p)
         print(f"[mppi] clearance {p.clearance['model']}: UR {len(c.points[0])} of "

@@ -152,12 +152,14 @@ def cmd_write(a) -> int:
             raise SystemExit(f"arm {name}: waypoints {wp} missing")
         arms.append({"name": name, "deploy": str(Path(dep).resolve()), "waypoints": wp,
                      "mppi_config": str((REPO / cfg).resolve())})
+    da = a.demo_actions == "auto"
     runs = [(s, arm) for s in starts for arm in arms] if a.order == "start" else \
         [(s, arm) for arm in arms for s in starts]
     q = shlex.quote
     sh = ["#!/bin/bash",
           (f"# hard suite (run_hard_suite.py write): arms {names}, {len(starts)} starts x "
-           f"{a.repeats}, {a.max_episode_s:g} s, resets {a.resets}, port {a.port}"),
+           f"{a.repeats}, {a.max_episode_s:g} s, resets {a.resets}, port {a.port}"
+           + ("" if da else ", no --mppi-demo-actions")),
           "set -u", f"cd {REPO}", f"B={rel(out)}", "STATUS=$B/run.status",
           (f"if ss -lupn 2>/dev/null | grep -qE ':{a.port}[[:space:]]'; then "
            f"echo 'run.sh: a socket holds port {a.port}' >&2; exit 3; fi")]
@@ -181,8 +183,8 @@ def cmd_write(a) -> int:
            "    --mppi-goal waypoints --mppi-stages all --mppi-max-duration-s 30.0 --mppi-debug \\",
            f"    --label {a.label}_$1 --out $B/$1 --mppi-clearance --mppi-clearance-ur-min-mm 3.0 \\",
            "    --mppi-clearance-franka-min-mm 2.0 \"${rs[@]}\" --mppi-waypoints $7 \\",
-           ("    --mppi-goal-mode stage --mppi-demo-actions auto --mppi-demo-offset-frames 20 "
-            "> $B/$1.log 2>&1"),
+           (f"    --mppi-goal-mode stage{' --mppi-demo-actions auto' if da else ''} "
+            "--mppi-demo-offset-frames 20 > $B/$1.log 2>&1"),
            "  echo \"$1 rc $? $(date -Is)\" >> $STATUS",
            "}"]
     if any(arm.get("controller") == "c3plus" for arm in arms):
@@ -222,8 +224,8 @@ def cmd_write(a) -> int:
         {"arms": arms, "starts": [dict(zip(("key", "start_states", "variants", "reset_seed"), s))
                                   for s in starts],
          "repeats": a.repeats, "max_episode_s": a.max_episode_s, "resets": a.resets,
-         "port": a.port, "order": a.order, "waypoint_rule": {**WP_RULE, "goal_demo": GOAL_DEMO,
-                                                             "demos": SEED_BUFFERS}},
+         "port": a.port, "order": a.order, **({} if da else {"demo_actions": None}),
+         "waypoint_rule": {**WP_RULE, "goal_demo": GOAL_DEMO, "demos": SEED_BUFFERS}},
         indent=1) + "\n")
     print(f"wrote {rel(out / 'run.sh')}: {len(runs)} runs ({len(arms)} arms x {len(starts)} "
           f"starts x {a.repeats} episodes, ~{len(runs) * a.repeats * (a.max_episode_s + 8) / 60:.0f}"
@@ -385,6 +387,8 @@ def main() -> int:
     w.add_argument("--order", choices=("start", "arm"), default="start")
     w.add_argument("--starts", default=None, help=f"comma subset of {','.join(KEYS)}")
     w.add_argument("--label", default="hard_suite")
+    w.add_argument("--demo-actions", choices=("auto", "none"), default="auto",
+                   help="none: no --mppi-demo-actions (the node gets no demo action inputs)")
     s = sub.add_parser("summarize", help="hard_suite.{json,md}")
     s.add_argument("--dir", action="append", required=True)
     s.add_argument("--out", default=None, help="default: the first --dir")

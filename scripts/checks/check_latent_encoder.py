@@ -7,6 +7,8 @@ E4 timing, E5 ``LATENT_STATE`` round trip, E6 ``DemoGoals`` on a synthetic file,
 E8 ``LatentDecoder`` vs the torch decodes in ``decoder.npz`` beside the deploy (``[SKIP]`` without it),
 E9 the ``B(z)`` state head vs the export's references (``[SKIP]`` for a fixed-B export),
 E10 (``belt_cloud_pointnet`` deploys only) resample determinism + permutation invariance of z.
+A ``belt_cloud_pointmae`` deploy (torch Point-MAE encoder) runs the belt-cloud path; its z is
+order-free through the sorting resample only, and batch / single encodes agree to the float32 tol.
 A ``belt_cloud_pointnet`` deploy runs E0-E4 on its segmented pulley-frame clouds (``pc_raw`` ->
 ``pc_in``), z to REF_Z_F32_TOL_REL x max(1, max|z|) of the float32 torch reference.
 ``[SKIP]`` (exit 0) if the deploy export is absent.
@@ -87,8 +89,11 @@ def check_e0(ctx: SimpleNamespace) -> str:
     if belt_cloud:
         # The model has no proprio/belt inputs whatever the trainer's CLI defaults say.
         a = {**a, "belt_num_points": 0, "proprio_dim": 0}
-        _require(report.get("model") == le.BELT_CLOUD_TYPE and a.get("model") == le.BELT_CLOUD_TYPE,
+        etype = getattr(enc, "encoder_type", le.BELT_CLOUD_TYPE)
+        _require(report.get("model") == etype and a.get("model") == etype,
                  f"report model {report.get('model')!r} / args {a.get('model')!r}")
+        if etype == le.POINTMAE_TYPE:  # the head input, not the unused point_feat_dim arg
+            a = {**a, "point_feat_dim": enc.point_feat_dim}
         _require(enc.frame == report.get("frame") == bc.SEG_FRAME, f"frame {enc.frame!r}")
     dims = {"num_points": (enc.num_points, a["num_points"]),
             "belt_num_points": (enc.belt_num_points, a["belt_num_points"]),
@@ -111,7 +116,8 @@ def check_e0(ctx: SimpleNamespace) -> str:
         _require(np.array_equal(lcs.z_goal, lcs.stage_goals[1]), "z_goal != z_goal_stage2")
         _require(lcs.goal_frames is not None, "demo export without goal_frames")
     _require(lcs.goal_source != "", "empty goal_source")
-    kind = f"{le.BELT_CLOUD_TYPE} ({enc.frame}); " if belt_cloud else ""
+    kind = (f"{getattr(enc, 'encoder_type', le.BELT_CLOUD_TYPE)} ({enc.frame}); "
+            if belt_cloud else "")
     return (f"{kind}dims match checkpoint_args (pts {enc.num_points}, belt {enc.belt_num_points}, "
             f"prop {enc.proprio_dim}, feat {enc.point_feat_dim}, z {enc.latent_dim}, u {lcs.n_u}, "
             f"lam {lcs.n_lam}); F identity {f_err:.1e}; goal_source {lcs.goal_source!r}; "
@@ -426,6 +432,9 @@ def check_e10(ctx: SimpleNamespace) -> str:
     rng = np.random.default_rng(0)
     n = enc.num_points
     z_err = 0.0
+    pointmae = getattr(enc, "encoder_type", None) == le.POINTMAE_TYPE
+    # torch float32: a batch of 3 and single encodes differ by kernel choice, not by the model
+    b_tol = REF_Z_F32_TOL_REL * max(1.0, float(np.abs(r["z"]).max())) if pointmae else 1e-12
     for pc in r["pc_raw"]:
         pc = np.asarray(pc, dtype=np.float32)
         a, empty = bc.resample_deterministic(pc, n)
@@ -436,8 +445,10 @@ def check_e10(ctx: SimpleNamespace) -> str:
         _require(np.array_equal(bc.resample_deterministic(perm, n)[0], a),
                  "resample depends on the point order")
         z = enc.encode(pc)
-        z_err = max(z_err, float(np.abs(enc.encode(perm) - z).max()),
-                    float(np.abs(enc._fuse(enc.pc_global(a[rng.permutation(n)])) - z).max()))
+        z_err = max(z_err, float(np.abs(enc.encode(perm) - z).max()))
+        if not pointmae:  # Point-MAE FPS starts at point 0: order-free only via the resample
+            z_err = max(z_err, float(np.abs(enc._fuse(enc.pc_global(a[rng.permutation(n)]))
+                                            - z).max()))
     _require(z_err <= 1e-9, f"z not permutation invariant: {z_err:.2e} > 1e-9")
     small = np.asarray(r["pc_raw"][0], dtype=np.float32)[:n // 3]
     tiled, empty = bc.resample_deterministic(small, n)
@@ -449,11 +460,11 @@ def check_e10(ctx: SimpleNamespace) -> str:
     _require(enc.last_empty is True and np.all(np.isfinite(z0)), "M == 0 not flagged empty")
     zb = enc.encode_batch([small, np.zeros((0, 3)), r["pc_raw"][0]])
     _require(enc.last_empty.tolist() == [False, True, False], f"batch flags {enc.last_empty}")
-    _require(np.abs(zb[1] - z0).max() <= 1e-12 and np.abs(zb[0] - z_small).max() <= 1e-12,
+    _require(np.abs(zb[1] - z0).max() <= b_tol and np.abs(zb[0] - z_small).max() <= b_tol,
              "encode_batch != encode")
-    return (f"K={len(r['pc_raw'])}: resample deterministic + order-free, z under input and "
-            f"resampled-point permutations max {z_err:.1e}; M={len(small)} cyclic, M=0 flagged "
-            "empty (finite z)")
+    perms = "input" if pointmae else "input and resampled-point"
+    return (f"K={len(r['pc_raw'])}: resample deterministic + order-free, z under {perms} "
+            f"permutations max {z_err:.1e}; M={len(small)} cyclic, M=0 flagged empty (finite z)")
 
 
 def _quat_z(deg: float) -> list[float]:

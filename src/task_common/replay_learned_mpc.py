@@ -4,6 +4,9 @@ Draws the ``LEARNED_MPC_DEBUG`` message answering the current frame (the latest 
 ``msg.step <= step``): decoded planned belts, planned EE knots, planned actions and the demo's
 fixed target belts (stage goals, or the final frame of a demo-traj run). Files come from ``meta["learned_mpc"]`` unless overridden; a layer
 whose files are missing is disabled with a reason. Every layer defaults off.
+The ``LCS diagnostics`` sub-folder (``DIAG_LAYERS``, :mod:`~task_common.replay_lcs_diag`): the
+deploy LCS's k = 1 / N step prediction error with the executed actions over the run, and the
+current solve's contact forces; computed once per run when first shown.
 Staged runs take the target belts from the run's recorded demo_goals ``pcd_belt_stage``; runs
 without a usable one fall back to the demo episode's goal frames.
 """
@@ -20,19 +23,38 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from loguru import logger
+from viser import uplot
 
 from task_common.belt_cloud import known_large_pulley_pose7, quat_wxyz_matrix
 from task_common.latent_encoder import LatentDecoder
+from task_common.mppi_lcs import N_P
 from task_common.recording import Recording
+from task_common.replay_lcs_diag import (
+    DiagLcs,
+    DiagResult,
+    active_set,
+    compute,
+    mppi_pgd_iters,
+    stats,
+)
 from task_common.replay_metrics import FRANKA_BASE_BODY, quat_rotate
+from task_common.replay_panels import (
+    COLORS,
+    NOW_SERIES_CSS,
+    PLOT_PERIOD_S,
+    TrajectoryChart,
+)
 
 if TYPE_CHECKING:
     from task_common.replay_app import ReplayApp
 
 LAYERS = ("planned_belt", "planned_ee", "actions", "target_belt")
+DIAG_LAYERS = ("lcs_accuracy", "contact_forces")
+ALL_LAYERS = LAYERS + DIAG_LAYERS
 REMOVED_LAYERS = ("action_rotation", "readout")  # old --learned-layers names, ignored
 LAYER_LABELS = {"planned_belt": "Planned belt", "planned_ee": "Planned EE",
-                "actions": "Planned actions", "target_belt": "Target belt"}
+                "actions": "Planned actions", "target_belt": "Target belt",
+                "lcs_accuracy": "LCS accuracy", "contact_forces": "Contact forces λ"}
 DEFAULT_DEBUG_CHANNEL = "LEARNED_MPC_DEBUG"
 FRANKA_PLAN_CHANNEL = "TARGET_CARTESIAN_POSE_TRAJECTORY"
 ROOT = "/replay/learned_mpc"
@@ -61,6 +83,8 @@ FRANKA_PLAN = (6, 182, 212)
 AUG_MARKER = (31, 41, 55)
 ACT_FRANKA = (8, 145, 178)
 ACT_UR = (220, 38, 38)
+BAR_HALF, BAR_GAP = 0.4, 0.03  # per lambda index: knot-0 bar left, last-knot bar right
+BAR_FILL = ("rgba(37, 99, 235, 0.6)", "rgba(220, 38, 38, 0.35)")
 
 
 def _sha256(path: Path) -> str:
@@ -115,16 +139,16 @@ def any_learned_runs(root: Path) -> bool:
 
 
 def parse_layers(text: str | None) -> tuple[str, ...]:
-    """``"a,b"`` -> validated layer names (``LAYERS``); ``REMOVED_LAYERS`` are dropped with a
-    warning."""
+    """``"a,b"`` -> validated layer names (``ALL_LAYERS``); ``REMOVED_LAYERS`` are dropped with
+    a warning."""
     names = tuple(s.strip() for s in (text or "").split(",") if s.strip())
     gone = [n for n in names if n in REMOVED_LAYERS]
     if gone:
         logger.warning(f"[REPLAY] learned layer(s) {gone} were removed; ignoring")
         names = tuple(n for n in names if n not in REMOVED_LAYERS)
-    bad = [n for n in names if n not in LAYERS]
+    bad = [n for n in names if n not in ALL_LAYERS]
     if bad:
-        raise ValueError(f"unknown learned layer(s) {bad}; choose from {','.join(LAYERS)}")
+        raise ValueError(f"unknown learned layer(s) {bad}; choose from {','.join(ALL_LAYERS)}")
     return names
 
 
@@ -265,7 +289,10 @@ def _base_pose(rec: Recording, frame: int, label: str) -> tuple[np.ndarray, np.n
 
 
 class LearnedMpcPanel:
-    """``Learned MPC`` folder: four toggleable layers over the recorded solves."""
+    """``Learned MPC`` folder: four toggleable 3D layers over the recorded solves, plus the
+    ``LCS diagnostics`` charts."""
+
+    uses_point_size = True  # enables Display > Point size without camera clouds
 
     def __init__(self, *, deploy: Path | None = None, decoder: Path | None = None,
                  demo_goals: Path | None = None, demo_episode: Path | None = None,
@@ -276,7 +303,7 @@ class LearnedMpcPanel:
         self.requested = set(parse_layers(",".join(layers)))
         self.action_scale = ACTION_SCALE_DEFAULT
         self.paths: dict[str, Path | None] = {}
-        self.available: dict[str, str | None] = dict.fromkeys(LAYERS, "no run loaded")
+        self.available: dict[str, str | None] = dict.fromkeys(ALL_LAYERS, "no run loaded")
         self.notes: list[str] = []
         self.solves: list[Solve] = []
         self.solve_steps = np.zeros(0, dtype=np.int64)
@@ -290,6 +317,16 @@ class LearnedMpcPanel:
         self._drawn: dict[str, tuple] = {}
         self._cache: dict[tuple[str, str], Any] = {}
         self.last_frame_ms = 0.0
+        self.run_key: str | None = None
+        self.control_dt = 0.0
+        self.lcs: DiagLcs | None = None
+        self.lcs_iters_source = ""
+        self.diag: DiagResult | None = None
+        self.belt_why: str | None = None
+        self._diag_t = 0.0
+        self._diag_sent = 0.0
+        self._diag_dirty = False
+        self._lam_sent: int | None = None
 
     # ---- GUI --------------------------------------------------------------------------
 
@@ -299,20 +336,49 @@ class LearnedMpcPanel:
             self.folder = folder
             self.status = gui.add_markdown("")
             self.boxes = {name: gui.add_checkbox(LAYER_LABELS[name], name in self.requested)
-                          for name in LAYERS}
+                          for name in ALL_LAYERS}
             self.scale_slider = gui.add_slider("Action scale", min=1.0, max=ACTION_SCALE_MAX,
                                                step=1.0, initial_value=self.action_scale)
+            self._build_diag_gui(gui)
         for name, box in self.boxes.items():
             box.on_update(lambda e, n=name: app.call_soon(
                 lambda v=bool(e.target.value): self.set_layer(app, n, v)))
         self.scale_slider.on_update(lambda e: app.call_soon(
             lambda v=float(e.target.value): self.set_action_scale(app, v)))
 
+    def _build_diag_gui(self, gui: Any) -> None:
+        with gui.add_folder("LCS diagnostics", visible=False) as self.diag_folder:
+            self.diag_status = gui.add_markdown("")
+            gui.add_html(NOW_SERIES_CSS)
+            self.latent_chart = TrajectoryChart(
+                gui, np.zeros(0), [np.zeros(0)] * 2, ("k = 1", "k = N"),
+                title="LCS prediction error (whitened latent)", y_label="|(ẑ - z) / z_std|",
+                aspect=1.6, visible=False)
+            self.belt_chart = TrajectoryChart(
+                gui, np.zeros(0), [np.zeros(0)] * 2, ("k = 1", "k = N"),
+                title="LCS prediction error (decoded belt)", y_label="Chamfer RMS mm",
+                aspect=1.6, visible=False)
+            bars = [uplot.Series(label="λ index")]
+            for label, color, fill in zip(("knot 0", "knot N-1"), COLORS, BAR_FILL, strict=False):
+                bars.append(uplot.Series(label=label, stroke=color, fill=fill, width=1.0,
+                                         points={"show": False}))
+            # NOW_SERIES_CSS hides every chart's last legend entry: a blank one goes last.
+            bars.append(uplot.Series(label="", show=False))
+            self.lam_plot = gui.add_uplot(
+                data=self._bar_data(-1), series=tuple(bars), title="Contact forces λ",
+                scales=self._bar_scales(1, (0.0, 1.0)), aspect=1.6, visible=False,
+                axes=self._bar_axes(1))
+            self.lam_text = gui.add_markdown("", visible=False)
+
     def set_layer(self, app: ReplayApp, name: str, enabled: bool) -> None:
-        if name not in LAYERS:
+        if name not in ALL_LAYERS:
             raise ValueError(f"unknown layer {name!r}")
         (self.requested.add if enabled else self.requested.discard)(name)
         app._set_gui(self.boxes[name], bool(enabled))
+        if name in DIAG_LAYERS:
+            self._ensure_diag()
+            self._diag_visibility()
+            self.latent_chart.sent_t = self.belt_chart.sent_t = self._lam_sent = None
         self._update(app, app.current_frame, app.current_step)
 
     def set_action_scale(self, app: ReplayApp, value: float) -> None:
@@ -354,6 +420,9 @@ class LearnedMpcPanel:
     def on_run_loaded(self, app: ReplayApp, rec: Recording) -> None:
         start = time.perf_counter()
         self.solves, self.current, self._drawn = [], -1, {}
+        self.run_key, self.control_dt = str(Path(rec.path).resolve()), rec.control_dt
+        self.lcs = self.diag = self.belt_why = self._lam_sent = None
+        self._diag_dirty = False
         self.decoder = self.demo_belts = self.goal_frames = self.target_source = None
         self.staged = False
         self.notes = []
@@ -370,12 +439,15 @@ class LearnedMpcPanel:
                 reason = f"cannot parse {channel}: {exc!r}"
                 self.solves = []
         self.solve_steps = np.array([s.step for s in self.solves], dtype=np.int64)
-        self.available = dict.fromkeys(LAYERS, reason)
+        self.available = dict.fromkeys(ALL_LAYERS, reason)
         if reason is None:
             self._load_files(block)
+            self._load_lcs(block)
+        self._ensure_diag()
         for name, box in self.boxes.items():
             box.disabled = self.available[name] is not None
         self.scale_slider.disabled = self.available["actions"] is not None
+        self._diag_visibility()
         self._show_status(start)
 
     def _load_files(self, block: dict) -> None:
@@ -424,6 +496,145 @@ class LearnedMpcPanel:
             why, self.target_source = None, "z_ref"  # no demo goal files: the tracked latent
             self.notes.append("target belt: decoded MPPI goal latent (z_ref, active stage)")
         self.available["target_belt"] = why
+
+    def _load_lcs(self, block: dict) -> None:
+        """The deploy LCS of the diagnostics layers (the series are computed when first shown)."""
+        why = self._missing("deploy")
+        if why is None:
+            iters, self.lcs_iters_source = mppi_pgd_iters(block.get("mppi_config"))
+            try:
+                self.lcs = self._load(f"diag_lcs:{iters}", lambda p: DiagLcs(p, iters),
+                                      self.paths["deploy"])
+                n_x = self.solves[0].x_sol.shape[0] - N_P
+                if n_x != self.lcs.n_x:
+                    why, self.lcs = f"x_sol has {n_x} latents, deploy n_x {self.lcs.n_x}", None
+            except (OSError, KeyError, ValueError) as exc:
+                why = f"deploy LCS unusable: {exc!r}"
+        for name in DIAG_LAYERS:
+            self.available[name] = why
+        self.belt_why = self.available["planned_belt"] if self.decoder is None else None
+
+    def _ensure_diag(self) -> None:
+        """Computes the run's series once (cached per run, deploy and decoder) if shown."""
+        if self.diag is not None or self.lcs is None or not any(
+                self.shown(n) for n in DIAG_LAYERS):
+            return
+        decoder = self.paths.get("decoder") if self.decoder is not None else None
+        key = ("diag", f"{self.run_key}|{self.paths.get('deploy')}|{self.lcs.iters}|{decoder}")
+        if key not in self._cache:
+            start = time.perf_counter()
+            try:
+                res = compute(self.lcs, np.array([s.step * self.control_dt for s in self.solves]),
+                              [s.x_sol for s in self.solves], [s.u_sol for s in self.solves],
+                              [s.t for s in self.solves], self.decoder)
+            except (ValueError, RuntimeError, IndexError) as exc:
+                for name in DIAG_LAYERS:
+                    self.available[name] = f"LCS diagnostics failed: {exc!r}"
+                    self.boxes[name].disabled = True
+                self.diag_status.content = self.available["lcs_accuracy"]
+                logger.warning(f"[REPLAY] {self.available['lcs_accuracy']}")
+                return
+            res.compute_ms = 1e3 * (time.perf_counter() - start)
+            self._cache[key] = res
+        self.diag = res = self._cache[key]
+        n = res.horizons[-1]
+        labels = ("k = 1", f"k = {n}")
+        self.latent_chart.set_series(res.time_s, [res.latent_err[1], res.latent_err[n]], labels)
+        if res.belt_err_mm is not None:
+            self.belt_chart.set_series(res.time_s, [res.belt_err_mm[1], res.belt_err_mm[n]],
+                                       labels)
+        top = float(np.nanmax(np.concatenate([res.lam0.ravel(), res.lam_last.ravel(), [0.0]])))
+        self.lam_plot.scales = self._bar_scales(self.lcs.n_lam, (0.0, 1.05 * top or 1.0))
+        self.lam_plot.axes = self._bar_axes(self.lcs.n_lam)
+        self.lam_plot.series = tuple({**sr, "label": f"knot {n - 1}"} if i == 2 else sr
+                                     for i, sr in enumerate(self.lam_plot.series))
+        self.diag_status.content = self.diag_summary()
+        logger.info(f"[REPLAY] LCS diagnostics: {self.diag_summary(markdown=False)}")
+
+    def diag_summary(self, markdown: bool = True) -> str:
+        res, lcs = self.diag, self.lcs
+        n = res.horizons[-1]
+        iters = (f"{lcs.iters} iters ({self.lcs_iters_source})" if lcs.solver == "pgd_symmetric"
+                 else f"{lcs.iters} FISTA iters")
+        lines = [(f"`{lcs.solver}`, {iters}; solves {1e3 * res.period_s:.0f} ms apart, "
+                  f"{res.gaps} gap{'s' * (res.gaps != 1)}; computed in {res.compute_ms:.0f} ms")]
+
+        def row(name: str, series: dict[int, np.ndarray], fmt: str) -> str:
+            parts = [f"k={k} {stats(series[k])[0]:{fmt}} / {stats(series[k])[1]:{fmt}}"
+                     for k in (1, n)]
+            return f"{name} median / p90: {', '.join(parts)}"
+
+        lines.append(row("latent |dz/σ|", res.latent_err, ".3f"))
+        lines.append(row("belt Chamfer RMS mm", res.belt_err_mm, ".2f")
+                     if res.belt_err_mm is not None else f"belt error off: {self.belt_why}")
+        return ("  \n" if markdown else "; ").join(lines)
+
+    def _diag_visibility(self) -> None:
+        acc, lam = self.shown("lcs_accuracy"), self.shown("contact_forces")
+        ready = self.diag is not None
+        self.diag_folder.visible = acc or lam or any(
+            n in self.requested and self.available.get(n) for n in DIAG_LAYERS)
+        self.latent_chart.handle.visible = acc and ready
+        self.belt_chart.handle.visible = acc and ready and self.diag.belt_err_mm is not None
+        self.lam_plot.visible = self.lam_text.visible = lam and ready
+        if not ready:
+            why = next((self.available[n] for n in DIAG_LAYERS if n in self.requested
+                        and self.available.get(n)), None)
+            self.diag_status.content = f"off: {why}" if why else ""
+
+    @staticmethod
+    def _bar_axes(n_lam: int) -> tuple[Any, ...]:
+        return (uplot.Axis(label="λ index", splits=tuple(float(i) for i in range(1, n_lam + 1))),
+                uplot.Axis(label="λ"))
+
+    @staticmethod
+    def _bar_scales(n_lam: int, y_range: tuple[float, float]) -> dict[str, Any]:
+        return {"x": uplot.Scale(time=False, auto=False, range=(0.5, n_lam + 0.5)),
+                "y": uplot.Scale(auto=False, range=y_range)}
+
+    def _bar_data(self, i: int) -> tuple[np.ndarray, ...]:
+        """One knot-0 and one last-knot bar per lambda as closed outlines (filled to 0)."""
+        n = self.lcs.n_lam if self.lcs is not None else 1
+        have = self.diag is not None and i >= 0
+        j = np.arange(1, n + 1, dtype=np.float64)[:, None]
+        x = np.concatenate([j + [-BAR_HALF, -BAR_HALF, -BAR_GAP, -BAR_GAP],
+                            j + [BAR_GAP, BAR_GAP, BAR_HALF, BAR_HALF]], axis=1).ravel()
+        out = [x]
+        for side, lam in enumerate((self.diag.lam0[i], self.diag.lam_last[i]) if have
+                                   else (np.zeros(n), np.zeros(n))):
+            y = np.full((n, 8), np.nan)
+            y[:, 4 * side:4 * side + 4] = np.outer(lam, [0.0, 1.0, 1.0, 0.0])
+            out.append(y.ravel())
+        out.append(np.full(len(x), np.nan))
+        return tuple(out)
+
+    def lam_summary(self, i: int) -> str:
+        if self.diag is None or i < 0:
+            return "no solve yet"
+        n = self.diag.horizons[-1]
+
+        def fmt(idx: list[int]) -> str:
+            return ", ".join(f"λ{k}" for k in idx) or "none"
+
+        return (f"solve {i} (t {self.diag.time_s[i]:.2f} s), active λ > 1e-6: knot 0 "
+                f"{fmt(active_set(self.diag.lam0[i]))}; knot {n - 1} "
+                f"{fmt(active_set(self.diag.lam_last[i]))}")
+
+    def _send_diag(self) -> None:
+        self._diag_sent, self._diag_dirty = time.perf_counter(), False
+        if self.shown("lcs_accuracy"):
+            self.latent_chart.set_time(self._diag_t)
+            if self.diag.belt_err_mm is not None:
+                self.belt_chart.set_time(self._diag_t)
+        if self.shown("contact_forces") and self._lam_sent != self.current:
+            self._lam_sent = self.current
+            self.lam_plot.data = self._bar_data(self.current)
+            self.lam_text.content = self.lam_summary(self.current)
+
+    def on_tick(self, app: ReplayApp) -> None:
+        if self._diag_dirty and (not app.playing
+                                 or time.perf_counter() - self._diag_sent >= PLOT_PERIOD_S):
+            self._send_diag()
 
     def _recorded_goals(self, block: dict) -> str | None:
         """Goal belts from the run's demo_goals ``pcd_belt_stage`` (n, P, 3), one per stage;
@@ -550,7 +761,7 @@ class LearnedMpcPanel:
                          f"{1e3 * (time.perf_counter() - start):.0f} ms")
         reasons = {why for why in self.available.values() if why}
         for why in sorted(reasons):
-            names = [LAYER_LABELS[n] for n in LAYERS if self.available[n] == why]
+            names = [LAYER_LABELS[n] for n in ALL_LAYERS if self.available[n] == why]
             lines.append(f"- off ({', '.join(names)}): {why}")
         lines += [f"- {note}" for note in self.notes]
         self.status.content = "\n".join(lines)
@@ -576,10 +787,18 @@ class LearnedMpcPanel:
             if not self.shown(name) or solve is None:
                 self._hide(name)
                 continue
-            key = (self.current, self.action_scale if name == "actions" else None)
+            key = (self.current, self.action_scale if name == "actions"
+                   else getattr(app, "point_size_mm", None))
             if self._drawn.get(name) != key:
                 draw(app, solve)
                 self._drawn[name] = key
+        if self.diag is not None and (self.shown("lcs_accuracy") or self.shown("contact_forces")):
+            self._diag_t = step * self.control_dt
+            if (getattr(app, "playing", False)
+                    and time.perf_counter() - self._diag_sent < PLOT_PERIOD_S):
+                self._diag_dirty = True
+            else:
+                self._send_diag()
         self.last_frame_ms = 1e3 * (time.perf_counter() - start)
 
     def _hide(self, layer: str) -> None:
@@ -589,11 +808,15 @@ class LearnedMpcPanel:
                 handle.visible = False
 
     def _points(self, app: ReplayApp, name: str, points: np.ndarray, color,
-                size: float = POINT_M) -> Any:
+                size: float | None = None) -> Any:
+        if size is None:  # 3x Display > Point size (slider 1 mm -> POINT_M)
+            size = POINT_M * getattr(app, "point_size_mm", 1.0)
         points = np.ascontiguousarray(points, dtype=np.float32)
         handle = self.handles.get(name)
         if handle is not None and handle.points.shape == points.shape:
             handle.points = points
+            if getattr(handle, "point_size", size) != size:
+                handle.point_size = size
             handle.visible = True
             return handle
         if handle is not None:

@@ -120,7 +120,9 @@ def p1(pre, tree) -> tuple[bool, str]:
                      ("stage_no_timeout_into", None), ("prior_mode", "demo"),
                      ("bc_prior", None),
                      ("goal_set", None), ("goal_set_tau", 0.0),
-                     ("stage_start", None), ("value", None)):  # later fields at their defaults
+                     ("stage_start", None), ("value", None),
+                     ("latent_support", None),
+                     ("ee_support", None)):  # later fields at their defaults
             if k in b and b[k] == v and k not in a:
                 b.pop(k)
         if b.pop("prior_sync", "missing") is not None or a.pop("prior_sync", None) is not None \

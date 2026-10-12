@@ -74,8 +74,9 @@ def s1(pre, tree) -> tuple[bool, str]:
         if "value" in doc:  # later key (V12-39): tree only
             continue
         a, b = pre.MppiParams.from_yaml(y).to_dict(), tree.MppiParams.from_yaml(y).to_dict()
-        if "value" in b and b["value"] is None and "value" not in a:
-            b.pop("value")
+        for k in ("value", "latent_support", "ee_support"):  # later keys at defaults
+            if k in b and b[k] is None and k not in a:
+                b.pop(k)
         if b.pop("stage_start", "missing") is not None \
                 or a.pop("stage_start", None) is not None or a != b:  # pre may have it
             ok = False

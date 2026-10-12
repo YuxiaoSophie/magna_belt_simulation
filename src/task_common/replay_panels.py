@@ -213,7 +213,7 @@ class TrajectoryChart:
 
     def __init__(self, gui: Any, x: np.ndarray, series: list[np.ndarray],
                  labels: tuple[str, ...], *, title: str | None, y_label: str,
-                 x_label: str = "t (s)", aspect: float = 2.0) -> None:
+                 x_label: str = "t (s)", aspect: float = 2.0, visible: bool = True) -> None:
         self.x = np.asarray(x, dtype=np.float64)
         self.series = [np.asarray(v, dtype=np.float64) for v in series]
         lo, hi = PlotsPanel._range(self.series)
@@ -229,7 +229,7 @@ class TrajectoryChart:
         self.handle = gui.add_uplot(
             data=self._data(float(self.x[0]) if len(self.x) else 0.0), series=tuple(lines),
             scales=PlotsPanel._scales(self.y_range), title=title, aspect=aspect,
-            axes=(uplot.Axis(label=x_label), uplot.Axis(label=y_label)))
+            axes=(uplot.Axis(label=x_label), uplot.Axis(label=y_label)), visible=visible)
 
     def _data(self, t: float) -> tuple[np.ndarray, ...]:
         k = int(np.searchsorted(self.x, t))
@@ -238,6 +238,22 @@ class TrajectoryChart:
         now = np.full(len(xs), np.nan)
         now[k:k + 2] = self.y_range
         return (xs, *ys, now)
+
+    def set_series(self, x: np.ndarray, series: list[np.ndarray],
+                   labels: tuple[str, ...] | None = None) -> None:
+        """Replace the data (same number of series) and rescale y; resent on the next
+        :meth:`set_time`."""
+        self.x = np.asarray(x, dtype=np.float64)
+        self.series = [np.asarray(v, dtype=np.float64) for v in series]
+        lo, hi = PlotsPanel._range(self.series)
+        self.y_range = (min(lo, 0.0), hi)
+        self.handle.scales = PlotsPanel._scales(self.y_range)
+        if labels is not None:
+            lines = list(self.handle.series)
+            for i, label in enumerate(labels, start=1):
+                lines[i] = {**lines[i], "label": label}
+            self.handle.series = tuple(lines)
+        self.sent_t = None
 
     def set_time(self, t: float) -> None:
         if t != self.sent_t:

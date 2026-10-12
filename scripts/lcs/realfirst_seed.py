@@ -70,6 +70,7 @@ DEFAULT_RESET_SPEC = ("slack_mm=10",)
 FALLBACK_UR_DZ_MM, FALLBACK_UR_TILT_DEG = 1.5, 2.5
 LAST_N = hl.LAST_N
 MIN_DEMO_SUCCESS = 2
+DEMO_OFFSET_KEYS = ("ur_dz_mm", "ur_tilt_deg", "franka_dz_mm", "franka_tilt_deg")
 
 
 @dataclasses.dataclass
@@ -80,12 +81,20 @@ class Slot:
     vid: str
     file: Path
     fallback: bool = False
+    offset: dict | None = None  # --demo-offset (demo slots only)
 
     @property
     def key(self) -> str:
         return f"{self.set}/{self.vid}"
 
     def perturbation(self) -> pert.Perturbation:
+        if self.offset and self.kind == "demo":
+            o = self.offset
+            return pert.Perturbation(
+                intent="engaged", ur_dpos_m=1e-3 * np.array([0.0, 0.0, o.get("ur_dz_mm", 0.0)]),
+                ur_tilt_deg=o.get("ur_tilt_deg", 0.0),
+                franka_dpos_m=1e-3 * np.array([0.0, 0.0, o.get("franka_dz_mm", 0.0)]),
+                franka_tilt_deg=o.get("franka_tilt_deg", 0.0))
         if not self.fallback:
             return pert.Perturbation(intent="nominal")
         return pert.Perturbation(intent="engaged",
@@ -94,11 +103,12 @@ class Slot:
 
 
 def variant_file(set_name: str, vid: str) -> Path:
-    index = json.loads((GV / set_name / "index.json").read_text())
+    base = GV / set_name if (GV / set_name).is_dir() else STARTS / set_name  # e.g. ur_pivot
+    index = json.loads((base / "index.json").read_text())
     row = next((r for r in index["variants"] if str(r["id"]) == vid), None)
     if row is None or row.get("file") is None or row.get("held") is False:
         raise ValueError(f"{set_name}/{vid}: no held start state")
-    return GV / set_name / row["file"]
+    return base / row["file"]
 
 
 def pick_pool_variant(seed: int) -> str:
@@ -548,6 +558,12 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--excite", type=int, default=14)
     p.add_argument("--demo-starts", default=None, metavar="SET/VARIANT,...",
                    help="demo start states (default: set2/gv_00,set2/gv_01,set2/gv_04)")
+    p.add_argument("--demo-offset", nargs="*", default=None, metavar="KEY=MM_OR_DEG",
+                   help=f"place offset of every demo ({', '.join(DEMO_OFFSET_KEYS)}); the "
+                        "teleoperator's adaptation to a new grasp (default: nominal)")
+    p.add_argument("--fallback-below", type=int, default=MIN_DEMO_SUCCESS,
+                   help="rerun the demos with the fallback offset below this many successes "
+                        "(0: never)")
     p.add_argument("--id-prefix", default="",
                    help="buffer ids <prefix><kind>_<i> (default: seed_<i>)")
     p.add_argument("--reset-spec", nargs="*", default=list(DEFAULT_RESET_SPEC),
@@ -573,6 +589,12 @@ def main() -> int:
                                else args.reset_spec)
     demo_starts = parse_starts(args.demo_starts) if args.demo_starts else DEMO_STARTS
     slots = plan_slots(args.demos, args.excite, args.seed, demo_starts)
+    if args.demo_offset:
+        off = {k: float(v) for k, v in (x.split("=", 1) for x in args.demo_offset)}
+        if bad := sorted(set(off) - set(DEMO_OFFSET_KEYS)):
+            raise SystemExit(f"--demo-offset {bad}: not in {DEMO_OFFSET_KEYS}")
+        slots = [dataclasses.replace(s, offset=off) for s in slots]
+        print(f"demo offset {off}")
     check_not_heldout(slots)
     starts = sorted({s.file for s in slots})
     sha_before = {str(f): sha256_file(f) for f in starts}
@@ -597,7 +619,7 @@ def main() -> int:
     run_pass(chain, args, slots, out)
     demo_ok = sum(r["slot"].kind == "demo" and r["measures"]["label_human"]["success"]
                   for r in chain.records)
-    if demo_ok < MIN_DEMO_SUCCESS:
+    if demo_ok < min(MIN_DEMO_SUCCESS, args.fallback_below):
         logger.warning(f"[SEED] {demo_ok} demo successes < {MIN_DEMO_SUCCESS}: rerunning the "
                        f"demo slots with the fallback offset (UR dz {FALLBACK_UR_DZ_MM} mm, tilt "
                        f"{FALLBACK_UR_TILT_DEG} deg)")

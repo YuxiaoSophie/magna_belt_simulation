@@ -9,6 +9,9 @@ the optional data-support box (``MppiParams.support_box``, a bound, not a target
 ``MppiParams.goal_set``: the goal distance is a soft-min over a set of encoded seated latents.
 ``MppiParams.value``: + weight x a learned cost-to-go ``V(z)`` (``latent_value``) at the terminal
 knot or summed over knots 1..H.
+``MppiParams.latent_support``: + weight x hinge^2 of the whitened nearest-training-latent distance
+of the rollout latents beyond a radius (a data-support bound in the latent, not a target).
+``MppiParams.ee_support``: the same on the 6-D EE position ``P`` (exact in the rollout, no LCS).
 """
 
 import dataclasses
@@ -40,6 +43,14 @@ STALL_KEYS = frozenset({"latents", "eps", "k"})
 HOLD_GOALS = ("seat", "entry", "best")
 NEAR_KEYS = frozenset({"k", "w_T"})
 SUPPORT_BOX_KEYS = frozenset({"lo", "hi", "weight", "hard_margin_m"})
+LATENT_SUPPORT_KEYS = frozenset({"file", "radius", "weight", "max_points", "where"})
+LATENT_SUPPORT_WHERE = ("all", "terminal")
+LATENT_SUPPORT_DEFAULTS = {"radius": 1.5, "weight": 1.0, "max_points": 3000, "where": "all"}
+LATENT_SUPPORT_CHUNK_ELEMS = 1 << 23  # query rows x training points per cdist chunk (32 MB f32)
+EE_SUPPORT_KEYS = frozenset({"file", "pulley_pose7", "radius_mm", "weight", "max_points",
+                             "where"})
+EE_SUPPORT_DEFAULTS = {"radius_mm": 35.0, "weight": 1.0, "max_points": 3000, "where": "all"}
+EE_SUPPORT_SCALE_MM = 10.0
 W_KEYS = ("w_q", "w_T", "w_r", "w_s")
 
 
@@ -676,6 +687,16 @@ class MppiParams:
     # Learned cost-to-go (train_value.py npz): {path, weight, where: terminal | all_knots};
     # cost += weight V(z_H) or weight sum_k V(z_k), k = 1..H. None = off.
     value: dict | None = None
+    # Latent data support: {file (npz, z_t (N, n_x) training latents), radius 1.5, weight 1,
+    # max_points 3000 (stride subsample), where all | terminal}; cost += weight sum_k
+    # relu(d_k - radius)^2, d_k = whitened distance of z_k to the nearest training latent,
+    # k = 1..H (all) or H (terminal). None = off.
+    latent_support: dict | None = None
+    # EE data support: {file (npz, ee_pos (N, 6) [Franka xyz, UR xyz] m in the pulley frame
+    # R^T (x - t)), pulley_pose7 (xyz + wxyz of that frame), radius_mm 35, weight 1, max_points
+    # 3000, where all | terminal}; cost += weight sum_k relu((d_k - radius_mm) / 10 mm)^2,
+    # d_k = 6-D Euclidean distance (mm) of P_k to the nearest training EE position. None = off.
+    ee_support: dict | None = None
 
     def __post_init__(self) -> None:
         if self.K < 2 or self.H < 1 or self.n_iter < 1 or self.pgd_iters < 1:
@@ -725,6 +746,10 @@ class MppiParams:
                              f"{self.goal_set_tau} (finite >= 0)")
         if self.value is not None:
             check_value(self.value)
+        if self.latent_support is not None:
+            check_latent_support(self.latent_support)
+        if self.ee_support is not None:
+            check_ee_support(self.ee_support)
 
     @classmethod
     def from_yaml(cls, path) -> "MppiParams":
@@ -808,6 +833,108 @@ def check_support_box(sb: dict) -> None:
     m = sb.get("hard_margin_m")
     if m is not None and not float(m) >= 0.0:
         raise ValueError(f"support_box.hard_margin_m {m} must be >= 0 or None")
+
+
+def check_latent_support(ls: dict) -> None:
+    """``MppiParams.latent_support`` keys and ranges (the npz is checked when loaded)."""
+    if not isinstance(ls, dict) or not set(ls) <= LATENT_SUPPORT_KEYS or "file" not in ls:
+        raise ValueError(f"latent_support {ls!r}: need file, within "
+                         f"{sorted(LATENT_SUPPORT_KEYS)}")
+    if not isinstance(ls["file"], (str, Path)):
+        raise TypeError(f"latent_support.file {ls['file']!r} must be an npz path")
+    c = {**LATENT_SUPPORT_DEFAULTS, **ls}
+    for k in ("radius", "weight"):
+        if not (math.isfinite(float(c[k])) and float(c[k]) >= 0.0):
+            raise ValueError(f"latent_support.{k} {c[k]} must be finite >= 0")
+    m = c["max_points"]
+    if isinstance(m, bool) or int(m) != m or m < 1:
+        raise ValueError(f"latent_support.max_points {m} must be an int >= 1")
+    if c["where"] not in LATENT_SUPPORT_WHERE:
+        raise ValueError(f"latent_support.where {c['where']!r}: one of {LATENT_SUPPORT_WHERE}")
+
+
+def load_latent_support(ls: dict, n_x: int | None = None) -> np.ndarray:
+    """``(M, n_x)`` float64 training latents of ``MppiParams.latent_support`` (un-whitened),
+    every ``ceil(N / max_points)``-th row of the npz's ``z_t``."""
+    with np.load(Path(ls["file"]), allow_pickle=False) as f:
+        Z = np.asarray(f["z_t"], dtype=np.float64)
+    if Z.ndim != 2 or len(Z) < 1 or (n_x is not None and Z.shape[1] != n_x) \
+            or not np.all(np.isfinite(Z)):
+        raise ValueError(f"latent support {ls['file']}: z_t {Z.shape} must be finite (N >= 1, "
+                         f"{n_x})")
+    m = int(ls.get("max_points", LATENT_SUPPORT_DEFAULTS["max_points"]))
+    return Z[::-(-len(Z) // m)].copy()
+
+
+def nn_dist(Q: torch.Tensor, S: torch.Tensor, chunk: int | None = None) -> torch.Tensor:
+    """``(...)`` Euclidean distance of each row of ``Q (..., n)`` to its nearest row of
+    ``S (M, n)``, over chunks of ``chunk`` query rows (default: bounded by
+    ``LATENT_SUPPORT_CHUNK_ELEMS``)."""
+    q = Q.reshape(-1, Q.shape[-1])
+    if chunk is None:
+        chunk = max(1, LATENT_SUPPORT_CHUNK_ELEMS // S.shape[0])
+    # centred matmul expansion: cdist's direct mode cost ~750 ms per GPU solve (TF32 is off)
+    c = S.mean(0)
+    s = S - c
+    s2 = (s * s).sum(-1)
+    d = [((qc * qc).sum(-1, keepdim=True) + s2 - 2.0 * (qc @ s.T)).amin(-1).clamp_min(0.0).sqrt()
+         for qc in (q[i:i + chunk] - c for i in range(0, q.shape[0], chunk))]
+    return (d[0] if len(d) == 1 else torch.cat(d)).reshape(Q.shape[:-1])
+
+
+def latent_support_cost(lcs: "TorchLcs", ls: dict, Z: torch.Tensor, S: torch.Tensor
+                        ) -> torch.Tensor:
+    """``(K,)`` ``weight sum_k relu(d_k - radius)^2`` of rollouts ``Z (K, H+1, n_x)`` against
+    the whitened training latents ``S``."""
+    c = {**LATENT_SUPPORT_DEFAULTS, **ls}
+    Zk = Z[:, -1:] if c["where"] == "terminal" else Z[:, 1:]
+    d = nn_dist(Zk / lcs.z_std, S)
+    return float(c["weight"]) * (d - float(c["radius"])).clamp_min(0.0).square().sum(1)
+
+
+def check_ee_support(es: dict) -> None:
+    """``MppiParams.ee_support`` keys and ranges (the npz is checked when loaded)."""
+    if not isinstance(es, dict) or not set(es) <= EE_SUPPORT_KEYS \
+            or not {"file", "pulley_pose7"} <= set(es):
+        raise ValueError(f"ee_support {es!r}: need file, pulley_pose7, within "
+                         f"{sorted(EE_SUPPORT_KEYS)}")
+    if not isinstance(es["file"], (str, Path)):
+        raise TypeError(f"ee_support.file {es['file']!r} must be an npz path")
+    pose = np.asarray(es["pulley_pose7"], dtype=np.float64)
+    if pose.shape != (7,) or not np.all(np.isfinite(pose)) or np.linalg.norm(pose[3:]) < 1e-6:
+        raise ValueError(f"ee_support.pulley_pose7 {es['pulley_pose7']}: 7 finite, xyz + wxyz")
+    c = {**EE_SUPPORT_DEFAULTS, **es}
+    for k in ("radius_mm", "weight"):
+        if not (math.isfinite(float(c[k])) and float(c[k]) >= 0.0):
+            raise ValueError(f"ee_support.{k} {c[k]} must be finite >= 0")
+    m = c["max_points"]
+    if isinstance(m, bool) or int(m) != m or m < 1:
+        raise ValueError(f"ee_support.max_points {m} must be an int >= 1")
+    if c["where"] not in LATENT_SUPPORT_WHERE:
+        raise ValueError(f"ee_support.where {c['where']!r}: one of {LATENT_SUPPORT_WHERE}")
+
+
+def load_ee_support(es: dict) -> np.ndarray:
+    """``(M, 6)`` float64 training EE positions of ``MppiParams.ee_support`` in ``P``'s frame
+    (m): ``R q + t`` per arm of every ``ceil(N / max_points)``-th ``ee_pos`` row."""
+    with np.load(Path(es["file"]), allow_pickle=False) as f:
+        E = np.asarray(f["ee_pos"], dtype=np.float64)
+    if E.ndim != 2 or len(E) < 1 or E.shape[1] != N_P or not np.all(np.isfinite(E)):
+        raise ValueError(f"ee support {es['file']}: ee_pos {E.shape} must be finite (N >= 1, 6)")
+    E = E[::-(-len(E) // int(es.get("max_points", EE_SUPPORT_DEFAULTS["max_points"])))]
+    pose = np.asarray(es["pulley_pose7"], dtype=np.float64)
+    R = _quat_mat_t(torch.as_tensor(pose[3:] / np.linalg.norm(pose[3:]))).numpy()
+    return np.concatenate([E[:, sl] @ R.T + pose[:3] for sl in POS_SLICES], axis=1)
+
+
+def ee_support_cost(es: dict, P: torch.Tensor, S_mm: torch.Tensor) -> torch.Tensor:
+    """``(K,)`` ``weight sum_k relu((d_k - radius_mm) / EE_SUPPORT_SCALE_MM)^2`` of rollouts
+    ``P (K, H+1, 6)`` (m) against the training EE positions ``S_mm`` (mm, ``P``'s frame)."""
+    c = {**EE_SUPPORT_DEFAULTS, **es}
+    Pk = P[:, -1:] if c["where"] == "terminal" else P[:, 1:]
+    d = nn_dist(Pk * 1e3, S_mm)
+    return float(c["weight"]) * ((d - float(c["radius_mm"])) / EE_SUPPORT_SCALE_MM).clamp_min(
+        0.0).square().sum(1)
 
 
 def support_hinge(P: torch.Tensor, sbox: torch.Tensor) -> torch.Tensor:
@@ -964,7 +1091,8 @@ def plan_cost(lcs: TorchLcs, params: MppiParams, Z: torch.Tensor, P: torch.Tenso
               anchor_on: torch.Tensor | None = None, clr: Clearance | None = None,
               C: torch.Tensor | None = None, u_demo: torch.Tensor | None = None,
               prior_on: torch.Tensor | None = None, sbox: torch.Tensor | None = None,
-              gset: torch.Tensor | None = None, vt: tuple | None = None
+              gset: torch.Tensor | None = None, vt: tuple | None = None,
+              lsup: torch.Tensor | None = None, esup: torch.Tensor | None = None
               ) -> tuple[torch.Tensor, torch.Tensor]:
     """``(cost (K,), violating knots (K,), envelope violated (K,) bool)`` of rolled-out plans
     (knots 1..H).
@@ -977,7 +1105,9 @@ def plan_cost(lcs: TorchLcs, params: MppiParams, Z: torch.Tensor, P: torch.Tenso
     gated by ``prior_on`` (0/1) like the anchor. ``sbox`` ``(2, 6)``: ``params.support_box``'s
     ``[lo, hi]`` as a tensor (default: from ``params``). ``gset`` ``(K_g, n_x)``: with
     ``params.goal_set`` the set replacing ``z_goal`` (default: loaded from ``params``). ``vt``:
-    ``params.value``'s ``value_tensors`` (default: loaded from ``params``).
+    ``params.value``'s ``value_tensors`` (default: loaded from ``params``). ``lsup`` ``(M, n_x)``:
+    ``params.latent_support``'s training latents, whitened (default: loaded from ``params``).
+    ``esup`` ``(M, 6)``: ``params.ee_support``'s training EE positions in mm (default: loaded).
     """
     if lim is None:
         lim = lcs.tensor(safety_limits(params))
@@ -999,6 +1129,16 @@ def plan_cost(lcs: TorchLcs, params: MppiParams, Z: torch.Tensor, P: torch.Tenso
             cost = cost + float(vv["weight"]) * value_forward(vt, Z[:, -1])
         else:
             cost = cost + float(vv["weight"]) * value_forward(vt, Z[:, 1:]).sum(1)
+    ls = params.latent_support
+    if ls is not None:
+        if lsup is None:
+            lsup = lcs.tensor(load_latent_support(ls, lcs.n_x) / lcs.z_std_np)
+        cost = cost + latent_support_cost(lcs, ls, Z, lsup)
+    es = params.ee_support
+    if es is not None:
+        if esup is None:
+            esup = lcs.tensor(load_ee_support(es) * 1e3)
+        cost = cost + ee_support_cost(es, P, esup)
     un = U / half
     cost = cost + params.w_r * (un * un).sum((1, 2))
     if params.w_s > 0.0:
@@ -1098,6 +1238,12 @@ class MppiSolver:
         self.s_gset = None if self.g_set is None else t(self.g_set)
         self.vfn = None if params.value is None else load_value(params.value, nx, lcs.z_std_np)
         self.s_value = None if self.vfn is None else self.vfn.torch_params(t)
+        self.lsup_np = (None if params.latent_support is None else
+                        load_latent_support(params.latent_support, nx) / lcs.z_std_np)
+        self.s_lsup = None if self.lsup_np is None else t(self.lsup_np)
+        self.esup_np = (None if params.ee_support is None
+                        else load_ee_support(params.ee_support) * 1e3)
+        self.s_esup = None if self.esup_np is None else t(self.esup_np)
         if self.clear is not None:
             self.s_q0 = t(np.tile([1.0, 0.0, 0.0, 0.0], (2, 1)))
         self.graph = None
@@ -1131,7 +1277,8 @@ class MppiSolver:
             C = self._clearance(P, U)
             cost, n_bad, env = plan_cost(lcs, p, Z, P, R, U, self.s_goal, box.half, self.s_anchor,
                                     self.s_lim, self.s_anchor_on, self.clear, C, self.s_udemo,
-                                    self.s_prior_on, self.s_sbox, self.s_gset, self.s_value)
+                                    self.s_prior_on, self.s_sbox, self.s_gset, self.s_value,
+                                    self.s_lsup, self.s_esup)
             w, ess, temp = self._weights(cost)
             mean = (w[:, None, None] * U).sum(0)
         Zm, Pm, Rm = self.roll(self.s_z0, self.s_p0, mean[None], self.s_rot0, p.pgd_iters)
@@ -1139,7 +1286,7 @@ class MppiSolver:
         cost_m, bad_m, _ = plan_cost(lcs, p, Zm, Pm, Rm, mean[None], self.s_goal, box.half,
                                   self.s_anchor, self.s_lim, self.s_anchor_on, self.clear, Cm,
                                   self.s_udemo, self.s_prior_on, self.s_sbox, self.s_gset,
-                                  self.s_value)
+                                  self.s_value, self.s_lsup, self.s_esup)
         best = torch.argmin(cost)
         fb = (bad_m[0] > 0) & (_pick(n_bad, best) < bad_m[0])
         plan = torch.where(fb, _pick(U, best), mean)
@@ -1238,6 +1385,12 @@ class MppiSolver:
                 **extra, "solve_ms": (time.perf_counter() - t0) * 1e3}
         if self.vfn is not None:
             info["value_H"] = float(self.vfn(Zp[-1]))
+        if self.lsup_np is not None:
+            d = nn_dist_np(Zp / lcs.z_std_np, self.lsup_np)
+            info["support_d0"], info["support_dmax"] = float(d[0]), float(d[1:].max())
+        if self.esup_np is not None:
+            d = nn_dist_np(Pp * 1e3, self.esup_np)
+            info["ee_support_d0"], info["ee_support_dmax"] = float(d[0]), float(d[1:].max())
         return plan, info
 
 
@@ -1249,6 +1402,13 @@ def goal_rows(z_goal, H: int, n_x: int) -> np.ndarray:
     if g.shape != (H, n_x):
         raise ValueError(f"z_goal shape {g.shape}: expected ({n_x},) or ({H}, {n_x})")
     return g.copy()
+
+
+def nn_dist_np(Q, S: np.ndarray) -> np.ndarray:
+    """``(n,)`` float64 Euclidean distance of each row of ``Q (n, d)`` to its nearest row of
+    ``S (M, d)``."""
+    q = np.asarray(Q, dtype=np.float64).reshape(-1, S.shape[1])
+    return np.sqrt(((q[:, None] - S[None]) ** 2).sum(-1).min(1))
 
 
 _SOLVERS: dict = {}

@@ -10,7 +10,21 @@ Run:
     uv run python scripts/replay_viewer.py --port 8082 --show-collision --point-cloud
     uv run python scripts/replay_viewer.py --render-fps 15 --stats   # slow link / client
     uv run python scripts/replay_viewer.py --recordings DIR --learned-layers planned_belt,actions
+    uv run python scripts/replay_viewer.py --recordings DIR --deploy DEPLOY.npz \
+        --learned-layers lcs_accuracy,contact_forces
     uv run python scripts/replay_viewer.py --episodes data/lcs/approach/v1_heldout   # LCS data
+
+Learned MPC layers (``--learned-layers``, all off by default; checkboxes under Learned MPC):
+planned_belt, planned_ee, actions, target_belt draw the current solve in 3D; the LCS diagnostics
+sub-folder holds
+  lcs_accuracy    per solve i, the deploy LCS rolled k = 1 and k = N steps from the encoded latent
+                  z0_i with the executed actions (u_sol[:, 0] of solves i..i+k-1) vs z0_{i+k}:
+                  whitened latent error and decoded-belt Chamfer RMS (mm), at solve i's time;
+                  windows across a gap in the solve times are skipped; median / p90 in the status
+  contact_forces  the LCS contact forces λ of the current solve at (z0_i, u_sol[:, 0]_i) and at
+                  the plan's last action knot, one bar per component, plus the active set
+Both use the deploy's lcs_forward_solver (pgd_symmetric with the run's MPPI pgd_iters, or
+full_lcp) and are computed once per run when first shown.
 """
 
 from __future__ import annotations
@@ -36,7 +50,7 @@ from task_common.recording import Recording
 from task_common.replay_app import DEFAULT_DEVICE, DEFAULT_RENDER_FPS, ReplayApp
 from task_common.replay_episode import EpisodeReplayApp, PredictionPanel, list_episodes
 from task_common.replay_learned_mpc import (
-    LAYERS,
+    ALL_LAYERS,
     LearnedMpcPanel,
     any_learned_runs,
     parse_layers,
@@ -109,7 +123,7 @@ def create_parser() -> argparse.ArgumentParser:
     learned.add_argument("--demo-episode", type=Path, default=None,
                          help="demo episode npz with pcd_belt")
     learned.add_argument("--learned-layers", default="",
-                         help=f"comma list to pre-enable, from {','.join(LAYERS)}")
+                         help=f"comma list to pre-enable, from {','.join(ALL_LAYERS)}")
     return parser
 
 

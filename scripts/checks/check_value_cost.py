@@ -57,7 +57,8 @@ WP = REPO / "data/lcs/realfirst/cmp/C1_transport/iter1/latent_waypoints.npz"
 N_LAT = 30
 LATER = (("stage_skip_ahead", False), ("stage_no_timeout_into", None), ("prior_mode", "demo"),
          ("bc_prior", None), ("goal_set", None), ("goal_set_tau", 0.0), ("stage_start", None),
-         ("support_box", None), ("prior_sync", None), ("overshoot", None))
+         ("support_box", None), ("prior_sync", None), ("overshoot", None),
+         ("latent_support", None), ("ee_support", None))
 
 
 def base_doc(device: str, small: bool = False) -> dict:

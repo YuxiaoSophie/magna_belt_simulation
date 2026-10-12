@@ -72,6 +72,7 @@ token list (§6).
 | | `seat6-rf` | seat6 starts, the seed demo's two goals (pre_place_2 4 s, seated 30 s), MPPI node, belt-seg cloud real_like (V11) |
 | | `seat6-rf11` | seat6 starts, MPPI two stages on the latent (demo-spread tol, streak 3, 10 s / 30 s), clearance, belt-seg clean cloud |
 | | `seat6-rf12` | seat6 starts, MPPI on the latent, no prefix (V12 campaign cells: eval is always the full task), clearance, belt-seg clean cloud |
+| | `hard11x2-rf` | hard suite: 11 starts x 2 (run_hard_suite.SUITE resets), noise 0, MPPI on the latent, stage goals on waypoints, clearance, belt-seg clean cloud |
 | | `under12` | 12 belt-under-pulley snapshots (`data/lcs/contact/snapshots{,_heldout}`), seated goal only, 30 s |
 | | `cell-s30` | one seat6 cell re-run with the stage-2 timeout 10 → 30 s |
 | cost | `Qw` | whitened latent cost (default) |
@@ -181,6 +182,23 @@ note column.
 | V16h | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V16g | real-first loop iteration 7: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr7 |
 | V16i | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V16h | real-first loop iteration 8: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr8 |
 | V16j | `rf-sk10+vg+aux-fixB-v12_27` | - | candidate | V16i | real-first loop iteration 9: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr9 |
+| V17a | `rf-sk10-t1-e0` | - | candidate | - | V12-42 T1 (3 demos + V12-29b MILES) fresh joint, today's recipe, seed 4; hard suite 8/22 (V12-43), 7/22 with progress start (V12-44) |
+| V17b | `rf-sk10-t1-aug-act0.1` | - | rejected | V17a | + point augmentation + Delta-JEPA action head λ 0.1 (train-only), seed 4; off-demo −15 % but hard suite 1/22 (V12-43, +y bias) |
+| V17c | `rf-sk10-t1-aug` | - | rejected | V17a | + point augmentation only, seed 4; hard suite 0/22 (V12-44, +x bias) |
+| V17d | `rf-sk10-t1-e0` | - | candidate | V17a | V17a's recipe, seed 6; hard suite **11/22** with progress start (V12-45); seed of V12-46 (= V18a) |
+| V17e | `rf-sk10-t1-e0` | - | candidate | V17a | V17a's recipe, seed 5; hard suite 9/22 with progress start (V12-45) |
+| V18a | `rf-sk10-t1e0s6-v12_46` | - | candidate | - | V12-46 iteration 0: = V17d (adopted via `seed_model`, no refit); eval 8/16 |
+| V18b | `rf-sk10-t1e0s6-v12_46` | - | candidate | V18a | V12-46 iteration 1: LCS-only refit from V17d's checkpoint (`refit.from_seed`) on the anchored buffer + on-policy rollouts up to set2 gv_00; eval 11/16; hard suite 10/22 (V12-47) |
+| V18c | `rf-sk10-t1e0s6-v12_46` | - | candidate | V18b | V12-46 iteration 2: LCS-only refit from V17d's checkpoint (`refit.from_seed`) on the anchored buffer + on-policy rollouts up to set2 gv_06 |
+| V18d | `rf-sk10-t1e0s6-v12_46` | - | candidate | V18c | V12-46 iteration 3: LCS-only refit from V17d's checkpoint (`refit.from_seed`) on the anchored buffer + on-policy rollouts up to set3 gv_02; eval 11/16 |
+| V18e | `rf-sk10-t1e0s6-v12_46` | - | candidate | V18d | V12-46 iteration 4: LCS-only refit from V17d's checkpoint (`refit.from_seed`) on the anchored buffer + on-policy rollouts up to set3 gv_03 |
+| V18f | `rf-sk10-t1e0s6-v12_46` | - | candidate | V18e | V12-46 iteration 5: LCS-only refit from V17d's checkpoint (`refit.from_seed`) on the anchored buffer + on-policy rollouts up to UR −30 mm; eval 5/16 |
+| V18g | `rf-sk10-t1e0s6-v12_46` | - | candidate | V18f | V12-46 iteration 6: LCS-only refit from V17d's checkpoint (`refit.from_seed`) on the anchored buffer + on-policy rollouts up to UR +15 mm |
+| V18h | `rf-sk10-t1e0s6-v12_46` | - | candidate | V18g | V12-46 iteration 7: LCS-only refit from V17d's checkpoint (`refit.from_seed`) on the anchored buffer + on-policy rollouts up to grasp −30°; eval 10/16 |
+| V18i | `rf-sk10-t1e0s6-v12_46` | - | candidate | V18h | V12-46 iteration 8: LCS-only refit from V17d's checkpoint (`refit.from_seed`) on the anchored buffer + on-policy rollouts up to grasp −20° |
+| V18j | `rf-sk10-t1e0s6-v12_46` | - | candidate | V18i | V12-46 iteration 9: LCS-only refit from V17d's checkpoint (`refit.from_seed`) on the anchored buffer + on-policy rollouts up to grasp +20°; eval 5/16 |
+| V22a | `rf-jepa+graph-v12_52` | - | candidate | - | real-first loop iteration 0: belt-cloud encoder + LCS, joint fresh refit on the buffer, box ub-tr0 |
+| V22b | `rf-jepa+graph-v12_52` | - | candidate | V22a | real-first loop iteration 1: belt-cloud encoder + LCS, joint warm refit on the buffer, box ub-tr1 |
 
 Side runs without an ID (`models.yaml` lists them under V6a/V6b): `t6a_w10` (`trafqf0l`) and
 `t6b_w1` (`6n5j9jvb`) stopped at epoch 30; `t6b_w10` (`q25alk7k`) segfaulted at epoch 216 and
@@ -281,6 +299,18 @@ without an ID (`runs/`: `graphemb`, `graphemb_dyn0.01..0.3`, `graphemb_rec0.003.
 | V16h | `v12_36` | `refit_from_buffer.py` | `iter7/refit/r7_lcs_only` | - | epoch 30 | `iter7/deploy_v16h` | ub-tr7 |
 | V16i | `v12_36` | `refit_from_buffer.py` | `iter8/refit/r8_lcs_only` | - | epoch 30 | `iter8/deploy_v16i` | ub-tr8 |
 | V16j | `v12_36` | `refit_from_buffer.py` | `iter9/refit/r9_lcs_only` | - | epoch 30 | `iter9/deploy_v16j` | ub-tr9 |
+| V18a | `v12_46` | `refit_from_buffer.py` | `iter0/refit/E0_s6` | - | epoch 60 | `iter0/deploy_v18a` | ub-tr0 |
+| V18b | `v12_46` | `refit_from_buffer.py` | `iter1/refit/r1_lcs_only` | - | epoch 30 | `iter1/deploy_v18b` | ub-tr1 |
+| V18c | `v12_46` | `refit_from_buffer.py` | `iter2/refit/r2_lcs_only` | - | epoch 30 | `iter2/deploy_v18c` | ub-tr2 |
+| V18d | `v12_46` | `refit_from_buffer.py` | `iter3/refit/r3_lcs_only` | - | epoch 30 | `iter3/deploy_v18d` | ub-tr3 |
+| V18e | `v12_46` | `refit_from_buffer.py` | `iter4/refit/r4_lcs_only` | - | epoch 30 | `iter4/deploy_v18e` | ub-tr4 |
+| V18f | `v12_46` | `refit_from_buffer.py` | `iter5/refit/r5_lcs_only` | - | epoch 30 | `iter5/deploy_v18f` | ub-tr5 |
+| V18g | `v12_46` | `refit_from_buffer.py` | `iter6/refit/r6_lcs_only` | - | epoch 30 | `iter6/deploy_v18g` | ub-tr6 |
+| V18h | `v12_46` | `refit_from_buffer.py` | `iter7/refit/r7_lcs_only` | - | epoch 30 | `iter7/deploy_v18h` | ub-tr7 |
+| V18i | `v12_46` | `refit_from_buffer.py` | `iter8/refit/r8_lcs_only` | - | epoch 30 | `iter8/deploy_v18i` | ub-tr8 |
+| V18j | `v12_46` | `refit_from_buffer.py` | `iter9/refit/r9_lcs_only` | - | epoch 30 | `iter9/deploy_v18j` | ub-tr9 |
+| V22a | `v12_57` | `refit_from_buffer.py` | `iter0/refit/JPG_s4` | - | epoch 40 | `iter0/deploy_v22a` | ub-tr0 |
+| V22b | `v12_57` | `refit_from_buffer.py` | `iter1/refit/r1_joint` | - | epoch 30 | `iter1/deploy_v22b` | ub-tr1 |
 
 Checkpoint date folders: V1 and V2 `2026-09-24` (V2's campaign folder is dated 20260925),
 V3 `2026-09-28`, V4/V5 `2026-09-29`, V6/V7 `2026-09-30`. V10 encoder runs (`phi.pt`, `z.npz`,
@@ -346,6 +376,42 @@ V10m 0.891 / 1.55, V10n 0.891 / 1.56 (`…/blocked_vs_unblocked_heldout.json`). 
 median (joint decoders; `…/embed_<tag>.log`): V10b-d 2.53, V10f 2.72, V10h 4.03, V10j 3.07,
 V10l 6.08, V10m 5.29, V10n 3.86 mm. V10 seat6 cells use the same harness and params as V4a
 except the model files; the cost is isotropic (`Qi`) although the folder names say `Qw`.
+
+### Encoder-study models (V12-42 to V12-61, not made by a loop)
+
+Trained directly with `train_joint_pointnet_lcs.py` (two-stage for JEPA arms), exported by
+`cmp/encoder_study/sim/prep_*.py` to `data/lcs/realfirst/cmp/encoder_study/sim/<ID>/`.
+Checkpoints: lcs_learning `outputs/sim_belt_v12_20261006/<run>/`. Hard suite = 11 starts × 2,
+no demo prior, engaged count (noise 0.2 for V17*, 0 from V12-49 on). Tiers: T1 = 3 demos +
+V12-29b MILES; T2 = T1 + V12-35/36 on-policy; T1ga = T1 + 4 grasp-angle demos + their MILES;
+T1ga_f = T1ga + 42 more operator attempts (39 failed). Details: `docs/realfirst-campaign.md`.
+
+| ID | run (checkpoint) | recipe | tier | seed | hard suite | run |
+|---|---|---|---|---|---|---|
+| V17a | `v12_42/t1/E0_s4` | reconstruction + LCS (E0) | T1 | 4 | 8/22; 7/22 progress start | V12-43/44 |
+| V17b | `v12_42/t1/E2_aug_act0.1_s4` | E0 + point augmentation + Delta-JEPA action head 0.1 | T1 | 4 | 1/22 | V12-43 |
+| V17c | `v12_42/t1/E1_aug_s4` | E0 + point augmentation | T1 | 4 | 0/22 | V12-44 |
+| V17d | `v12_42/t1/E0_s6` | E0 | T1 | 6 | 11/22; 9/22 at noise 0 | V12-45/49 |
+| V17e | `v12_42/t1/E0_s5` | E0 | T1 | 5 | 9/22 | V12-45 |
+| V19a | `v12_49/t1/B_s6` | E0 with J fixed to 0 (B) | T1 | 6 | 7/22 | V12-50 |
+| V19b | `v12_49/t1/C_s6` | J learned + violation-QP loss + full-LCP forward (C) | T1 | 6 | not run (MPPI has no full-LCP solver) | V12-50 |
+| V19c | `v12_49/t1/B_s5` | B | T1 | 5 | 11/22 | V12-50 |
+| V20a | `v12_51/t1/JP0_s6` | JEPA + SIGReg, J 0, post-hoc decoder | T1 | 6 | 0/22 | V12-53 |
+| V21a | `v12_52/t1/JPG_s6` | JEPA + graph stress (JPG), SIGReg off, J 0 | T1 | 6 | 11/22 | V12-54 |
+| V21b | `v12_52/t1/BG_s6` | reconstruction + graph stress (BG) | T1 | 6 | 0/22 | V12-54 |
+| V21c | `v12_52/t1/JPG_s4` | JPG | T1 | 4 | 11/22 (V22a re-export: 12/22) | V12-55 |
+| V21d | `v12_52/t1/JPG_s5` | JPG | T1 | 5 | 5/22 | V12-55 |
+| V23a | `v12_56/t2/JPG2_s4` | JPG, T2 graph | T2 | 4 | 1/22 | V12-56 |
+| V23b | `v12_56/t2/JPG2_s6` | JPG, T2 graph | T2 | 6 | 1/22 | V12-56 |
+| V24a | `v12_58/t1ga/JPG_s4` | JPG, T1ga graph | T1ga | 4 | 0/22 | V12-58 |
+| V24b | `v12_58/t1ga/JPG_s6` | JPG, T1ga graph | T1ga | 6 | 2/22 | V12-58 |
+| V25a | `v12_60/t2_gm/JPG2GM_s4` | JPG + goal margin W 0.1 / M 0.3 | T2 | 4 | 6/22 | V12-60 |
+| V25b | `v12_60/t2_gm/JPG2GM_s6` | JPG + goal margin W 0.1 / M 0.3 | T2 | 6 | 1/22 | V12-60 |
+| V26a | `v12_61/t1gaf_gm/JPGGM_s4` | JPG + goal margin W 0.1 / M 0.3, T1ga_f graph | T1ga_f | 4 | 0/22 | V12-61 |
+| **V26b** | `v12_61/t1gaf_gm/JPGGM_s6` | JPG + goal margin W 0.1 / M 0.3, T1ga_f graph | T1ga_f | 6 | **16/22** (best) | V12-61 |
+
+V21c with the EE data-support MPPI cost (weights 1 / 10): 12/22 each (V12-59b, eval tags
+`V21c_n0_ees1/10`, no new model).
 
 ## 3. Closed-loop evaluation index
 
@@ -514,6 +580,13 @@ no per-folder table; their results are in the worktree
 | V16f · seat6-rf12 · Qw · ub-tr5 | `data/lcs/realfirst/cmp/v12_36/iter5/eval` | 10-06 | 6 / 16 | `…/table.md` | V11 loop iteration 5, MPPI 2 stages (seed demo goals): 2/16 strict, 6/16 engaged, RMSE 11.9 vs the demo belt, unsafe 0, solve p95 15 ms |
 | V16h · seat6-rf12 · Qw · ub-tr7 | `data/lcs/realfirst/cmp/v12_36/iter7/eval` | 10-06 | 6 / 16 | `…/table.md` | V11 loop iteration 7, MPPI 2 stages (seed demo goals): 3/16 strict, 3/16 engaged, RMSE 11.5 vs the demo belt, unsafe 0, solve p95 15 ms |
 | V16j · seat6-rf12 · Qw · ub-tr9 | `data/lcs/realfirst/cmp/v12_36/iter9/eval` | 10-06 | 6 / 16 | `…/table.md` | V11 loop iteration 9, MPPI 2 stages (seed demo goals): 1/16 strict, 1/16 engaged, RMSE 24.3 vs the demo belt, unsafe 4, solve p95 15 ms |
+| V18b · seat6-rf12 · Qw · ub-tr1 | `data/lcs/realfirst/cmp/v12_46/iter1/eval` | 10-08 | 6 / 16 | `…/table.md` | V11 loop iteration 1, MPPI 2 stages (seed demo goals): 11/16 strict, 11/16 engaged, RMSE 15.0 vs the demo belt, unsafe 0, solve p95 18 ms |
+| V18d · seat6-rf12 · Qw · ub-tr3 | `data/lcs/realfirst/cmp/v12_46/iter3/eval` | 10-08 | 6 / 16 | `…/table.md` | V11 loop iteration 3, MPPI 2 stages (seed demo goals): 11/16 strict, 11/16 engaged, RMSE 17.9 vs the demo belt, unsafe 0, solve p95 17 ms |
+| V18f · seat6-rf12 · Qw · ub-tr5 | `data/lcs/realfirst/cmp/v12_46/iter5/eval` | 10-08 | 6 / 16 | `…/table.md` | V11 loop iteration 5, MPPI 2 stages (seed demo goals): 3/16 strict, 5/16 engaged, RMSE 15.9 vs the demo belt, unsafe 0, solve p95 19 ms |
+| V18h · seat6-rf12 · Qw · ub-tr7 | `data/lcs/realfirst/cmp/v12_46/iter7/eval` | 10-08 | 6 / 16 | `…/table.md` | V11 loop iteration 7, MPPI 2 stages (seed demo goals): 10/16 strict, 10/16 engaged, RMSE 13.8 vs the demo belt, unsafe 0, solve p95 19 ms |
+| V18j · seat6-rf12 · Qw · ub-tr9 | `data/lcs/realfirst/cmp/v12_46/iter9/eval` | 10-08 | 6 / 16 | `…/table.md` | V11 loop iteration 9, MPPI 2 stages (seed demo goals): 5/16 strict, 5/16 engaged, RMSE 13.0 vs the demo belt, unsafe 0, solve p95 18 ms |
+| V22a · hard11x2-rf · Qw · ub-tr0 | `data/lcs/realfirst/cmp/v12_57/iter0/cand/eval` | 10-08 | 11 / 22 | `…/table.md` | V11 loop iteration 0, MPPI 2 stages (seed demo goals): 12/22 strict, 12/22 engaged, RMSE 30.0 vs the demo belt, unsafe 0, solve p95 19 ms |
+| V22b · hard11x2-rf · Qw · ub-tr1 | `data/lcs/realfirst/cmp/v12_57/iter1/cand/eval` | 10-08 | 11 / 22 | `…/table.md` | V11 loop iteration 1, MPPI 2 stages (seed demo goals): 1/22 strict, 2/22 engaged, RMSE 31.2 vs the demo belt, unsafe 0, solve p95 17 ms |
 
 Fixed 2026-09-30: the empty `mpc_eval/20260924-202837-evalv2-v2full-set3` was deleted (its
 re-run is `…-203612`); `mpc_eval/20260924-234527-flateval-learned-set1/index.json` had 0

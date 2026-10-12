@@ -10,46 +10,62 @@ packages `handoffs/packages/PKG-20261006-cmp-*.md`. Glossary and earlier campaig
 `V<campaign><letter>` (V12g, V13a, …; `docs/models.md`). Campaign V11 = the first two real-first
 loops (2026-10-05), V12 = this campaign (2026-10-06); V13 = the frozen-encoder models of V12-13.
 
-## 0. Status summary (updated 2026-10-08)
+## 0. Status summary (updated 2026-10-12)
 
-**Where we are.** Without the demo action prior (banned 2026-10-07), the best fixed model (V12h +
-data-support box + latent waypoints) seats **5-7/22** on the hard suite (11 varied starts × 2)
-with MPPI and **6/22** with C3+. The Jin & Posa loop has not improved on that: warm deployed refits
-collapse (V12-35), refits from the seed oscillate (V12-36). The encoder is the main suspect: it
-is accurate near the demos and 4-5× worse on the states the controller visits (V12-41).
+**Where we are.** Without any demo action prior, **V26b seats 16/22 on the hard suite** (V12-61,
+noise 0). It is JEPA + graph stress + a label-aware goal margin, trained on 3 demos + MILES
++ 4 grasp-angle demos and their MILES + 42 operator attempts at grasp-angle starts. That is
+12/14 on the non-angle starts and the first seats at positive grasp angles (up+20, up+30 2/2).
+Open:
+- Seed variance: seed 4 of the same recipe seats 0/22, and no offline metric predicts it.
+- Negative grasp angles: still "over" for every model.
+- The Jin & Posa loop: V12-57 is paused after one refit dropped 12 → 2/22.
 
-| run | what | result |
-|---|---|---|
-| V12-07 | full task, demo grasps, waypoints + demo prior | 8/10 |
-| V12-17 | data-support box, 4 hard grasps (prior on) | 5/8 vs 1/8 without the box |
-| V12-33 | best controller with the prior, hard suite | 10-11/22 (historical: the prior is banned) |
-| V12-37 | honest baseline, no prior, hard suite | H 16 5/22, H 24 7/22 |
-| V12-38 | longer horizon H 32 | 0/10, stopped |
-| V12-39 | learned cost-to-go V(z) in MPPI | 6/22 (trades starts) |
-| V12-40 | C3+ instead of MPPI | V12h 6/22, V16b 0/22 |
-| V12-24/25/26 | MILES seed data | better off-demo prediction (9.8 vs 13.5 mm), worse closed loop (1-2/22 vs 11/22, prior on) |
-| V12-35 | loop: 3 demos + MILES, every refit deployed | 0, 3, 0, 0, 0, 0 /5; refits drift; stopped |
-| V12-36 | loop: refits from the seed, anchor 0.7, no prior | evals 4, 3, 6, 3, 1 /16; no trend |
+**Everything tried, by theme** (details in the run index and §7; model registry `docs/models.md`):
 
-**Why it fails.**
-1. **Representation off the demos** (V12-41): reconstruction 2.5-3.2 mm on held-out demo-like
-   frames, 9.6-13.4 mm on off-demo closed-loop rollouts (12-17 mm beyond 40 mm from the demo
-   tube). One-step prediction error ≈ reconstruction error, so the encoder, not the LCS step,
-   sets the accuracy floor.
-2. **Failure modes:** "over" (the Franka sweeps before the belt is down) and under / slanted.
-   Controller tweaks (start rule, goal set, MPPI settings, cost-to-go) move wins between starts
-   without a net gain (V12-33/34/39).
-3. **Refits:** lower prediction error does not mean better control (V12-25/26); deployed warm
-   refits drift (V12-35); from-seed refits are stable but do not climb (V12-36).
+| theme | runs | what was tried | outcome |
+|---|---|---|---|
+| loop basics | V11-01/02, V12-01..08 | real-first loop, clean clouds, Sinkhorn recon, warm refits, demo prefixes, latent waypoints + demo action prior | 8/10 near the demos with the prior (V12-07); varied grasps 7/50 |
+| controller | V12-09/10/15/16/17/19/22/30/31/32/33/34/38/39/40, V12-48 | nearest-demo waypoints, overshoot guard, failure census, data-support EE box, waypoint schedule, seated goal set, progress start, MPPI sweep, H 16 → 24 / 32, learned cost-to-go, C3+, smoothness w_s, exploration noise | the support box is the one gain (5/8 vs 1/8); noise 0 for eval; the rest trade starts |
+| demo action prior | V12-06/07/14/28/37 | demo action prior, stage-synced prior, MILES-BC prior (planned); removing the prior (user: cheating) | without the prior 5-7/22 (20 demos, V12h); the rule since 2026-10-07 |
+| refit rules (J&P) | V12-08/11/12/13/18/27/35/36/46/57 | warm vs from-seed refits, frozen encoder, anchor 0.7, behaviour and response gates, on-policy weighting, keep-best | warm refits drift; from-seed flat; V12-46's first refit 8 → 11/16 then degrades; V12-57 iteration 1 2/22 |
+| seed data and starts | V12-04, V12-20/21, V12-23..26, V12-29b, V12-58 | extra demos, slanted-belt and grasp-angle starts, MILES around demos, scripted grasp-angle demos (UR tilt ≈ −1.0 to −1.3 × grasp angle) | 3 demos + 12 min MILES (T1) ≈ 20 demos (V12-43) |
+| encoder | V12-41/42/43/44/45 | data tiers T0/T1/T2, point augmentation, Delta-JEPA action head, latent 32, Point-MAE (pretrained) | better offline error does not mean better control (aug + head 1/22, aug 0/22); seeds 7-11/22 |
+| LCS loss | V12-49/50, loss audit | multi-step loss K ≤ 7, learned J with violation-QP + full-LCP forward, contact-mode statistic | B (J 0) 7-11/22; J learned needs a full-LCP MPPI solver (not run) |
+| latent objective | V12-51..55 | JEPA + SIGReg; JEPA + graph stress (JPG); reconstruction + graph | SIGReg 0/22; JPG 11 / 11 / 5 (seeds 6 / 4 / 5); recon + graph 0/22 |
+| more data, same recipe | V12-56, V12-58 | JPG on T2 (on-policy data) and on T1ga (grasp-angle demos) | collapse: 1/22, 0-2/22; MPPI-seated belts drift away from the goal in the latent |
+| data support in MPPI | V12-59/59b, diag gv_00 | latent-NN support cost; 6-D EE NN support cost | latent cost wrong direction in replay; EE cost 12/22 (no gain) |
+| goal margin | V12-60/61 | pull human-labelled seated finals together, push failed finals ≥ M away | W 1 / M 1 collapses the latent; W 0.1 / M 0.3: T2 1 → 6/22, T1ga_f **16/22** (seed 6) |
+| tooling | viewer, diagnoses | replay viewer LCS-accuracy chart, planned-vs-recorded check (V26b up+30) | no bug: the chart is decoded vs decoded; the JEPA post-hoc decoder is ~13 mm off on closed-loop belts |
 
-**Next: improve the encoder for little real data**, without simulation pretraining (the sim is
-the real system, so sim data is real budget; external models pretrained on public data are
-allowed). Offline first: (a) train on every real frame (demos, MILES, all rollouts incl.
-failures) with point augmentation, an action-reconstruction head on z_{t+k} − z_t and multi-step
-prediction; (b) an external pretrained point-cloud backbone (Point-MAE first, Sonata), frozen +
-head and partly fine-tuned. Learning curves against real robot time (3 demos 45 s, + MILES 1×
-12 min, + MILES 2× 23 min, + on-policy iterations), scored on V12-25's 87 off-demo rollouts
-(reconstruction, multi-step prediction, action probe, +y probe); the winner on the hard suite.
+**What we learned.**
+1. Offline prediction error does not select controller models (V12-43, V12-50, V12-56).
+   Closed-loop checks are needed, and seeds of one recipe span 0-16/22.
+2. The latent's geometry near the goal decides success. When data is added, MPPI-seated
+   belts can move away from the goal while "over" belts move closer. A human success label
+   (the goal margin) is the first fix that holds this geometry in place.
+3. Graph stress in place of SIGReg makes JEPA usable at this data scale. Reconstruction
+   + graph does not.
+4. Grasp-angle starts need data there: positive angles seat once their demos, failed
+   attempts and the goal margin are in training. Negative angles still fail.
+
+**Next.**
+- Seed robustness of the V26 recipe (seeds 5, 7, 8; ensemble or closed-loop selection).
+- Resume the J&P loop from V26b with the goal margin in the refits and labelled on-policy
+  attempts.
+- Operator demos at negative grasp angles.
+- An H 7 vs H 24 A/B on V26b.
+
+Constraints unchanged: no demo prior, no sim pretraining, real-available signals only,
+multi-step training horizon ≤ 7.
+
+**Controller used for every eval from V12-49 on (MPPI):**
+- 1024 samples, H 24 steps of 75 ms (1.8 s), 6 iterations; 7 knots are sent.
+- u is the per-step EE displacement. Its box is the training data's range ∩ 6 mm / 2° per step.
+- Effort cost w_r 0.3 and smoothness cost w_s 0.3. There is no separate EE-velocity cost.
+
+"Whitened" latent distances are z / z_std per dimension, with z_std taken from the training
+latents at export. They are not comparable across models.
 
 **Deferred by the user:** robust resets; seed variant D (A's encoder frozen + MILES).
 
@@ -105,6 +121,26 @@ refit, several iterations); **sim** = fixed-model closed-loop check in the simul
 | V12-31 | offline | grasp −20°/−30° starts: why the planner sweeps early when the first waypoint (the demo's static start) is out of reach (LCS cost terms at the start latent), and an opt-in progress-gated start (`MppiParams.stage_start: progress`, loop `waypoints.start`): drop the start-state waypoints the latent is outside, start at the nearest remaining pre-latch stage | V12h | `cmp/start_stage/` | the tracking + terminal cost toward the static start drives the sweep (−20°: 'sweep' 127-129 cheaper than 'descend UR', the prior +4); replay Σu₀ Franka y / UR z 0-3 s +4..+71 / −21..−82 → −71..−95 / −162..−189 mm on 12 failing episodes; in-reach controls unchanged; +30° changes (risk); −10..−30° belt stays 11-27 mm up at the UR's lowest z (second cause); sim pending |
 | V12-40 | code + offline | C3+ (magna's C++ learned MPC, `projection_type: C3+`) as the controller for the current latent deploys: params generator, loop key `controller: c3plus`, hard-suite C3+ arms, C++ load mirror, E3 at 1e-2 + exact-LCP consistency on task states, solve-time estimate, what the support box / clearance did in MPPI runs | V12h, V16b | `cmp/c3plus/` | A/B 19:32-20:30 (no prior, 11 hard starts × 2): **C3+ with V12h 6/22** (engaged 6, under 6, slanted 7, over 3; nominal 2/2, UR +15 mm 2/2, UR −30 mm 1/2) vs MPPI with V12h 5/22 (H 16, V12-37) / 7/22 (H 24); **C3+ with V16b 0/22** (Franka y max median 8 mm: no sweep, under 10) vs MPPI with V16b 5/22 (set2/gv_06 2/2, grasp +20/+30° 3/4); C3+ solve p95 7-8 ms |
 | V12-41 | offline | encoder accuracy readout: held-out reconstruction of the seed / loop models vs reconstruction and one-step prediction on V12-25's 87 off-demo closed-loop rollouts, by distance from the demo tube | V12v, V12h, V16a, V16b, V16f, seeds B / C / B2 | refit reports, `cmp/seed_compare/report.md` | held-out 2.5-3.2 mm (V16f 5.0) vs off-demo 9.6-13.4 mm (12.4-17.4 mm beyond 40 mm from the tube); one-step ≈ recon: the encoder limits accuracy where the controller goes |
+| V12-42 | offline | encoder study for little real data: real-budget tiers T0 (3 demos, 45 s) / T1 (+ V12-29b MILES) / T2 (+ V12-35/36 on-policy; no all-data tier, user: too slow) × arms E0 today's recipe, E1 + point augmentation, E2 + Delta-JEPA action head (Δz → actions, k 1 and 5, λ 1/10/50), E3 + latent 32, E4 external Point-MAE backbone (ShapeNet-pretrained; frozen / partly fine-tuned); scored on V12-25's off-demo rollouts and the no-prior hard-suite rollouts (recon, one-/7-step, action-response and action-decodability probes, +y probe) | V17… | `cmp/encoder_study/` | started 2026-10-08 evening (code: trainer options, Point-MAE wrapper, tiers + `encoder_eval.py`) |
+| V12-43 | sim | hard suite (11 × 2, no prior, box) with V12-42's winners, MPPI H 24 (+ C3+ for the best) vs V12h 7/22 / 6/22 | V17a, V17b | `cmp/encoder_study/sim/` (`vs_v12_37/hard_suite.md`) | 02:55-03:45: **V17a (E0, T1 = 3 demos + MILES) 8/22** (over 13, slanted 1; nominal 2/2, UR +15 mm 2/2, set2/set3 grasps 4/8) vs **V17b (E2 aug + head λ 0.1) 1/22** (over 18, under 2): the better-predicting encoder controls far worse (+y bias of the action head, diagnosis in §7). V17a matches V12h's 7/22 (V12-37, 20 demos) with 3 demos + 12 min of MILES |
+| V12-44 | sim | V12-43's diagnosis fix: `stage_start: progress` (start at the nearest reachable pre-latch waypoint) on V17a (E0) and V17c (E1, augmentation only); hard suite 11 × 2, no prior | V17a, V17c | `cmp/encoder_study/sim44/` (`vs_v12_43/hard_suite.md`) | 03:45-04:35: **V17a + progress 7/22** (vs 8/22 without: + UR −30 mm 1/2, the first without the prior, and set3 gv_02 2/2; − UR +15 mm 1/2 and nominal 0/2 slanted): mode 1 removed, no net gain (as V12-33 with the prior); **V17c (augmentation only) 0/22** (mode 3: belt down, then lifted out without the Franka −x pull) |
+| V12-45 | sim | gate validation within today's recipe: V17d = T1 E0 seed 6 (response gate pass) vs V17e = T1 E0 seed 5 (gate fail), `stage_start: progress`, hard suite 11 × 2, no prior | V17d, V17e | `cmp/encoder_study/sim45/` (`vs_all/hard_suite.md`) | 04:35-05:23: **V17d (E0 seed 6, gate pass) 11/22** (the best without a demo prior so far; all 4 set2/set3 grasps 7/8, UR +15 mm 2/2, nominal 2/2), **V17e (E0 seed 5, gate fail) 9/22** (UR −30 mm 2/2, under 8). Same recipe and data: seeds 4/5/6 give 7, 9, 11/22 with the progress start; the gate does not rank seeds within E0 (V17e beats V17a); it only flags the extreme models (V17b, V17c) |
+| V12-46 | loop | Jin & Posa loop seeded by V17d (E0 seed 6, 11/22; new opt-in loop key `seed_model`), = V12-36's rules (no prior, anchor 0.7, from-seed LCS-only refits, on-policy weighting, `refit_gate: report`, rotation over the 10 hard starts) + H 24 + `waypoints.start: progress`; report-only response gate per iteration (`scripts/lcs/response_gate.py`); eval (16 episodes, V12-36's set) at iteration 0 (extra baseline) and 1/3/5/7/9 | V18a (= V17d)… | `cmp/v12_46/`, config `cmp/configs/v12_46.yaml` | 06:15-09:18 (~3 h, 50 MPC rollouts + 96 eval episodes, 6524 s robot): collects 5, 5, 5, 4, 3, 5, 0, 0, 1, 2 /5 over the rotation (set2 gv_00, gv_06, set3 gv_02, gv_03, UR −30, UR +15, grasp −30°, −20°, +20°, +30°); **evals (16 episodes) 8 → 11 → 11 → 5 → 10 → 5** at iterations 0/1/3/5/7/9. The first on-policy refit gives the campaign's best no-prior model (V18b/V18d 11/16: every start but the grasp angles and one more); the grasp angles stay 0 in eval (collect +20° 1/5, +30° 2/5: the first grasp-angle seats); after the grasp-angle iterations the model degrades on the other starts (V18j 5/16, slanted/other). Response gate (report-only) fails on every refit, including the 11/16 ones |
+| V12-47 | sim | V18b (V12-46 iteration 1, 11/16 on the loop eval) on the hard suite (11 × 2, noise 0.2, `stage_start: progress`, its loop yaml), to compare directly with V17d's 11/22 (V12-45) | V18b | `cmp/encoder_study/sim47/` (`vs_all/hard_suite.md`) | 11:00-11:23: **10/22** (over 4, slanted 4, under 4) vs V17d 11/22: same level, different starts (+ UR −30 mm 2/2, set3 gv_03 2/2; − set2 gv_06 0/2, UR +15 mm 1/2, nominal 1/2); grasp angles 0/8. The loop eval's 8 → 11/16 gain is not confirmed on the hard suite: within noise, the first refit traded starts |
+| V12-48 | sim | robot-motion oscillation (user observation): V18b on the hard suite with `action_noise_frac` 0 (the V12-37-derived hard-suite yaml injects 0.2 exploration noise into every executed command) vs 0 + `w_s` 1.0 (smoothness, incl. continuity with the last executed command; was 0.3). Measured on V12-47: commands change by 0.9-1.1× their size per step (demos 0.1-0.3), UR y reverses on 35 % of steps even without noise (demos 8 %), injected noise doubles UR x/z flips and EE second difference | V18b | `cmp/encoder_study/sim48/` (`vs_all/hard_suite.md`, oscillation in `chain.log`) | 11:42-12:30: **noise 0: 10/22** (= V12-47's 10/22 with noise 0.2; set2 gv_06 0 → 2/2, set3 gv_03 / UR −30 2 → 1/2); **noise 0 + w_s 1.0: 2/22** (slanted 9: smoothing damps the final corrections). Oscillation, noise 0.2 → 0: UR x/z sign flips 0.21/0.26 → 0.07/0.11, EE second difference F y/z 0.49/0.24 → 0.34/0.11 mm (demo-like); UR y keeps flipping (0.35) in every arm, incl. w_s 1.0 (0.34): a near-null latent direction, not a smoothing problem. Decision: noise 0 for evaluation (smoother, same success); keep w_s 0.3 |
+| V12-49 | code + offline + sim | multi-step LCS loss for the belt model (user request): rollout ẑ_{t+j+1} = LCS(ẑ_{t+j}, recorded u_{t+j}) from ẑ_t = enc(o_t) with the training PGD; multi-step violation (dynamics vs the encoded recorded states + LCP terms at each step, γ^j, steps 1..K−1) up to K = 24 + a multi-step Sinkhorn reconstruction anchor at j = 1, 3, 7, 24; T1, V17d's recipe, 3 seeds × K 7 / 24; baseline = V17d at noise 0 on the hard suite | V19… | `cmp/encoder_study/sim49/` (baseline), trainer flags `--belt-ms-*` | from 12:50. Baseline: **V17d at noise 0: 9/22** (13:24-14:05; vs 11/22 at noise 0.2 in V12-45, V18b 10/22 at noise 0): within noise the T1 models sit at 9-11/22. Code done (`--belt-ms-*`, `--lcs-symmetric-f`, contact-mode statistic, 28/28 checks). Multi-step horizon ≤ 7 (user; K 24 also has too few windows in T1: MILES segments are 24 frames). Training from 14:40 (T1, seeds 4/5/6): B = J 0; E7 = K 7 + recon 1,3,7 (J learned); E7s = both. Next: C = J learned + L4DC eq.-9 violation + eq.-7 full-F forward solver; D = C + K 7 (code in progress) |
+| V12-50 | sim | closed loop for the V12-49 candidates that MPPI simulates exactly (J 0): V19a = B seed 6 (most accurate: held-out 2.99 / 4.26 mm, off-demo 9.06 / 10.07), V19c = B seed 5 (3 contact modes); noise 0, progress start, H 24; vs V17d 9/22 (V12-49 baseline). C models (J learned) are excluded until MPPI runs the full-LCP solver: C seed 6's export fails E3 (MPPI's 25-iteration symmetric PGD vs the trained full-LCP step 0.025-0.044) | V19a, V19c | `cmp/encoder_study/sim50/` | 17:03-18:05: **V19c (B seed 5, J 0, 3 contact modes) 11/22** (best at noise 0; nominal 2/2, UR −30 2/2, UR +15 2/2, set3 gv_03 2/2), **V19a (B seed 6, most accurate offline) 7/22**; vs V17d 9/22, V18b 10/22 at noise 0. The offline-best seed again did not win; the multi-mode seed did. Grasp angles 0/8 for both |
+| V12-51 | code + offline + sim | JEPA-style training (user): no reconstruction, no decoded next state, no aux head; LCS as the predictor with multi-step latent prediction (K ≤ 7, γ^k) against an EMA target encoder (stop-gradient) + LCP terms, SIGReg anti-collapse; decoder fitted afterwards on the frozen encoder (viewer / scoring only). Arms JP0 (J 0) and JPq (J learned, violation-QP loss, full-LCP forward), 3 seeds each on T1 | V20… | lcs_learning `outputs/sim_belt_v12_20261006/v12_51/` | code done (`--jepa`, `--jepa-horizon/-gamma/-ema-tau`, `--sigreg-weight/-projections`, `--jepa-decoder-epochs`; `scripts/check_jepa.py` all pass, defaults bit-identical). Single-stage K 7 from scratch collapses on T1 (effective rank 1.004 / 10 after 60 epochs; SIGReg up to weight 50 does not stop it); K 1 for 20 epochs then warm K 7 keeps rank 8 → two-stage recipe. Caution from the probes: latent prediction is no better than predicting no change (whitened k 1 0.46 vs hold 0.41, k 7 1.83 vs 1.84). Training queued after V12-50: JP0 seeds 4/5/6 (J 0, ~17 min each), JPq seed 4 (J learned, ~95 min) |
+| V12-52 | code + offline + sim | JEPA with the V10 graph stress loss instead of SIGReg (user): obstacle-aware graph rebuilt on T1's segmented camera clouds (Sinkhorn/OT matching for the blend, pulley SDF on cloud points, robust clearance and edge-length quantiles, duplicate edges removed — V10's graph.py summed them), stress + far terms on the latent (1 unit = 50 mm of legal motion); arm JPG (J 0, two-stage) 3 seeds | V21… | lcs_learning `outputs/sim_belt_v12_20261006/v12_52/` (graphs `graphs/t1_s3.npz`, `t2_s16.npz`) | code done (`scripts/build_cloud_graph.py`, `lcs_learning/graph_latent.py`, trainer/refit `--graph-*`; `check_graph_reg.py` 27/27, defaults bit-identical; builder on GT centrelines = graph.py exactly; the dedupe fix changes V10-style D by median 12.8 %). Cloud graphs: T1 3,016 nodes, T2 7,407; one component each; only 0.2-0.3 % of candidates rejected; cloud test catches 30-38 % of GT-blocked candidates; D vs GT-graph D Pearson 0.96 (T1) / 0.90 (T2); straight moves blocked 11 % (T1) / 28 % (T2) of node-landmark pairs, which then take 3.1-3.5 × vs 2.3-2.4 × the straight distance: weak but real obstacle signal. Training from 19:05 on the T1 graph, W 1: JPG (JEPA + graph, SIGReg off, J 0, two-stage) and BG (today's recipe, J 0, + graph), seeds 4/5/6 |
+| V12-53 | sim | JEPA model in closed loop (user): V20a = V12-51 JP0 seed 6 (SIGReg JEPA, J 0, post-hoc decoder; best JEPA seed offline but off-demo one-step 11.96 mm vs B 9.4); hard suite 11 × 2, noise 0, progress start, vs V19c 11/22 / V17d 9/22. JPq (J learned) stopped at stage 2 to free the GPU (MPPI cannot run full_lcp yet). Cache-reproducibility tolerance made opt-in configurable (`LCS_CACHE_REPRO_TOL_REL`, default unchanged) because unit-scale JEPA latents exceed the 1e-6 relative float32 check | V20a | `cmp/encoder_study/sim53/` (`vs_all/hard_suite.md`) | 18:25-18:58: **0/22** (over 17, under 4, other 1), every start including nominal and UR +15 mm; the belt is swept while still 10.7 mm above the groove (median h at Franka y 45 mm, vs 1.7 for V19c). Response probe: Franka +x toward the seat at 86 % of states (as V17c, 0/22), but V19c (11/22) shows similar +x and stronger +y, so the probe does not separate them. **SIGReg JEPA does not work at this data scale** (offline off-demo 12-13 mm vs 9.4, weaker action readout, closed loop 0/22) |
+| V12-54 | sim | graph-regularised models in closed loop: V21a = V12-52 JPG seed 6 (JEPA + graph stress, SIGReg off, J 0; held-out 3.29 / 4.48 mm but off-demo 12.30 / 13.11) and V21b = BG seed 6 (reconstruction recipe + graph stress, J 0; held-out 3.12 / 4.23, off-demo 9.21 / 10.15, hard-suite rollouts 10.88 / 11.56 — the best BG seed; BG mean off-demo 10.7 vs B 9.4, action R² 0.13-0.15 vs 0.21); hard suite 11 × 2, noise 0, vs V19c 11/22 | V21a, V21b | `cmp/encoder_study/sim54/` (`vs_all/hard_suite.md`) | 19:30-20:20: **V21a (JEPA + graph, no reconstruction) 11/22** = the best (ties V19c; nominal 2/2, UR −30 2/2, UR +15 2/2, set3 gv_03 2/2), sweep starts with the belt 2.8 mm up (V19c 1.7). **V21b (reconstruction + graph) 0/22**, over 18, sweep with the belt 9.9 mm up, like SIGReg JEPA (V20a 0/22, 10.7 mm). Replacing SIGReg by the graph stress turns JEPA from 0/22 into 11/22 (one seed); adding the graph to the reconstruction recipe breaks it although its offline errors equal B seed 6's. Offline prediction error again does not rank closed-loop results |
+| V12-55 | sim | seed robustness of JEPA + graph: V21c = JPG seed 4, V21d = JPG seed 5; hard suite 11 × 2, noise 0, vs V21a (seed 6) 11/22 | V21c, V21d | `cmp/encoder_study/sim55/` (`vs_all/hard_suite.md`) | 20:30-21:22: **JPG seed 4 11/22, seed 5 5/22** (seed 6 11/22 in V12-54): JEPA + graph mean 9.0 / 22 over 3 seeds vs SIGReg JEPA 0/22 and reconstruction B seeds 4-6 (offline-chosen 5 and 6) 11 and 7 /22; seed 5 was also the weakest offline (held-out 4.39 / 5.54). Seed 4 starts the sweep with the belt fully down (median h 0.0 mm at Franka y 45). Grasp angles 0/8 for every seed |
+| V12-56 | offline + sim | JEPA + graph on tier T2 (T1 + V12-35/36 on-policy, 150 min robot) with the T2 cloud graph (2.5× more lip-blocked pairs): JPG2 seeds 4 and 6, two-stage, J 0, SIGReg off; then offline scoring and the hard suite vs the T1 JPG seeds (11/22) | V23a (s4), V23b (s6) | lcs_learning `outputs/sim_belt_v12_20261006/v12_56/`; offline `cmp/encoder_study/v12_56_eval_s4/`; sim `cmp/encoder_study/sim56/` | seed 4 (stage 2 cut to 5 epochs: 174 s/epoch at the first attempt): offline one-step / H7 Chamfer **5.37 / 5.59 mm off-demo, 8.22 / 8.48 hard-suite rollouts** vs T1 JPG seed 4 12.69 / 15.68 and 13.76 / 16.15; action R² unchanged (k5 0.39 / 0.18). Seed 6: 6.23 / 6.33 and 8.48 / 8.63. **Hard suite (noise 0, 22:21-23:13): V23a 1/22 (over 11, slanted 6, under 4), V23b 1/22 (over 13, under 4, slanted 2, other 2)** vs T1 JPG seeds 4 and 6 11/22: halving the offline error broke the closed loop. Sweep starts with the belt up (median h at Franka y 45: 7.2 / 5.5 mm vs 0.0 / 2.8 for the T1 seeds; V21b 9.9 at 0/22); h at the sweep ranks closed-loop success across all six JEPA arms, offline Chamfer does not. Seeding V12-57 stays on T1 JPG seed 4 |
+| V12-57 | loop (prep) | Jin & Posa loop seeded by JPG seed 4 (V21c, 11/22) with the JEPA latent loss in the refits, the cloud graph rebuilt from each iteration's buffer (on-policy failures add lip-blocked states), and keep-best deployment (every refit trained and kept; the best model by eval is deployed) | V22… | `cmp/v12_57/`, config `cmp/configs/v12_57.yaml` | config final: joint refits from the seed (JEPA K=7 + graph inherited from the checkpoint, 30 epochs, no on-policy frame weights), graph rebuilt each iteration (`--knn-coarse 64`), keep-best with min_gain 1 (a candidate must engage ≥ 1 more of 22); launched 23:11; iteration 0: V22a 12/22 (no J&P iteration yet; 12/14 without the grasp-angle starts). **Iteration 1: V22b 2/22** (over 18: nominal, ur_z±, set3 gv_03 all over; keep-best kept V22a). Cause (offline, `v12_57` deploys): not the graph (rebuilt graph = T1 graph on the T1 nodes, distance-to-goal corr 0.999; the 5 new on-policy episodes end 97-237 mm from the goal) but where the refit puts seated belts: V22a's 12 engaged final clouds are 1.99 (whitened) from the nearest demo final in V22a's latent and 5.47 in V22b's, its over finals 2.29 / 4.47 (over closer than seated in V22b). The only seated training states are the 3 demo finals + MILES rest frames, so the place of MPPI-seated belts in the latent is unconstrained and moves between trainings (also the seed spread 11 / 11 / 5 and the T2 collapse); with anchor 0.7 the 5 on-policy failure episodes carry 30 % of the refit's frames. Paused after iteration 1 for V12-58 |
+| V12-58 | data (sim) + offline + sim | grasp-angle coverage (user request): new UR grasp-angle starts ±15° / ±25° (`start_states/ur_pivot_train`; the hard suite keeps ±20° / ±30° for eval), scripted demos (the teleop stand-in: nominal place, then a UR place-offset grid dz / tilt = the operator adapting; one success per angle), MILES around them (V12-29b settings), tier T1ga = T1 + these; V22a's recipe (JPG two-stage, J 0, SIGReg off, graph rebuilt on T1ga) seeds 4 / 6; hard suite noise 0 vs V22a 12/22 (grasp angles 0/8). V12-57 paused after iteration 1 for the GPU, resumed at the end | V24a (s4), V24b (s6) | `cmp/v12_58/` (`night3.sh`, `night.status`, `probe_*`), sim `cmp/encoder_study/sim58/` | starts ±15/±25 made 00:50 (all held). Nominal scripted place fails at every angle (negative: over, h +11..+17 mm, roll−; positive: under, h −18..−19 mm, roll+; the fallback offset too). Per-angle grid (2 demos per setting, UR tilt opposite to the grasp angle): **up−15 UR +1.5 mm / +14° 2/2, up+15 +1.5 / −14° 2/2, up−25 +1.5 / +26° 1/2 (Franka-down offsets, +3 mm UR and ≤ +20° all over), up+25 +1.5 / −32° 2/2** (−8..−26° under, h −19 → −12 mm): the operator's compensating tilt ≈ −1.0 to −1.3 × the grasp angle. 01:20 MILES on the 4 picked demos (16 min, 499 segments); T1ga = 352 + 4 demos + 499 MILES (graph 7178 nodes, one component). **Hard suite (02:02-02:53): V24a 0/22 (over 17, outside 3, other 2), V24b 2/22 (engaged 2 = up+30 2/2, the first grasp-angle seat without a demo prior; up+20 slanted 2/2 instead of under; every other start over)**. Same collapse as T2 / V22b: in V24a's latent V22a's seated finals are 3.62 from the demo finals and V24a's own over / outside finals 2.05-2.25; in V24b 1.71 vs 2.39 (MPPI settles in over) |
+| V12-59 | sim | EE data-support MPPI cost (`MppiParams.ee_support`, opt-in: weight × Σ_k relu((d_k − 35 mm)/10 mm)², d_k = 6-D NN distance of the planned Franka + UR positions to V21c's training EE positions, pulley frame; replay on set2 gv_00 r1 slows then reverses the +x drive, `cmp/latent_support/README.md`) on V21c: weights 1 and 10, hard suite noise 0 vs V21c 11/22 | V21c_n0_ees1, V21c_n0_ees10 | `cmp/encoder_study/sim59/` (`chain.sh`); re-run `sim59b/` | 02:54-03:25, **invalid**: every finished episode over (10/10 starts done incl. V21c's 2/2 starts) because the term's NN (cdist direct-difference mode) made MPPI solves 757 ms (median) vs 17 ms, so the arms acted on 3 Hz plans; logged EE distances were sane (0-32 mm). Stopped; `nn_dist` now a centred float32 matmul expansion (2.7 ms per call on the GPU, 2e-4 mm from fp64; `check_latent_support.py` 9/9 with chunk tolerances 1e-4 / 1e-3 mm). **V12-59b** (07:0x-07:48, fast NN, solves 39 ms median vs 18 without the term): **ees1 12/22, ees10 12/22** vs V21c 11/22 and V22a 12/22: no measurable gain; grasp-angle starts unchanged (up+ under, up− over). Not adopted |
+| V12-60 | offline + sim | label-aware goal margin (new opt-in loss, lcs_learning `goal_margin.py`, `--goal-margin-weight/-margin/-pull-radius/-last-n`): last 13 frames of every task attempt labelled success by the human label (+ demo finals) = SEATED, of every failed attempt = FAILED (MILES excluded; sim GT never used); pull SEATED within 0.3 latent units of other attempts' seated frames, push FAILED ≥ 1.0 (≈ 50 mm with the graph scale) from them. T2 has 36 seated / 174 failed attempts. T2 JPG2 (V12-56's recipe, collapsed to 1/22) + goal margin W 1, M 1.0, seeds 4 / 6; hard suite noise 0 | V25a (s4), V25b (s6) | `cmp/v12_60/` (`chain.sh`), sim `cmp/encoder_study/sim60/` | training from 03:26 (V12-57 iteration 2 stopped at its start, stays paused). **W 1 / M 1.0 collapses the latent**: stage 1 seed 4 val eff rank 1.0-1.2 (6.0 without the term), graph Spearman 0.39 (0.98), val graph stress 11 → 157 (0.03), held-out push violation still 42 %; the baseline latent is ~0.44 per dim, so M 1.0 (≈ 50 mm) is far beyond the over / seated gap. Stopped 03:37; restart (`chain2.sh`): stage-1 sweep (W, M) ∈ (0.1, 0.3), (0.3, 0.3), (0.1, 0.6), pick = lowest held-out violation with eff rank ≥ 4.5 and Spearman ≥ 0.95, then stage 2 + seed 6 + hard suite; V12-61 uses the same pick. Sweep (stage 1 seed 4, val, epoch 20; baseline eff rank 5.98, Spearman 0.982): W 0.1 / M 0.3 rank 3.90, Spearman 0.969, push violation 0, sep 5.8; W 0.3 / M 0.3 4.04 / 0.961 / 0 / 5.3; W 0.1 / M 0.6 1.56 / 0.925 / 0.07 / 5.6. None reached rank 4.5; continued with **W 0.1 / M 0.3** (the T1 JPG models that seated 11/22 had rank ~3) from 04:12. **Hard suite (04:37-05:26): V25a 6/22 (engaged 6, slanted 6, over 5, under 5), V25b 1/22 (slanted 12)** vs the same recipe without the term V23a/b 1/22 each (over 11-13): the term moves T2's failures from over to slanted and lifts seed 4 from 1 to 6; still below T1 JPG (11/22) |
+| V12-61 | offline + sim | V22a's recipe + goal margin (V12-60's sweep pick) on T1ga_f = T1ga + every V12-58 probe demo (42 more: 39 failed operator attempts at the ±15/±25 starts = the FAILED set, 3 more successes); graph rebuilt on T1ga_f; seeds 4 / 6; hard suite noise 0 vs V24a/b | V26a (s4), V26b (s6) | `cmp/v12_61/` (`chain3.sh`), sim `cmp/encoder_study/sim61/` | goal margin W 0.1 / M 0.3 (V12-60's pick). Hard suite 06:1x-06:55: **V26b 16/22 — best so far** (both repeats of nominal, set2 gv_00, set3 gv_02, set3 gv_03, ur_z+15, ur_z−30, **up+20 and up+30**; set2 gv_06 other 2/2; up−20 / up−30 over 2/2; 12/14 on the non-angle starts = V22a, + 4/4 positive grasp angles; median h at the sweep −0.7 mm). **V26a 0/22** (over 17, other 4): the seed lottery remains (V12-55: JPG seeds 11 / 11 / 5). Negative grasp angles still fail for every model |
 
 ## 1. Goal
 
@@ -127,6 +163,15 @@ stage-indexed demo actions as the MPPI mean / cost) counts as cheating and fails
 initial conditions; from V12-37 on it is off, and earlier prior-on results are historical. **No simulation pretraining (user, 2026-10-08):** the sim stands in for the real system, so no component (encoder included) is pretrained on extra sim data; every sim frame counts as real budget. External models pretrained on public data are allowed. Clean clouds (`--cloud-noise off`, segmentation on). Private LCM
 ports >= 7780; one sim at a time; new data dirs only (`data/lcs/realfirst/cmp/`,
 `data/lcs/mpc_eval/20261006_cmp_*`, lcs_learning `outputs/sim_belt_v12_20261006/`); commits only when the user asks.
+
+**Aux head (in every belt-cloud model since V11-01, `+aux` in the model tags; made explicit 2026-10-08).**
+The belt-cloud encoder trains a small aux head on the latent, weight 0.1 (L1), whose targets are hand-designed
+geometric features of the segmented belt cloud relative to the known large pulley
+(`src/task_common/belt_cloud_features.py`, stored as `sim_cloud_h_mm` / `sim_cloud_wrap_deg` / `sim_cloud_r_mm`):
+median height of the belt over the groove seat plane h (h/50), wrap arc (sin, cos) and radial offset r
+((r − 47)/10). They are real-available (camera cloud + known pulley pose) and used only as training
+supervision, not in the MPC cost or state, but they inject task knowledge (the success measures h and wrap)
+into the latent. Refit default `aux_feature_weight: 0.1` (no CLI flag yet). Ablation pending.
 
 ## 3. Baseline: V11-01 and V11-02
 
@@ -1901,7 +1946,239 @@ Encoder options discussed with the user (2026-10-07/08), for the next study:
 - in the loop, keep the encoder learning from on-policy data (warm start, small learning rate,
   anchored old frames) so it improves where the controller goes.
 
+### V12-42 encoder study (2026-10-08 00:50-, `cmp/encoder_study/`, GPU trainings, CPU scoring)
+
+Question: which encoder recipe represents the belt best off the demos, for the least real data?
+Simulation pretraining is excluded (the sim is the real system).
+
+Setup:
+- Code: lcs_learning trainer options `--pc-aug*` (resample from the raw segmented cloud, occlusion
+  ball, dropout, 1 mm noise; training inputs only), `--act-recon-weight/--act-recon-steps`
+  (Delta-JEPA head: MLP from Δz_k = enc(o_{t+k}) − enc(o_t) to the k executed actions, k 1 and 5,
+  train-only, not exported), `--model belt_cloud_pointmae` (Point-MAE, official ShapeNet
+  `pretrain.pth`, N 256 / G 32 / M 16; deploy = torch encoder in the node, ~2.5-6 ms per frame).
+  Checks: `check_act_head_aug.py` 18/18 (defaults bit-identical), `check_pointmae_integration.py` 8/8.
+- Tiers (`scripts/lcs/encoder_tiers.py`, `encoder_study/tiers/`): T0 3 demos (601 frames, 45 s robot),
+  T1 + V12-29b MILES (9,022 frames, 11.4 min, = V12-35's seed), T2 + V12-35/36 on-policy (113k
+  frames, 150 min). No all-data tier (user).
+- Scoring (`scripts/lcs/encoder_eval.py`): E_off = V12-25's 87 off-demo rollouts, E_hs = 176 no-prior
+  hard-suite rollouts (V12-37/39/40); disjoint from every tier. One-step / 7-step / recon Chamfer
+  RMS, probes, action response, ridge action decodability from Δz.
+- Trainings: V12-35 seed recipe (fresh joint, 60 epochs, latent 10, Sinkhorn, lr 3e-4), frozen code
+  copies (`outputs/sim_belt_v12_20261006/v12_42/code_snapshot_*`), ~4.5 min each (PointNet).
+
+T1 results (one-step mm off-demo / hard suite; action decodability R² k=1 Franka / UR):
+
+| arm | E_off | E_hs | R² k=1 |
+|---|---|---|---|
+| E0 today's recipe, seed 4 / 5 | 9.18 / 10.41 | 11.34 / 11.49 | 0.19 / 0.07 |
+| V15a (V12-35's seed model) | 9.18 | 11.25 | 0.21 / 0.08 |
+| E1 + augmentation | 8.35 | 10.04 | 0.21 / 0.09 |
+| E2 aug + action head λ 0.1 | **8.03** | **9.99** | **0.33 / 0.12** |
+| E2 aug + action head λ 1 | 11.02 | 11.95 | 0.32 / 0.11 |
+| E2 aug + action head λ 10 | 11.19 (7-step 250) | 12.86 | 0.34 / 0.11 |
+| E2 action head λ 1, no aug | 12.28 | 13.18 | 0.33 / 0.12 |
+| E4 Point-MAE frozen | 17.69 | 18.49 | 0.00 / 0.00 |
+| E4 Point-MAE, last 2 blocks fine-tuned | 18.61 | 18.88 | 0.00 / 0.00 |
+| E4 Point-MAE absolute scale, last 2 blocks | 15.28 | 15.56 | 0.06 / 0.02 |
+| E4 Point-MAE absolute scale, all fine-tuned | 14.37 | 14.50 | 0.02 / 0.01 |
+
+- Augmentation: −10-15 % on both sets. The action head at λ 0.1 adds a little and makes the
+  Franka action readable from Δz (R² 0.19 → 0.33); the UR stays weak (≈ 0 in the seat phase).
+  λ ≥ 1 shrinks the LCS's action response 5-10× and hurts prediction.
+- Seed-to-seed spread of the same recipe is ~1.2 mm, as large as the arm differences: replicates
+  queued (E0 s6, E1 s5/s6, E2 λ 0.1 s5/s6, λ 0.03, latent 32 ± head).
+- Point-MAE underfits (train recon 7.9 vs 5.9 mm, latent std ~1/3 of PointNet's): ShapeNet features
+  with per-cloud normalisation do not carry mm-level belt geometry. Follow-up with absolute-scale
+  input (`--pm-norm fixed`): last 2 blocks fine-tuned held-out recon 5.8 mm, E_off 15.3 / E_hs 15.6;
+  whole network fine-tuned held-out 3.8 mm (near PointNet's 3.2) but E_off 14.4 / E_hs 14.5 and
+  action R² ≈ 0. With 22M parameters on 9k frames it fits the demo neighbourhood and generalises
+  worse than the small PointNet: **Point-MAE dropped** for this data scale.
+- Latent 32 (aug + head λ 0.1, 3 seeds): E_off 7.86 ± 0.28, E_hs 9.87 ± 0.28 vs latent 10's 8.05 ± 0.40 /
+  9.83 ± 0.21: no clear gain, so latent 10 is kept (smaller C3+ problem).
+- 3-seed summary (`encoder_study/t1_summary.md`): E0 9.52 ± 0.77 / 11.51 ± 0.17, E1 aug 8.96 ± 0.56 /
+  10.70 ± 0.68, E2 aug + head λ 0.1 **8.05 ± 0.40 / 9.83 ± 0.21** (−15 % on both sets).
+- V12-43 (sim) started 02:57: V17a = E0 seed 4 vs V17b = E2 λ 0.1 seed 4 (the median seed of each).
+  Then T0 / T2 trainings of both recipes for the learning curve.
+- **Learning curve (today's recipe E0, seed 4; one-step mm E_off / E_hs, `encoder_study/t02_eval/`):**
+  T0 (3 demos, 45 s robot) 16.32 / 16.01 (7-step 38 / 47: unstable); T1 (+ MILES, 11 min) 9.18 /
+  11.34 (3-seed mean 9.52 / 11.51); T2 (+ V12-35/36 on-policy, 150 min) **4.21 / 6.53** (7-step 4.49 /
+  6.99). Coverage of the states the controller visits halves the error; T2's on-policy rollouts
+  start from the same hard-suite starts as the eval sets (other episodes), so part of the gain is
+  in-distribution. E2 on T0: 15.78 / 15.74 (no gain); E2 on T2 was stopped (closed loop already lost).
+- The +y probe varies strongly with the seed (E0: 92 % vs 60 % "worse" from over states); E2 λ 0.1
+  rates +y as improving everywhere (0 %), a risk for the sweep runaway in closed loop.
+
+### V12-43 diagnosis: why V17b goes "over" (03:20, offline on the first 4 starts; scripts and outputs `encoder_study/sim/diag/`)
+
+Episodes: V17a 9 (4 engaged, 4 over, 1 slanted), V17b 8 (all over).
+- **Mode 1 (both models): stage 0 never reached → sweep with the UR high.** Waypoints 0 and 1 (demo
+  frames 10, 20) are the demo's static start. From a start outside the frame-10 tol, MPPI spends two
+  3 s timeouts on it while commanding Franka +y 1.3-1.9 mm/step (Franka y +45 mm at 1.2-2.0 s with
+  UR z 72-95 mm; the demo sweeps at frame 33 with the UR down); the belt ends over (h 30-33 mm).
+  The LCS drifts under zero input from static states (24 steps: V17a 2.7, V17b 4.75 whitened), and
+  every constant input moves away from waypoint 0, +y least: sweeping is the least-bad option (as
+  V12-31). V17b: 6/8 episodes (median start distance / frame-10 tol ≈ 2.0); V17a 3/9 (≈ 1.0).
+- **Mode 2 (V17b only): no −y dip before the latch.** In V17b a one-step Franka +y input points
+  toward the seated goal at 100 % of 476 recorded states (median cosine +0.56; V17a 41 %, −0.04), and
+  −y is rated worse at the latch. MPPI skips the demo's −y dip (lowest Franka y −1..−2 vs V17a
+  −16..−20 mm, demo −32), misses the latch, and sweeps with the belt 7.5 mm up. Likely from the
+  action head: Δz must encode actions, and the dominant demo action is the +y sweep ending at the seat.
+- Waypoint tols did not declare stages early (V17b's wide frame-20 tol never triggered early).
+- Fixes ranked: (1) `stage_start: progress` (V12-31; config) → V12-44; (2) do not take the action
+  head to closed loop without a probe gate (+y "worse" from over states ≥ 50 % and the +y/seat
+  cosine positive at ≤ 60 % of states; E2 λ 0.1 fails both, E0 passes); (3) make the LCS hold under
+  zero input at static states (hold segments in the data, or a zero-input consistency loss).
+
+V12-44 (prepared 03:25, `cmp/encoder_study/sim44/`, port 7797, after V12-43): V17a and V17c (= T1 E1
+seed 4, point augmentation only; frame-10 tol 1.33) with `stage_start: progress`, otherwise the
+V12-43 yaml. Then T0 / T2 trainings of E0 and E2.
+
+### V12-44 diagnosis and a response-direction gate (04:10, offline; `encoder_study/sim44/diag/`)
+
+- `stage_start: progress` removed mode 1 in both arms: no stage-0/1 timeouts; Franka y reaches 45 mm
+  at 3.9-8.4 s with the UR at 35-46 mm (V12-43 mode-1 episodes: 1.2-2.0 s, UR 72-95 mm).
+- V17c (augmentation only) fails in a new mode 3: the belt is down (h 1.4-3.5 mm at sweep onset),
+  then the sweep lifts it out (h 7-11 mm within 0.4-0.8 s) because MPPI never pulls Franka −x
+  (V17c 0..+5 mm vs V17a −7..−10 mm from sweep onset to max y). Its LCS rates Franka +x as toward the
+  seat at 86 % of 1719 recorded closed-loop states (median cosine +0.47; V17a +0.10, V12h −0.46).
+- **Response-direction gate** (`sim44/diag/gate.py`, `gate_t1.py`): median cosine of the one-step
+  whitened response to Franka +x / +y (1 mm) with the direction to the seated goal, over recorded
+  closed-loop states; pass if both ≤ 0.3. Over the five sim-tested models it orders the closed-loop
+  results (V12h −0.47/−0.14, V17a +0.10/+0.01 pass; V16b +0.43, V17c +0.47, V17b +0.70/+0.52 fail).
+  Threshold set after seeing results, n = 5. Offline prediction error and zero-input drift did not
+  predict closed loop (V17c beat V17a on both).
+- Over all 17 T1 PointNet models the gate varies with the seed, not only the recipe: E0 2/3 pass
+  (s4, s6; s5 fails F+x +0.34), E1 aug 1/3, E2 aug + head λ 0.1 0/3, latent 32 + head 0/3, latent 32
+  aug 1/1. Augmentation and the action head make a +x / +y "toward the seat" geometry more likely.
+- V12-45 (queued after V12-44): validates the gate within one recipe: V17d = E0 seed 6 (pass) vs
+  V17e = E0 seed 5 (fail), both with `stage_start: progress`, hard suite 11 × 2. Then T0 / T2 trainings.
+
+### V12-43 to V12-45 readout (2026-10-08 05:25)
+
+Hard suite (11 starts × 2, no demo prior, MPPI H 24, data-support box, models trained on T1 = 3 demos
++ 12 min of MILES only):
+
+| model | recipe / seed | response gate | V12-43 (static start) | with `stage_start: progress` |
+|---|---|---|---|---|
+| V17a | E0 seed 4 | pass | 8/22 | 7/22 (V12-44) |
+| V17d | E0 seed 6 | pass | - | **11/22** (V12-45) |
+| V17e | E0 seed 5 | fail (F+x +0.34) | - | 9/22 (V12-45) |
+| V17b | E2 aug + head λ 0.1, seed 4 | fail | 1/22 | - |
+| V17c | E1 aug, seed 4 | fail | - | 0/22 (V12-44) |
+| V12h (V12-37) | 20 demos + OU, 2 loop iterations | pass | 7/22 | - |
+
+- **3 demos + 12 min of MILES are enough** for the no-prior hard-suite level of the 20-demo model
+  (7-11/22 vs 7/22): the real-data cost of a working seed is small.
+- **Offline prediction error does not choose the controller model.** Augmentation and the action
+  head cut off-demo error 10-15 % but give 0-1/22: they change the LCS's action-response geometry
+  (Franka +x / +y "toward the seat" at 85-100 % of states), and MPPI exploits it.
+- **Seed variance is large within one recipe** (7, 9, 11/22): the same data and recipe give different
+  action geometries. The response-direction gate flags the broken recipes but does not rank good
+  seeds. Practical rule for now: train a few seeds, reject gate failures, pick by a short closed-loop
+  check (on hardware: a handful of rollouts per candidate), then run the Jin & Posa loop from it.
+- **Unsolved starts:** every grasp-angle start (±20°, ±30°) fails for every no-prior model (over at
+  −20/−30°, under at +20/+30°); the T1 demos have no such grasp, so these are out of the model's data.
+  This is where on-policy data (the J&P loop) has to add coverage.
+- `stage_start: progress` removes the early high sweep (mode 1) without a net gain for V17a; kept on
+  for V12-45. Point-MAE (ShapeNet) is dropped at this data scale.
+
+### V12-46 readout (2026-10-08 09:20, `cmp/v12_46/learning_curve.md`)
+
+| iter | model | collect start | collect | eval /16 |
+|---|---|---|---|---|
+| 0 | V18a = V17d | set2 gv_00 | 5/5 | 8 |
+| 1 | V18b | set2 gv_06 | 5/5 | **11** |
+| 2 | V18c | set3 gv_02 | 5/5 | - |
+| 3 | V18d | set3 gv_03 | 4/5 | **11** |
+| 4 | V18e | UR −30 mm | 3/5 | - |
+| 5 | V18f | UR +15 mm | 5/5 | 5 |
+| 6 | V18g | grasp −30° | 0/5 | - |
+| 7 | V18h | grasp −20° | 0/5 | 10 |
+| 8 | V18i | grasp +20° | 1/5 | - |
+| 9 | V18j | grasp +30° | 2/5 | 5 |
+
+- **On-policy refits help when the new data is near what the model can already do:** one refit on
+  5 rollouts from a start the model already seats lifts the eval from 8 to 11/16 (nominal and UR
+  −30 mm seat for the first time without a prior) and it holds at iteration 3.
+- **Far-off failures hurt the shared model:** after rollouts from starts it cannot solve (UR −30 mm
+  slants, grasp angles over), the from-seed LCS-only refit degrades the solved starts (5/16 at
+  iterations 5 and 9, mostly slanted). Same pattern as V12-36. Collecting on the grasp angles
+  gave the first grasp-angle seats in collection (+20° 1/5, +30° 2/5), but not in eval.
+- Evals are one episode per start, no action noise: ±2 is within noise; 11 vs 5 is not.
+- Next to try: (1) keep the best model for deployment and evaluation (the loop deploys the latest),
+  while still training on every rollout (user rule: never discard data); (2) curriculum over the
+  rotation: stay on a start until it seats before moving on, so failures far from the model's
+  competence do not dominate a refit; (3) per-start or per-region weighting of failures (the
+  V12-36 off-track weight applies only after a tube exit); (4) joint (encoder) refits from T2-sized
+  data: the T2 learning curve (4.2 mm off-demo) shows the encoder improves a lot with on-policy data,
+  while LCS-only refits keep the T1 encoder.
+
+### LCS loss audit: torch_pgd_fixed vs the L4DC violation loss (2026-10-08, offline; `encoder_study/lcs_loss_cmp/`)
+
+User question: with CasADi's original violation-based loss (Jin et al. L4DC 2022, eq. 9) as ground truth, how good is
+the `torch_pgd_fixed` loss every V11-V18 model was trained with? Measured on V17d (n_λ 8) with 3000 tuples each from
+T1 and from its own hard-suite rollouts (sim45), plus a synthetic stress θ (V17d with c shifted so 1-7 constraints
+are active, real mode switches).
+- **V17d uses a single contact mode everywhere:** exactly λ₁ is active on all 6000 tuples (λ₁ ≈ 0.40 ± 0.04, smallest
+  inactive slack median 1.4): the complementarity does no switching, so the model is effectively affine. Here
+  torch and eq. 9 agree to machine precision (λ error 1.5e-7; gradient cosine 1.000 on every block, torch = 0.2 ×
+  eq. 9 from MSE vs ½‖·‖²).
+- **With real switching (stress θ) torch_pgd_fixed is wrong, and the cause is the dropped skew part:** PGD solves
+  LCP(F_pgd) while the slack uses F_lcp = F_pgd + J − Jᵀ (‖J−Jᵀ‖/‖F_pgd‖ = 0.61): λ off 40-55 %, 8-12 % mode
+  agreement, predictions shift 10-18× the true step, gradient cosine 0.59 vs eq. 9 with J pushed the opposite way and
+  E/H/G/J/c gradients 33-37× too large. 25 vs 500 PGD iterations changes nothing (cosine 0.592 → 0.588); the torch
+  loss form with exact-LCP λ matches eq. 9 (cosine 1.000). Hypothesis (untested): the mismatch penalty is smallest
+  in single-mode solutions, pushing training toward degenerate models like V17d.
+- Side finding: V17d's one-step latent residual exceeds the per-step latent motion (median ratio 1.13 T1, 1.90 sim45):
+  in latent space its one-step prediction is worse than "no change", although decoded clouds stay within ~5 mm
+  (the λ term is a near-constant offset 17-20× the step).
+- MPPI also uses F_pgd (consistent with training), C3+ uses F_lcp (inconsistent).
+- Fix options: drop J (symmetric F: PGD = exact LCP, training = MPPI = C3+), or solve the full LCP exactly
+  (n_λ 8: 256 active sets) with an active-set / implicit gradient, or train with eq. 9 (convex inner QP, envelope
+  gradient). Report the number of distinct active sets as a standard model metric.
+
+### Diagnosis: early prediction error in V21c set2 gv_00 repeat 1 ("over") (2026-10-08 23:40, offline; scripts `encoder_study/diag_gv00/`)
+
+Viewer frames are 20 ms, so frames 200-300 = 4-6 s. Comparison run: V21c nominal repeat 0 (engaged).
+
+| t (s) | 0 | 1 | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|---|---|
+| Franka x, pulley frame (mm) | 58 | 85 | 136 | 143 | 142 | 143 | 145 |
+| belt h (mm) (nominal) | 73 (72) | 58 (37) | 52 (19) | 50 (13) | 49 (8) | 48 (5) | 48 (3) |
+| belt cloud NN to training (mm) (nominal) | 9.9 (5.2) | 11.2 (8.8) | 19.5 (9.9) | 22.8 (8.8) | 27.1 (6.9) | 28.0 (7.7) | 28.1 (8.1) |
+| latent NN, whitened (nominal) | 0.63 (0.18) | 1.04 (0.52) | 2.03 (0.51) | 2.20 (0.86) | 2.76 (0.49) | 2.77 (0.60) | 2.75 (0.69) |
+| decoded vs GT belt (mm) (nominal) | 7.2 (3.2) | 9.9 (5.5) | 18.0 (6.5) | 25.2 (3.9) | 30.3 (4.2) | 32.1 (4.3) | 32.4 (4.6) |
+| k7 error / no change / zero action (mm) | 6.5 / 6.3 / 6.3 | 11.6 / 9.2 / 11.7 | 12.1 / 3.5 / 11.7 | 6.9 / 6.0 / 7.1 | 6.4 / 2.0 / 6.8 | 7.3 / 1.8 / 7.7 | 4.0 / 8.1 / 4.8 |
+
+Training reference: cloud NN between episodes median 5.5 mm (p90 7.2); latent NN spacing 0.17. Segmentation is fine (segmented vs GT 3.4 mm, as nominal). The reset jitter (dx -6, dy 7.5 mm, yaw 4.9 deg) starts the EEs 11-13 mm from the nominal start. In 0-2 s MPPI drives the Franka +85 mm along pulley x with the UR held high (z 53 vs 12 nominal at 3 s); the belt stays up (h ~50 mm). That joint state is outside the training data (the EE support box is per-axis, so each coordinate is still inside it), the encoder extrapolates (decoded belt 25-32 mm from the real one), and the LCS there is pure drift: the k7 error equals the zero-action rollout error and exceeds "no change". MPPI exploited the model on the way out: in 0-2 s the plans promised a goal-distance decrease of 0.14-0.25 per 7 steps and got an increase of 0.32-0.80 (nominal: promised 0.55, got 1.90). From 3 s the planner finds no downhill (promised < 0), barely moves (0.7 mm/step) and every stage times out. Screen over all 44 V21c / V22a hard-suite episodes (`diag_gv00/ood_screen.py`, max whitened NN distance of the encoded latent to V21c's training latents in the first 10 s): engaged 0.94-1.58; the non-angle "over" runs split into out-of-data (set2 gv_00 r1 3.15, set3 gv_02 r1 2.74 / 2.86) and in-data (set2 gv_06 1.25-1.40); every grasp-angle start is out of the data from t = 0 (up−20 1.6-1.9, up+20 3.0-3.2, up+30 3.2-3.4, up−30 3.9-4.0). A latent-support MPPI cost (`MppiParams.latent_support`, opt-in; `cmp/latent_support/README.md`) does not hold the state in the data on a CPU replay of this run: the LCS's predicted latents stay near the data while the real ones leave it, and where the term acts it speeds the +x drive. EE positions are propagated exactly, and their 6-D NN distance to the training EE positions (pulley frame) separates the out-of-data failures: engaged 17-34 mm, set2 gv_00 r1 61, set3 gv_02 r1 40, up−30 70 (set2 gv_06 33 either way); an `ee_support` term is being added. Remedy candidates: a data-support cost on the rollout latents (kNN distance to training latents, real-available) in place of or beside the per-axis EE box; on-policy data from these starts (the V12-57 loop collects them).
+
+### Diagnosis: viewer plans vs recorded belt in V26b up+30 r0 (2026-10-09, offline; `encoder_study/diag_v26b/`)
+
+Viewer: the planned belt (decoded MPPI knots) misses the recorded belt, while the LCS-accuracy chart reports < 2 mm (k 1) / 3.6 mm (k 7). No bug found:
+the recorded plans are exactly the LCS rollouts of the recorded inputs (DiagLcs vs `x_sol` knot 7: 0.000 whitened), knots are 75 ms apart like the solves, solve and episode utimes match exactly, and the
+world transform is not involved (the same errors in the pulley frame). The chart compares a decoded prediction with the decoded encoding of the later observation, so decoder error cancels; against the recorded belt:
+
+| median over the run (mm) | |
+|---|---|
+| decoded knot 0 vs recorded belt (decoder error now) | 13.3 |
+| planned end (knot 7) vs recorded belt 7 steps later | 14.6 |
+| planned end vs decoded observation 7 steps later (= chart k 7) | 3.65 |
+| recorded belt motion over 7 steps | 0.96 |
+
+The 13 mm is the JEPA latent + post-hoc decoder: decoded vs the observed segmented cloud is 2.7-2.8 mm on training episodes (seed demo, up+25 demo) but 9.7 (V26b nominal) and 13.6 (this run) on closed-loop episodes; along this run it is 3.3 mm at t 0, 11-17 mm from 0.8 s on.
+In the seated phase the latent is inside the data (whitened NN 0.66-0.87) yet the training cloud of the nearest latent is 13-14 mm from the observed cloud: the encoder maps these belts onto training states that differ by ~13 mm (JEPA does not ask the latent to keep that detail), so the decoder draws the training shape.
+The chart therefore measures the LCS's self-consistency in its own latent, not the accuracy of the drawn belts; the drawn planned / target belts are only as good as the decoder (here ~13 mm off).
+
 ## 8. Conclusions
+
+### Night of 2026-10-08/09 (V12-57 to V12-61)
+
+- **Best model: V26b 16/22** (V22a's JEPA + graph recipe + goal margin W 0.1 / M 0.3, seed 6, on T1ga_f = T1 + 4 grasp-angle demos (UR tilt ≈ −1.0 to −1.3 × the grasp angle) + their MILES + 39 failed operator attempts): 12/14 on the non-angle starts and the first positive-grasp-angle seats (up+20, up+30 2/2 each). Seed 4 of the same recipe: 0/22.
+- **Recurring collapse** (T2 1/22, V22b 2/22, V24a/b 0-2/22): adding data moves where the latent puts MPPI-seated belts, and "over" finals can end up nearer the seated goal than truly seated ones; nothing in training separated them. The label-aware goal margin (human success label, real-available) is the first fix that helps: T2 1 → 6/22 (seed 4), T1ga 0-2 → 16/22 (seed 6). At W 1 / M 1.0 it collapses the latent (rank 1).
+- **Seed variance is the open problem**: 16 vs 0 for seeds 6 / 4 of V12-61; offline metrics do not predict it.
+- EE data-support cost (V12-59b): no gain (12/22). Latent support cost: wrong direction in replay. Negative grasp angles: still over for every model.
+- V12-57 (J&P loop) is paused after iteration 1 (V22b 2/22, kept V22a); its refits need the goal margin and labelled on-policy attempts before resuming.
 
 ### Current (2026-10-08)
 

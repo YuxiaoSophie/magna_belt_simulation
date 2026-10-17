@@ -409,6 +409,56 @@ T1ga_f = T1ga + 42 more operator attempts (39 failed). Details: `docs/realfirst-
 | V25b | `v12_60/t2_gm/JPG2GM_s6` | JPG + goal margin W 0.1 / M 0.3 | T2 | 6 | 1/22 | V12-60 |
 | V26a | `v12_61/t1gaf_gm/JPGGM_s4` | JPG + goal margin W 0.1 / M 0.3, T1ga_f graph | T1ga_f | 4 | 0/22 | V12-61 |
 | **V26b** | `v12_61/t1gaf_gm/JPGGM_s6` | JPG + goal margin W 0.1 / M 0.3, T1ga_f graph | T1ga_f | 6 | **16/22** (best) | V12-61 |
+| V27a | `v12_62/t1gaf_gt_gm/JPGGM_s4` | V26 recipe on sim GT belt points (`pcd_belt_seg` := `pcd_belt`, pulley frame; diagnostic, not real-available) | T1ga_f GT twin | 4 | 0/22 | V12-62 |
+| V27b | `v12_62/t1gaf_gt_gm/JPGGM_s6` | as V27a | T1ga_f GT twin | 6 | 0/22 | V12-62 |
+| V28a | `v12_63/t1gaf_gt_gm16/JPGGM_s4` | V27 recipe (sim GT points), latent 16 | T1ga_f GT twin | 4 | 0/22 | V12-63 |
+| V28b | `v12_63/t1gaf_gt_gm16/JPGGM_s6` | V27 recipe (sim GT points), latent 16 | T1ga_f GT twin | 6 | 14/22 | V12-63 |
+| V29a | `v12_64/t1gaf_gm16/JPGGM_s4` | V26 recipe (camera seg), latent 16 | T1ga_f | 4 | 0/22 | V12-64 |
+| V29b | `v12_64/t1gaf_gm16/JPGGM_s6` | V26 recipe (camera seg), latent 16 | T1ga_f | 6 | 0/22 | V12-64 |
+| V30a | `v12_65/t1gaf_gt_gm25/JPGGM_s4` | V27 recipe (sim GT points), latent 25 | T1ga_f GT twin | 4 | 0/22 | V12-65 |
+| V30b | `v12_65/t1gaf_gt_gm25/JPGGM_s6` | V27 recipe (sim GT points), latent 25 | T1ga_f GT twin | 6 | 13/22 | V12-65 |
+| V31a | `v12_66/t1gaf_gm25/JPGGM_s4` | V26 recipe (camera seg), latent 25 | T1ga_f | 4 | 16/22 | V12-66 |
+| V31b | `v12_66/t1gaf_gm25/JPGGM_s6` | V26 recipe (camera seg), latent 25 | T1ga_f | 6 | 0/22 | V12-66 |
+| V32a | `v12_67/t1gaf_gt_gm5/JPGGM_s4` | V27 recipe (sim GT points), latent 5 | T1ga_f GT twin | 4 | 1/22 | V12-67 |
+| V32b | `v12_67/t1gaf_gt_gm5/JPGGM_s6` | V27 recipe (sim GT points), latent 5 | T1ga_f GT twin | 6 | 14/22 | V12-67 |
+| V33a | `v12_68/t1gaf_gm5/JPGGM_s4` | V26 recipe (camera seg), latent 5 | T1ga_f | 4 | 0/22 | V12-68 |
+| V33b | `v12_68/t1gaf_gm5/JPGGM_s6` | V26 recipe (camera seg), latent 5 | T1ga_f | 6 | 1/22 | V12-68 |
+| V34a | `v12_69/t1gaf_gm_ee/JPGGMEE_s4` | V26 recipe (camera seg, latent 10) + EE positions in the LCS (A_p/E_p, world-frame fold) | T1ga_f | 4 | 0/22 | V12-69 |
+| V34b | `v12_69/t1gaf_gm_ee/JPGGMEE_s6` | V26 recipe (camera seg, latent 10) + EE positions in the LCS (A_p/E_p, world-frame fold) | T1ga_f | 6 | 0/22 | V12-69 |
+| V34c | `v12_69/t1gaf_gm_ee/JPGGMEE_s5` | V26 recipe (camera seg, latent 10) + EE positions in the LCS (A_p/E_p, world-frame fold) | T1ga_f | 5 | 0/22 | V12-69 |
+| V35a | `v12_70/t1gaf_gm_sbp/JPGGMSBP_s4` | V26b recipe on V4a encoder inputs (scene cloud 1800 + 150 sim-GT belt points + 40-d state, latent 16); post-hoc decoder RMSE on GT belt points (diagnostic: GT input) | T1ga_f | 4 | 0/22 | V12-70 |
+| V35b | `v12_70/t1gaf_gm_sbp/JPGGMSBP_s6` | V26b recipe on V4a encoder inputs (scene cloud 1800 + 150 sim-GT belt points + 40-d state, latent 16); post-hoc decoder RMSE on GT belt points (diagnostic: GT input) | T1ga_f | 6 | 1/22 | V12-70 |
+| V35c | `v12_70/t1gaf_gm_sbp/JPGGMSBP_s5` | V26b recipe on V4a encoder inputs (scene cloud 1800 + 150 sim-GT belt points + 40-d state, latent 16); post-hoc decoder RMSE on GT belt points (diagnostic: GT input) | T1ga_f | 5 | 0/22 | V12-70 |
+| V36a | `v12_71/t1gaftr_gm/JPGGMTR_s4` | V26b recipe on T1ga_f_tr (demos cut 30 frames after 'done') | T1ga_f_tr | 4 | 0/22 | V12-71 |
+| V36b | `v12_71/t1gaftr_gm/JPGGMTR_s6` | V26b recipe on T1ga_f_tr (demos cut 30 frames after 'done') | T1ga_f_tr | 6 | 16/22 | V12-71 |
+| V36c | `v12_71/t1gaftr_gm/JPGGMTR_s5` | V26b recipe on T1ga_f_tr (demos cut 30 frames after 'done') | T1ga_f_tr | 5 | 7/22 | V12-71 |
+| V37a | `v12_72/t1gaftr2_gm/JPGGMTR2_s4` | V26b recipe on T1ga_f_tr2 (T1ga_f_tr minus MILES past the cut) | T1ga_f_tr2 | 4 | 8/22 | V12-72 |
+| V37b | `v12_72/t1gaftr2_gm/JPGGMTR2_s6` | V26b recipe on T1ga_f_tr2 (T1ga_f_tr minus MILES past the cut) | T1ga_f_tr2 | 6 | 2/22 | V12-72 |
+| V37c | `v12_72/t1gaftr2_gm/JPGGMTR2_s5` | V26b recipe on T1ga_f_tr2 (T1ga_f_tr minus MILES past the cut) (collapsed, eff_rank 1.00) | T1ga_f_tr2 | 5 | 1/22 | V12-72 |
+| V38a | `v12_75/t1gaftr3_gm/JPGGMTR3_s4` | V26b recipe on T1ga_f_tr3 (T1ga_f_tr minus the 15 hooked-start episodes) | T1ga_f_tr3 | 4 | 5/20 (H 7: 11/20) | V12-75 |
+| V38b | `v12_75/t1gaftr3_gm/JPGGMTR3_s6` | V26b recipe on T1ga_f_tr3 (T1ga_f_tr minus the 15 hooked-start episodes) | T1ga_f_tr3 | 6 | 2/20 (H 7: 6/20) | V12-75 |
+| V38c | `v12_75/t1gaftr3_gm/JPGGMTR3_s5` | V26b recipe on T1ga_f_tr3 (T1ga_f_tr minus the 15 hooked-start episodes) | T1ga_f_tr3 | 5 | 5/20 (H 7: 7/20) | V12-75 |
+| V39a | `v12_79/dense/JPGGMD_s4` | V26b recipe on T1ga_f_tr re-rendered with the ZED720 camera (2.5 mm voxel, clean), N 1600, Chamfer decoder | T1ga_f_tr_d | 4 | H 7: 3/20 | V12-79 |
+| V39b | `v12_79/dense/JPGGMD_s6` | V26b recipe on T1ga_f_tr re-rendered with the ZED720 camera (2.5 mm voxel, clean), N 1600, Chamfer decoder | T1ga_f_tr_d | 6 | H 7: 14/20 | V12-79 |
+| V39c | `v12_79/dense/JPGGMD_s5` | V26b recipe on T1ga_f_tr re-rendered with the ZED720 camera (2.5 mm voxel, clean), N 1600, Chamfer decoder | T1ga_f_tr_d | 5 | H 7: 16/20 | V12-79 |
+| V40a | `v12_79/dense_noisy/JPGGMDN_s4` | as V39, `real_like` clouds | T1ga_f_tr_dn | 4 | H 7: 9/20 | V12-79 |
+| V40b | `v12_79/dense_noisy/JPGGMDN_s6` | as V39, `real_like` clouds | T1ga_f_tr_dn | 6 | H 7: 0/20 (under 18) | V12-79 |
+| V40c | `v12_79/dense_noisy/JPGGMDN_s5` | as V39, `real_like` clouds | T1ga_f_tr_dn | 5 | H 7: 0/20 (under 18) | V12-79 |
+| V44a | `v12_79/orig544/JPGGM544_s4` | V26b recipe on T1ga_f_tr at N 544 (every point, no resample jitter), Sinkhorn decoder | T1ga_f_tr | 4 | H 7: 9/20 | V12-79 |
+| V44b | `v12_79/orig544/JPGGM544_s6` | V26b recipe on T1ga_f_tr at N 544 (every point, no resample jitter), Sinkhorn decoder | T1ga_f_tr | 6 | H 7: 14/20 | V12-79 |
+| V44c | `v12_79/orig544/JPGGM544_s5` | V26b recipe on T1ga_f_tr at N 544 (every point, no resample jitter), Sinkhorn decoder | T1ga_f_tr | 5 | H 7: 13/20 | V12-79 |
+| V45a | `v12_80/v4a544/V4A544_s4` | V4a recipe on V44's input (N 544): joint recon + decoded-next + LCS, latent 16, lr 1e-3, batch 154, 300 epochs, no violation grad to the encoder, Chamfer; no JEPA / graph / goal margin | T1ga_f_tr | 4 | H 7: 16/20 | V12-80 |
+| V45b | `v12_80/v4a544/V4A544_s6` | V4a recipe on V44's input (N 544): joint recon + decoded-next + LCS, latent 16, lr 1e-3, batch 154, 300 epochs, no violation grad to the encoder, Chamfer; no JEPA / graph / goal margin | T1ga_f_tr | 6 | H 7: 6/20 | V12-80 |
+| V45c | `v12_80/v4a544/V4A544_s5` | V4a recipe on V44's input (N 544): joint recon + decoded-next + LCS, latent 16, lr 1e-3, batch 154, 300 epochs, no violation grad to the encoder, Chamfer; no JEPA / graph / goal margin | T1ga_f_tr | 5 | H 7: 18/20 (only up-20 fails); **20/20** with the UR 30° / Franka 20° rotation envelope (V12-87) | V12-80, V12-87 |
+| V45d | `v12_83/ft/V4A544FT_s5` | V45c fine-tuned (warm, 30 epochs, lr 3e-4) on its two failed up-20 rollouts (label False, weight 5, train-only) | T1ga_f_tr + 2 | 5 | H 7: 18/20 (up-20 0/2; a training start) | V12-83 |
+| V45e | `v12_84/ft/V4A544FT2_s5` | V45c fine-tuned (warm, 30 epochs, lr 3e-4) on T1ga_f_tr + 563 MILES segments around V45d's failed up-20 rollouts (train-only) | T1ga_f_tr + MILES(fail) | 5 | H 7: 18/20 (up-20 0/2; a training start) | V12-84 |
+| V45f | `v12_85/ft/V4A544FT3_s5` | as V45e on the new MILES segments only (old rows weight 1e-6): forgets (gate rejected, recon 4.58 mm) | MILES(fail) | 5 | partial: 2/10, paused by the user | V12-85 |
+| V47a | `v12_82/orig544l16/JPGGM544L16_s4` | V44 recipe, latent 16 | T1ga_f_tr | 4 | not run (decoder probe 3.87 mm) | V12-82 |
+| V47b | `v12_82/orig544l16/JPGGM544L16_s6` | V44 recipe, latent 16 | T1ga_f_tr | 6 | not run (decoder probe 2.86 mm) | V12-82 |
+| V47c | `v12_82/orig544l16/JPGGM544L16_s5` | V44 recipe, latent 16 (collapsed dynamics, eff_rank 1.26) | T1ga_f_tr | 5 | not run (decoder probe 2.57 mm) | V12-82 |
+| V48a | `v12_88/v48/V48_s4` | V45 recipe without current-state recon or the one-step decoded next state; decoded LCS rollout recon at k 1..7 (belt_ms K 7, γ 0.9, multi-step latent weight 0); violation grad to the encoder on | T1ga_f_tr | 4 | suite pending (held-out h7 3.62 mm) | V12-88 |
+| V48b | `v12_88/v48/V48_s6` | V45 recipe without current-state recon or the one-step decoded next state; decoded LCS rollout recon at k 1..7 (belt_ms K 7, γ 0.9, multi-step latent weight 0); violation grad to the encoder on (h24 rollout diverges: 506 mm) | T1ga_f_tr | 6 | suite pending (h7 3.12 mm) | V12-88 |
+| V48c | `v12_88/v48/V48_s5` | V45 recipe without current-state recon or the one-step decoded next state; decoded LCS rollout recon at k 1..7 (belt_ms K 7, γ 0.9, multi-step latent weight 0); violation grad to the encoder on; 1 contact mode on held-out data | T1ga_f_tr | 5 | suite pending (h7 3.49 mm) | V12-88 |
 
 V21c with the EE data-support MPPI cost (weights 1 / 10): 12/22 each (V12-59b, eval tags
 `V21c_n0_ees1/10`, no new model).

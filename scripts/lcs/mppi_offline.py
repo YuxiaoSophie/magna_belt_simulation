@@ -72,8 +72,8 @@ from task_common.magna_process import (
     check_private_url,
     parse_stage_line,
 )
+from task_common.mppi_costs import Clearance
 from task_common.mppi_lcs import (
-    Clearance,
     MppiParams,
     MppiSolver,
     TorchLcs,

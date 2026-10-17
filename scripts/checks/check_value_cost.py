@@ -48,6 +48,7 @@ import torch
 from check_support_box import load_pair
 
 from task_common import latent_value as lv
+from task_common import mppi_costs
 from task_common.latent_encoder import LATENT_STATE_CHANNEL, latent_state_message
 
 C1 = REPO / "data/lcs/realfirst/cmp/C1_transport"
@@ -202,8 +203,9 @@ def v3(tree, value: str) -> tuple[bool, str]:
                 goal = lcs.tensor(vf.z_mean)
                 c_on, _, _ = tree.plan_cost(lcs, prm, tz, tP, tR, tU, goal, half, None)
                 c_off, _, _ = tree.plan_cost(lcs, off, tz, tP, tR, tU, goal, half, None)
-                vt = tree.value_tensors(lcs, prm.value)
-                c_vt, _, _ = tree.plan_cost(lcs, prm, tz, tP, tR, tU, goal, half, None, vt=vt)
+                vt = mppi_costs.value_tensors(lcs, prm.value)
+                c_vt, _, _ = tree.plan_cost(lcs, prm, tz, tP, tR, tU, goal, half, None,
+                                            terms=mppi_costs.CostTerms(value=vt))
                 same_vt = same_vt and torch.equal(c_on, c_vt)
                 Zr = tz.double().numpy()  # the dtype-rounded latents
                 ref = w * (vf(Zr[:, -1]) if where == "terminal" else vf(Zr[:, 1:]).sum(1))

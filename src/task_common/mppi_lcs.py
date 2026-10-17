@@ -1,17 +1,23 @@
-"""MPPI on the exported latent LCS (torch, batched on the GPU).
+"""MPPI on the exported latent LCS, batched on the GPU.
 
-``TorchLcs`` is ``latent_encoder.LearnedLcs`` (``z' = A z + B u + D lam + d``, ``lam`` from the
-fixed-iteration Nesterov PGD on ``F_pgd = G G^T + stiffness I``) for K states at once, with the
-EE positions ``p = [p_franka, p_ur]`` carried as ``p' = p + u[0:3] / u[3:6]`` and optional
-``A_p``/``E_p`` couplings. ``mppi_plan`` samples input sequences around a warm-started mean and
-costs latent goal distance + inputs + smoothness; EE positions only enter as safety bounds and
-the optional data-support box (``MppiParams.support_box``, a bound, not a target).
-``MppiParams.goal_set``: the goal distance is a soft-min over a set of encoded seated latents.
-``MppiParams.value``: + weight x a learned cost-to-go ``V(z)`` (``latent_value``) at the terminal
-knot or summed over knots 1..H.
-``MppiParams.latent_support``: + weight x hinge^2 of the whitened nearest-training-latent distance
-of the rollout latents beyond a radius (a data-support bound in the latent, not a target).
-``MppiParams.ee_support``: the same on the 6-D EE position ``P`` (exact in the rollout, no LCS).
+Model (``TorchLcs``): ``z' = A z + B u + D lam + d`` with ``lam`` from a fixed-iteration Nesterov
+PGD on ``F_pgd = G G^T + stiffness I`` (the training forward); the EE positions
+``P = [p_franka, p_ur]`` are carried as ``P' = P + u[:6]`` and only enter the cost as bounds.
+
+One solve (``mppi_plan`` -> ``MppiSolver``):
+1. warm start: the previous plan shifted by one step (zeros on the first solve);
+2. sample K input sequences around the mean (clipped to the input box; sample 0 = the mean);
+3. roll every sample out through the LCS (one Warp kernel, ``mppi_warp``);
+4. cost each rollout (``plan_cost``): latent goal distance + inputs + smoothness, plus the
+   safety knots (z bounds, rotation envelope) at ``safety_penalty`` each;
+5. weight the samples ``exp(-cost / temperature)``, the temperature set so the effective sample
+   size is ``ess_frac`` K, and move the mean to the weighted average;
+6. repeat 2-5 ``n_iter`` times; return the mean plan, or the best sample when the mean
+   violates more safety knots than it.
+On CUDA the whole solve is one captured CUDA graph.
+
+Optional cost terms live in ``mppi_costs``; the overshoot guard and the BC policy prior in
+``mppi_guards``.
 """
 
 import dataclasses
@@ -24,42 +30,43 @@ import numpy as np
 import torch
 import yaml
 
-from task_common.latent_value import LatentValue, check_value, value_forward
+from task_common.latent_value import check_value, value_forward
+from task_common.mppi_costs import (
+    CLEARANCE_KEYS,
+    N_P,
+    CostTerms,
+    _qmul_t,
+    _quat_exp_t,
+    check_ee_support,
+    check_latent_support,
+    check_support_box,
+    clearance_bad,
+    ee_support_cost,
+    goal_set_dist,
+    latent_support_cost,
+    load_cost_terms,
+    nn_dist_np,
+    softmin_sq,
+    support_hinge,
+)
+from task_common.mppi_guards import check_overshoot
+from task_common.mppi_warp import _FusedRollout
 
-N_P = 6  # [p_franka (3), p_ur (3)]
-POS_SLICES = (slice(0, 3), slice(3, 6))
 ROT_SLICES = (slice(6, 9), slice(9, 12))
 ROT_CHANNELS = tuple(range(6, 12))
 EPS = 1e-12
-CLEARANCE_CHUNKS = 1  # threads per (sample, knot, set); more measured slower
-CLEARANCE_CLUSTER_M = 0.01  # voxel edge of the point clusters (kernel culling)
-CLEARANCE_KEYS = frozenset({"model", "ur_min_m", "franka_min_m", "w_soft", "soft_margin_m"})
-OVERSHOOT_KEYS = frozenset({"seat_tol", "fade", "fade_last_stage", "hold", "near"})
 PRIOR_SYNC = (None, "stage")
 PRIOR_MODES = ("demo", "policy")
-HOLD_KEYS = frozenset({"enter_k", "streak", "goal", "w_q", "w_T", "w_r", "w_s", "exit_k", "cold",
-                       "stall"})
-STALL_KEYS = frozenset({"latents", "eps", "k"})
-HOLD_GOALS = ("seat", "entry", "best")
-NEAR_KEYS = frozenset({"k", "w_T"})
-SUPPORT_BOX_KEYS = frozenset({"lo", "hi", "weight", "hard_margin_m"})
-LATENT_SUPPORT_KEYS = frozenset({"file", "radius", "weight", "max_points", "where"})
-LATENT_SUPPORT_WHERE = ("all", "terminal")
-LATENT_SUPPORT_DEFAULTS = {"radius": 1.5, "weight": 1.0, "max_points": 3000, "where": "all"}
-LATENT_SUPPORT_CHUNK_ELEMS = 1 << 23  # query rows x training points per cdist chunk (32 MB f32)
-EE_SUPPORT_KEYS = frozenset({"file", "pulley_pose7", "radius_mm", "weight", "max_points",
-                             "where"})
-EE_SUPPORT_DEFAULTS = {"radius_mm": 35.0, "weight": 1.0, "max_points": 3000, "where": "all"}
-EE_SUPPORT_SCALE_MM = 10.0
-W_KEYS = ("w_q", "w_T", "w_r", "w_s")
 
 
 def _scalar(x):
     return np.asarray(x).item()
 
 
+# --- the LCS ------------------------------------------------------------------------------------
+
 class TorchLcs:
-    """The deploy's LCS as torch tensors (``dtype`` on ``device``)."""
+    """The deploy's LCS as torch tensors (``dtype`` on ``device``), stepped for K states at once."""
 
     def __init__(self, d: dict, device: str | torch.device = "cuda",
                  dtype: torch.dtype = torch.float32) -> None:
@@ -203,8 +210,7 @@ class TorchLcs:
 
     def rollout_fused(self, z0, p0, U: torch.Tensor, rot0=None, iters: int = 25
                       ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """``rollout`` as one Warp kernel (a thread per sample runs all H steps and the PGD);
-        same maths, float32, on torch's current stream (CUDA-graph capturable)."""
+        """``rollout`` as one Warp kernel (``mppi_warp``): same maths, float32, CUDA only."""
         if self._fused is None:
             self._fused = _FusedRollout(self)
         return self._fused(z0, p0, U, rot0, iters)
@@ -215,404 +221,11 @@ class TorchLcs:
         return float(np.linalg.norm(diff / self.z_std_np))
 
 
-def _quat_exp_t(r: torch.Tensor) -> torch.Tensor:
-    """``(..., 3)`` rotation vectors -> ``(..., 4)`` unit quaternions ``wxyz``."""
-    a = r.norm(dim=-1, keepdim=True)
-    s = torch.where(a > 1e-4, torch.sin(0.5 * a) / a.clamp_min(1e-30), 0.5 - a * a / 48.0)
-    return torch.cat([torch.cos(0.5 * a), s * r], dim=-1)
-
-
-def _qmul_t(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    aw, av = a[..., :1], a[..., 1:]
-    bw, bv = b[..., :1], b[..., 1:]
-    return torch.cat([aw * bw - (av * bv).sum(-1, keepdim=True),
-                      aw * bv + bw * av + torch.cross(av, bv, dim=-1)], dim=-1)
-
-
 def _quat_angle_t(q: torch.Tensor) -> torch.Tensor:
     return 2.0 * torch.atan2(q[..., 1:].norm(dim=-1), q[..., 0].abs())
 
 
-def _wp_funcs():
-    import warp as wp
-
-    @wp.func
-    def quat_exp(r: wp.vec3):
-        a = wp.length(r)
-        s = 0.5 - a * a / 48.0
-        if a > 1.0e-4:
-            s = wp.sin(0.5 * a) / a
-        return wp.quat(s * r[0], s * r[1], s * r[2], wp.cos(0.5 * a))
-
-    @wp.func
-    def quat_angle(q: wp.quat):
-        return 2.0 * wp.atan2(wp.length(wp.vec3(q[0], q[1], q[2])), wp.abs(q[3]))
-
-    return quat_exp, quat_angle
-
-
-def _fused_kernel(nx: int, nl: int, nu: int):
-    import warp as wp
-
-    _wp_quat_exp, _wp_quat_angle = _wp_funcs()
-
-    f32 = wp.float32
-    vx, vl = wp.types.vector(nx, f32), wp.types.vector(nl, f32)
-    vu, v6 = wp.types.vector(nu, f32), wp.types.vector(N_P, f32)
-    mxx, mxu = wp.types.matrix((nx, nx), f32), wp.types.matrix((nx, nu), f32)
-    mxl, mx6 = wp.types.matrix((nx, nl), f32), wp.types.matrix((nx, N_P), f32)
-    mlx, mlu = wp.types.matrix((nl, nx), f32), wp.types.matrix((nl, nu), f32)
-    mll, ml6 = wp.types.matrix((nl, nl), f32), wp.types.matrix((nl, N_P), f32)
-
-    @wp.kernel(module="unique", enable_backward=False)
-    def rollout(z0: wp.array(dtype=vx), p0: wp.array(dtype=v6), r0: wp.array(dtype=wp.vec3),
-                U: wp.array2d(dtype=vu),
-                A: wp.array(dtype=mxx), B: wp.array(dtype=mxu), D: wp.array(dtype=mxl),
-                d: wp.array(dtype=vx), Ap: wp.array(dtype=mx6), sE: wp.array(dtype=mlx),
-                sH: wp.array(dtype=mlu), sc: wp.array(dtype=vl), sEp: wp.array(dtype=ml6),
-                Ms: wp.array(dtype=mll), betas: wp.array(dtype=f32), n_pgd: int, H: int,
-                Z: wp.array2d(dtype=vx), P: wp.array2d(dtype=v6), R: wp.array2d(dtype=wp.vec2)):
-        k = wp.tid()
-        z = z0[0]
-        p = p0[0]
-        qf = _wp_quat_exp(r0[0])
-        qu = _wp_quat_exp(r0[1])
-        Z[k, 0] = z
-        P[k, 0] = p
-        R[k, 0] = wp.vec2(_wp_quat_angle(qf), _wp_quat_angle(qu))
-        zero = vl()
-        for h in range(H):
-            u = U[k, h]
-            nsq = -(sE[0] @ z + sH[0] @ u + sc[0] + sEp[0] @ p)
-            lam = vl()
-            y = vl()
-            for i in range(n_pgd):
-                lam_old = lam
-                # lam = max(y - s (F y + q), 0) with Ms = I - s F
-                lam = wp.max(nsq + Ms[0] @ y, zero)
-                y = lam_old + (1.0 + betas[i]) * (lam - lam_old)
-            z = A[0] @ z + B[0] @ u + D[0] @ lam + d[0] + Ap[0] @ p
-            p = p + v6(u[0], u[1], u[2], u[3], u[4], u[5])
-            qf = _wp_quat_exp(wp.vec3(u[6], u[7], u[8])) * qf
-            qu = _wp_quat_exp(wp.vec3(u[9], u[10], u[11])) * qu
-            Z[k, h + 1] = z
-            P[k, h + 1] = p
-            R[k, h + 1] = wp.vec2(_wp_quat_angle(qf), _wp_quat_angle(qu))
-
-    types = {"vx": vx, "v6": v6, "vu": vu, "mxx": mxx, "mxu": mxu, "mxl": mxl, "mx6": mx6,
-             "mlx": mlx, "mlu": mlu, "vl": vl, "ml6": ml6, "mll": mll}
-    return rollout, types
-
-
-def _clearance_kernel():
-    import warp as wp
-
-    _wp_quat_exp, _ = _wp_funcs()
-    f32 = wp.float32
-    vu, v6 = wp.types.vector(12, f32), wp.types.vector(N_P, f32)
-
-    @wp.func
-    def poly_dist(r: f32, z: f32, prof: wp.array2d(dtype=wp.vec2), j: int):
-        # padded vertices give zero-length edges (t = 0)
-        n = prof.shape[1]
-        d2 = f32(1.0e30)
-        inside = wp.int32(0)
-        for i in range(n):
-            A = prof[j, i]
-            B = prof[j, (i + 1) % n]
-            abx = B[0] - A[0]
-            abz = B[1] - A[1]
-            apx = r - A[0]
-            apz = z - A[1]
-            den = abx * abx + abz * abz
-            t = f32(0.0)
-            if den > f32(0.0):
-                t = wp.clamp((apx * abx + apz * abz) / den, f32(0.0), f32(1.0))
-            dx = apx - t * abx
-            dz = apz - t * abz
-            d2 = wp.min(d2, dx * dx + dz * dz)
-            if (A[1] > z and B[1] <= z) or (A[1] <= z and B[1] > z):  # noqa: SIM102
-                if r < A[0] + (z - A[1]) / abz * abx:
-                    inside = 1 - inside
-        d = wp.sqrt(d2)
-        if inside == 1:
-            d = -d
-        return d
-
-    @wp.func
-    def box_sd(x: wp.vec3, h: wp.vec3):
-        q = wp.vec3(wp.abs(x[0]) - h[0], wp.abs(x[1]) - h[1], wp.abs(x[2]) - h[2])
-        out = wp.length(wp.vec3(wp.max(q[0], f32(0.0)), wp.max(q[1], f32(0.0)),
-                                wp.max(q[2], f32(0.0))))
-        return out + wp.min(wp.max(q[0], wp.max(q[1], q[2])), f32(0.0))
-
-    @wp.func
-    def cyl_bound(x: wp.vec3, lim: wp.vec2):
-        a = wp.sqrt(x[0] * x[0] + x[1] * x[1]) - lim[0]
-        b = wp.abs(x[2]) - lim[1]
-        pa = wp.max(a, f32(0.0))
-        pb = wp.max(b, f32(0.0))
-        return wp.sqrt(pa * pa + pb * pb) + wp.min(wp.max(a, b), f32(0.0))
-
-    @wp.func
-    def set_dist(pts: wp.array(dtype=wp.vec3), cl: wp.array(dtype=wp.vec2i),
-                 cc: wp.array(dtype=wp.vec4), c0: int, stride: int, Rq: wp.mat33, t: wp.vec3,
-                 plate_R: wp.array(dtype=wp.mat33), plate_p: wp.array(dtype=wp.vec3),
-                 plate_h: wp.array(dtype=wp.vec3), pul_R: wp.array(dtype=wp.mat33),
-                 pul_p: wp.array(dtype=wp.vec3), pul_b: wp.array(dtype=wp.vec2),
-                 prof: wp.array2d(dtype=wp.vec2)):
-        # Board.min_distance; a cluster is skipped when centre bound - radius >= best.
-        RbT = wp.transpose(plate_R[0])
-        Mb = RbT * Rq
-        bb = RbT * (t - plate_p[0])
-        h = plate_h[0]
-        best = f32(1.0e30)
-        for ci in range(c0, cl.shape[0], stride):
-            c = cc[ci]
-            if box_sd(Mb * wp.vec3(c[0], c[1], c[2]) + bb, h) - c[3] < best:
-                for i in range(cl[ci][0], cl[ci][1]):
-                    best = wp.min(best, box_sd(Mb * pts[i] + bb, h))
-        for j in range(pul_R.shape[0]):
-            RjT = wp.transpose(pul_R[j])
-            Mj = RjT * Rq
-            bj = RjT * (t - pul_p[j])
-            lim = pul_b[j]
-            for ci in range(c0, cl.shape[0], stride):
-                c = cc[ci]
-                if cyl_bound(Mj * wp.vec3(c[0], c[1], c[2]) + bj, lim) - c[3] < best:
-                    for i in range(cl[ci][0], cl[ci][1]):
-                        x = Mj * pts[i] + bj
-                        if cyl_bound(x, lim) < best:
-                            best = wp.min(best, poly_dist(wp.sqrt(x[0] * x[0] + x[1] * x[1]),
-                                                          x[2], prof, j))
-        return best
-
-    @wp.kernel(module="unique", enable_backward=False)
-    def clear(P: wp.array2d(dtype=v6), U: wp.array2d(dtype=vu), q0: wp.array2d(dtype=wp.quat),
-              pts_ur: wp.array(dtype=wp.vec3), cl_ur: wp.array(dtype=wp.vec2i),
-              cc_ur: wp.array(dtype=wp.vec4), pts_f: wp.array(dtype=wp.vec3),
-              cl_f: wp.array(dtype=wp.vec2i), cc_f: wp.array(dtype=wp.vec4),
-              plate_R: wp.array(dtype=wp.mat33), plate_p: wp.array(dtype=wp.vec3),
-              plate_h: wp.array(dtype=wp.vec3), pul_R: wp.array(dtype=wp.mat33),
-              pul_p: wp.array(dtype=wp.vec3), pul_b: wp.array(dtype=wp.vec2),
-              prof: wp.array2d(dtype=wp.vec2), n_chunks: int, C: wp.array3d(dtype=f32)):
-        k, h, a, c = wp.tid()
-        arm = 1 - a  # C: UR first; P / U / q0: Franka first
-        q = q0[k % q0.shape[0], arm]
-        for j in range(h):
-            u = U[k, j]
-            q = _wp_quat_exp(wp.vec3(u[6 + 3 * arm], u[7 + 3 * arm], u[8 + 3 * arm])) * q
-        p = P[k, h]
-        t = wp.vec3(p[3 * arm], p[3 * arm + 1], p[3 * arm + 2])
-        Rq = wp.quat_to_matrix(q)
-        d = f32(0.0)
-        if a == 0:
-            d = set_dist(pts_ur, cl_ur, cc_ur, c, n_chunks, Rq, t, plate_R, plate_p, plate_h,
-                         pul_R, pul_p, pul_b, prof)
-        else:
-            d = set_dist(pts_f, cl_f, cc_f, c, n_chunks, Rq, t, plate_R, plate_p, plate_h,
-                         pul_R, pul_p, pul_b, prof)
-        wp.atomic_min(C, k, h, a, d)
-
-    return clear, vu, v6
-
-
-class Clearance:
-    """``MppiParams.clearance``: frozen UR / Franka sets vs plate + pulleys per knot.
-
-    ``__call__(P, U, q0)`` -> ``C (K, H+1, 2)`` min signed distance of the UR (0) / Franka (1)
-    set at each knot: point = ``R(q_k) p_local + P[k, h]`` with ``q_k = exp(w_h) .. exp(w_1)
-    q0`` (``q0`` (2, 4) or (K, 2, 4) absolute ``wxyz``); Warp kernel or torch (same maths).
-    """
-
-    def __init__(self, cfg: dict, lcs: TorchLcs, max_points: int | None = None) -> None:
-        """``max_points``: cap of ``ClearanceModel.kernel_points`` (None: every point)."""
-        from task_common.clearance_model import ClearanceModel
-
-        self.lcs = lcs
-        self.model = ClearanceModel.load(cfg["model"])
-        self.model.check_frames()
-        self.ur_min = float(cfg.get("ur_min_m", self.model.ur_min_m))
-        self.franka_min = float(cfg.get("franka_min_m", self.model.franka_min_m))
-        self.w_soft = float(cfg.get("w_soft", 0.0))
-        self.soft_margin = float(cfg.get("soft_margin_m", 0.012))
-        self.points = self.model.kernel_points(max_points)
-        t = lcs.tensor
-        self.lim = t(np.array([self.ur_min, self.franka_min]))
-        self.pts = [t(p) for p in self.points]
-        m = self.model
-        self.plate = [t(m.plate[k]) for k in ("rot", "pos", "half")]
-        self.pulleys = [[t(p[k]) for k in ("rot", "pos", "profile")] for p in m.pulleys]
-        self._wp = None
-        self.n_chunks, self.cluster_m = CLEARANCE_CHUNKS, CLEARANCE_CLUSTER_M
-
-    def __call__(self, P: torch.Tensor, U: torch.Tensor, q0: torch.Tensor,
-                 fused: bool = True) -> torch.Tensor:
-        if fused and self.lcs.device.type == "cuda":
-            return self._fused(P, U, q0)
-        return self.torch_path(P, U, q0)
-
-    def _arrays(self):
-        import warp as wp
-
-        kernel, vu, v6 = _clearance_kernel()
-        dev = str(self.lcs.device) if self.lcs.device.index is not None else "cuda:0"
-        m = self.model
-        n_prof = max(len(p["profile"]) for p in m.pulleys)
-        prof = np.stack([np.concatenate([p["profile"], np.repeat(p["profile"][-1:], n_prof
-                                                                 - len(p["profile"]), 0)])
-                         for p in m.pulleys]).astype(np.float32)
-        bounds = [[p["profile"][:, 0].max(), np.abs(p["profile"][:, 1]).max()] for p in m.pulleys]
-
-        def arr(x, dtype):
-            return wp.array(np.asarray(x, np.float32), dtype=dtype, device=dev)
-
-        sets = []
-        for pts in self.points:
-            order, spans, centres = point_clusters(pts, self.cluster_m)
-            sets += [arr(pts[order], wp.vec3), wp.array(spans, dtype=wp.vec2i, device=dev),
-                     arr(centres, wp.vec4)]
-        geo = [*sets, arr([m.plate["rot"]], wp.mat33), arr([m.plate["pos"]], wp.vec3),
-               arr([m.plate["half"]], wp.vec3), arr([p["rot"] for p in m.pulleys], wp.mat33),
-               arr([p["pos"] for p in m.pulleys], wp.vec3), arr(bounds, wp.vec2),
-               wp.array(prof, dtype=wp.vec2, device=dev)]
-        return wp, kernel, vu, v6, dev, geo
-
-    def _fused(self, P, U, q0):
-        if self._wp is None:
-            self._wp = self._arrays()
-        wp, kernel, vu, v6, dev, geo = self._wp
-        K, H1 = P.shape[0], P.shape[1]
-        P, U = P.contiguous(), U.contiguous()
-        q = q0.reshape(-1, 2, 4).roll(-1, dims=-1).contiguous()  # wxyz -> warp xyzw
-        C = torch.full((K, H1, 2), 1.0e30, dtype=torch.float32, device=P.device)
-        wp.launch(kernel, dim=(K, H1, 2, self.n_chunks), device=dev,
-                  stream=wp.stream_from_torch(torch.cuda.current_stream(P.device)),
-                  inputs=[wp.from_torch(P, dtype=v6), wp.from_torch(U, dtype=vu),
-                          wp.from_torch(q, dtype=wp.quat), *geo, self.n_chunks],
-                  outputs=[wp.from_torch(C)])
-        return C
-
-    def torch_path(self, P: torch.Tensor, U: torch.Tensor, q0: torch.Tensor,
-                   chunk: int = 64) -> torch.Tensor:
-        K, H1 = P.shape[0], P.shape[1]
-        q = q0.reshape(-1, 2, 4).expand(K, 2, 4) if q0.numel() == 8 else q0.reshape(K, 2, 4)
-        Q = [q]
-        for j in range(H1 - 1):
-            e = torch.stack([_quat_exp_t(U[:, j, 6:9]), _quat_exp_t(U[:, j, 9:12])], dim=1)
-            q = _qmul_t(e, q)
-            Q.append(q)
-        Rm = _quat_mat_t(torch.stack(Q, dim=1))  # (K, H1, 2, 3, 3)
-        t = P.reshape(K, H1, 2, 3)
-        out = []
-        for arm, pts in ((1, self.pts[0]), (0, self.pts[1])):
-            Ra, ta = Rm[:, :, arm].reshape(-1, 3, 3), t[:, :, arm].reshape(-1, 3)
-            res = [self._board_min(pts @ Ra[s:s + chunk].transpose(1, 2) + ta[s:s + chunk, None])
-                   for s in range(0, Ra.shape[0], chunk)]
-            out.append(torch.cat(res).reshape(K, H1))
-        return torch.stack(out, dim=-1)
-
-    def _board_min(self, W: torch.Tensor) -> torch.Tensor:
-        """``(B, n, 3)`` world points -> ``(B,)`` min signed distance (no bound skip)."""
-        rot, pos, half = self.plate
-        q = ((W - pos) @ rot).abs() - half
-        d = q.clamp_min(0.0).norm(dim=-1) + q.amax(-1).clamp_max(0.0)
-        for rot, pos, prof in self.pulleys:
-            loc = (W - pos) @ rot
-            d = torch.minimum(d, _polygon_distance_t(loc[..., :2].norm(dim=-1), loc[..., 2], prof))
-        return d.amin(-1)
-
-
-def point_clusters(points: np.ndarray, cell: float
-                   ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """``(order, spans (n_cl, 2) int32, centres (n_cl, 4) xyz + radius)``: voxel clusters of
-    ``points``, lowest cluster first; ``points[order]`` is contiguous per cluster."""
-    keys = np.floor(np.asarray(points) / cell).astype(np.int64)
-    _, inv = np.unique(keys, axis=0, return_inverse=True)
-    inv = inv.reshape(-1)
-    groups = [np.flatnonzero(inv == g) for g in range(inv.max() + 1)]
-    groups.sort(key=lambda g: (float(points[g, 2].min()), int(g[0])))
-    order = np.concatenate(groups)
-    ends = np.cumsum([len(g) for g in groups])
-    spans = np.stack([ends - [len(g) for g in groups], ends], 1).astype(np.int32)
-    centres = []
-    for g in groups:
-        c = 0.5 * (points[g].min(0) + points[g].max(0))
-        centres.append(np.r_[c, np.linalg.norm(points[g] - c, axis=1).max() * (1 + 1e-5) + 1e-7])
-    return order, spans, np.asarray(centres)
-
-
-def _quat_mat_t(q: torch.Tensor) -> torch.Tensor:
-    """``(..., 4)`` unit ``wxyz`` -> ``(..., 3, 3)``."""
-    w, x, y, z = q.unbind(-1)
-    return torch.stack([
-        1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w),
-        2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w),
-        2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
-        dim=-1).reshape(*q.shape[:-1], 3, 3)
-
-
-def _polygon_distance_t(r: torch.Tensor, z: torch.Tensor, poly: torch.Tensor) -> torch.Tensor:
-    """``clearance._polygon_distance`` on ``(r, z)`` (any shape) vs a closed ``(E, 2)`` polygon."""
-    a, b = poly, poly.roll(-1, dims=0)
-    ab = b - a
-    apx, apz = r[..., None] - a[:, 0], z[..., None] - a[:, 1]
-    t = ((apx * ab[:, 0] + apz * ab[:, 1]) / (ab * ab).sum(-1)).clamp(0.0, 1.0)
-    d = torch.hypot(apx - t * ab[:, 0], apz - t * ab[:, 1]).amin(-1)
-    zc = z[..., None]
-    straddles = (a[:, 1] > zc) != (b[:, 1] > zc)
-    den = torch.where(ab[:, 1] == 0.0, torch.ones_like(ab[:, 1]), ab[:, 1])
-    x_at = a[:, 0] + (zc - a[:, 1]) / den * ab[:, 0]
-    inside = (straddles & (r[..., None] < x_at)).sum(-1) % 2 == 1
-    return torch.where(inside, -d, d)
-
-
-class _FusedRollout:
-    def __init__(self, lcs: TorchLcs) -> None:
-        import warp as wp
-
-        self.wp, self.lcs = wp, lcs
-        self.kernel, ty = _fused_kernel(lcs.n_x, lcs.n_lam, lcs.n_u)
-        self.ty = ty
-        dev = str(lcs.device) if lcs.device.index is not None else "cuda:0"
-        self.dev = dev
-        s = lcs.step_size
-        f_pgd = lcs.np["F_pgd"]
-
-        def arr(x, t):
-            return wp.array([np.asarray(x, dtype=np.float32)], dtype=t, device=dev)
-
-        n = lcs.np
-        self.mats = [arr(n["A"], ty["mxx"]), arr(n["B"], ty["mxu"]), arr(n["D"], ty["mxl"]),
-                     arr(n["d"], ty["vx"]), arr(n["A_p"], ty["mx6"]), arr(s * n["E"], ty["mlx"]),
-                     arr(s * n["H"], ty["mlu"]), arr(s * n["c"], ty["vl"]),
-                     arr(s * n["E_p"], ty["ml6"]),
-                     arr(np.eye(lcs.n_lam) - s * f_pgd, ty["mll"])]
-        self._betas: dict[int, object] = {}
-
-    def __call__(self, z0, p0, U, rot0, iters):
-        wp, lcs = self.wp, self.lcs
-        K, H, _ = U.shape
-        if int(iters) not in self._betas:
-            self._betas[int(iters)] = wp.array(np.asarray(lcs.nesterov_betas(iters), np.float32),
-                                               dtype=wp.float32, device=self.dev)
-        z0 = lcs.tensor(z0).reshape(1, lcs.n_x).contiguous()
-        p0 = lcs.tensor(p0).reshape(1, N_P).contiguous()
-        U = U.contiguous()
-        r0 = lcs.tensor(np.zeros((2, 3)) if rot0 is None else rot0).reshape(2, 3).contiguous()
-        Z = torch.empty((K, H + 1, lcs.n_x), dtype=torch.float32, device=lcs.device)
-        P = torch.empty((K, H + 1, N_P), dtype=torch.float32, device=lcs.device)
-        R = torch.empty((K, H + 1, 2), dtype=torch.float32, device=lcs.device)
-        ty = self.ty
-        wp.launch(self.kernel, dim=K, device=self.dev,
-                  stream=wp.stream_from_torch(torch.cuda.current_stream(lcs.device)),
-                  inputs=[wp.from_torch(z0, dtype=ty["vx"]), wp.from_torch(p0, dtype=ty["v6"]),
-                          wp.from_torch(r0, dtype=wp.vec3), wp.from_torch(U, dtype=ty["vu"]),
-                          *self.mats, self._betas[int(iters)], int(iters), int(H)],
-                  outputs=[wp.from_torch(Z, dtype=ty["vx"]), wp.from_torch(P, dtype=ty["v6"]),
-                           wp.from_torch(R, dtype=wp.vec2)])
-        return Z, P, R
-
+# --- parameters ---------------------------------------------------------------------------------
 
 @dataclass
 class MppiParams:
@@ -784,285 +397,6 @@ class MppiParams:
                            float(self.rot_envelope_deg["ur"])])
 
 
-def check_overshoot(ov: dict) -> None:
-    """``MppiParams.overshoot`` keys and ranges."""
-    if not set(ov) <= OVERSHOOT_KEYS or "seat_tol" not in ov:
-        raise ValueError(f"overshoot keys {sorted(ov)}: need seat_tol, within "
-                         f"{sorted(OVERSHOOT_KEYS)}")
-    if not float(ov["seat_tol"]) > 0.0:
-        raise ValueError(f"overshoot.seat_tol {ov['seat_tol']} must be > 0")
-    f = ov.get("fade")
-    if f is not None and (len(f) != 2 or not 0.0 <= float(f[0]) < float(f[1])):
-        raise ValueError(f"overshoot.fade {f}: [k1, k2] with 0 <= k1 < k2")
-    h = ov.get("hold")
-    if h is not None:
-        if not set(h) <= HOLD_KEYS:
-            raise ValueError(f"overshoot.hold keys {sorted(h)} not within {sorted(HOLD_KEYS)}")
-        if h.get("goal", "seat") not in HOLD_GOALS:
-            raise ValueError(f"overshoot.hold.goal {h.get('goal')!r}: one of {HOLD_GOALS}")
-        st = h.get("streak", 1)
-        if int(st) != st or st < 1 or not float(h.get("enter_k", 1.0)) > 0.0:
-            raise ValueError(f"overshoot.hold streak {st} (int >= 1) / enter_k > 0")
-        ex = h.get("exit_k")
-        if ex is not None and not float(ex) > float(h.get("enter_k", 1.0)):
-            raise ValueError(f"overshoot.hold.exit_k {ex} must exceed enter_k")
-        if any(not float(h.get(k, 1.0)) > 0.0 for k in W_KEYS):
-            raise ValueError("overshoot.hold weight scales must be > 0")
-        sl = h.get("stall")
-        if sl is not None and (not set(sl) <= STALL_KEYS or int(sl.get("latents", 0)) < 1
-                               or float(sl.get("eps", 0.0)) < 0.0
-                               or not float(sl.get("k", 1.0)) > 0.0):
-            raise ValueError(f"overshoot.hold.stall {sl}: {{latents >= 1, eps >= 0, k > 0}}")
-    n = ov.get("near")
-    if n is not None and (not set(n) <= NEAR_KEYS or not float(n.get("k", 0.0)) > 0.0
-                          or not float(n.get("w_T", 1.0)) > 0.0):
-        raise ValueError(f"overshoot.near {n}: {{k > 0, w_T scale > 0}}")
-
-
-def check_support_box(sb: dict) -> None:
-    """``MppiParams.support_box`` keys and ranges."""
-    if not set(sb) <= SUPPORT_BOX_KEYS or not {"lo", "hi", "weight"} <= set(sb):
-        raise ValueError(f"support_box keys {sorted(sb)}: need lo, hi, weight, within "
-                         f"{sorted(SUPPORT_BOX_KEYS)}")
-    lo, hi = np.asarray(sb["lo"], dtype=np.float64), np.asarray(sb["hi"], dtype=np.float64)
-    if lo.shape != (N_P,) or hi.shape != (N_P,) or not np.all(np.isfinite(np.r_[lo, hi])) \
-            or np.any(lo > hi):
-        raise ValueError(f"support_box lo {sb['lo']} / hi {sb['hi']}: 6 finite, lo <= hi")
-    if not float(sb["weight"]) >= 0.0:
-        raise ValueError(f"support_box.weight {sb['weight']} must be >= 0")
-    m = sb.get("hard_margin_m")
-    if m is not None and not float(m) >= 0.0:
-        raise ValueError(f"support_box.hard_margin_m {m} must be >= 0 or None")
-
-
-def check_latent_support(ls: dict) -> None:
-    """``MppiParams.latent_support`` keys and ranges (the npz is checked when loaded)."""
-    if not isinstance(ls, dict) or not set(ls) <= LATENT_SUPPORT_KEYS or "file" not in ls:
-        raise ValueError(f"latent_support {ls!r}: need file, within "
-                         f"{sorted(LATENT_SUPPORT_KEYS)}")
-    if not isinstance(ls["file"], (str, Path)):
-        raise TypeError(f"latent_support.file {ls['file']!r} must be an npz path")
-    c = {**LATENT_SUPPORT_DEFAULTS, **ls}
-    for k in ("radius", "weight"):
-        if not (math.isfinite(float(c[k])) and float(c[k]) >= 0.0):
-            raise ValueError(f"latent_support.{k} {c[k]} must be finite >= 0")
-    m = c["max_points"]
-    if isinstance(m, bool) or int(m) != m or m < 1:
-        raise ValueError(f"latent_support.max_points {m} must be an int >= 1")
-    if c["where"] not in LATENT_SUPPORT_WHERE:
-        raise ValueError(f"latent_support.where {c['where']!r}: one of {LATENT_SUPPORT_WHERE}")
-
-
-def load_latent_support(ls: dict, n_x: int | None = None) -> np.ndarray:
-    """``(M, n_x)`` float64 training latents of ``MppiParams.latent_support`` (un-whitened),
-    every ``ceil(N / max_points)``-th row of the npz's ``z_t``."""
-    with np.load(Path(ls["file"]), allow_pickle=False) as f:
-        Z = np.asarray(f["z_t"], dtype=np.float64)
-    if Z.ndim != 2 or len(Z) < 1 or (n_x is not None and Z.shape[1] != n_x) \
-            or not np.all(np.isfinite(Z)):
-        raise ValueError(f"latent support {ls['file']}: z_t {Z.shape} must be finite (N >= 1, "
-                         f"{n_x})")
-    m = int(ls.get("max_points", LATENT_SUPPORT_DEFAULTS["max_points"]))
-    return Z[::-(-len(Z) // m)].copy()
-
-
-def nn_dist(Q: torch.Tensor, S: torch.Tensor, chunk: int | None = None) -> torch.Tensor:
-    """``(...)`` Euclidean distance of each row of ``Q (..., n)`` to its nearest row of
-    ``S (M, n)``, over chunks of ``chunk`` query rows (default: bounded by
-    ``LATENT_SUPPORT_CHUNK_ELEMS``)."""
-    q = Q.reshape(-1, Q.shape[-1])
-    if chunk is None:
-        chunk = max(1, LATENT_SUPPORT_CHUNK_ELEMS // S.shape[0])
-    # centred matmul expansion: cdist's direct mode cost ~750 ms per GPU solve (TF32 is off)
-    c = S.mean(0)
-    s = S - c
-    s2 = (s * s).sum(-1)
-    d = [((qc * qc).sum(-1, keepdim=True) + s2 - 2.0 * (qc @ s.T)).amin(-1).clamp_min(0.0).sqrt()
-         for qc in (q[i:i + chunk] - c for i in range(0, q.shape[0], chunk))]
-    return (d[0] if len(d) == 1 else torch.cat(d)).reshape(Q.shape[:-1])
-
-
-def latent_support_cost(lcs: "TorchLcs", ls: dict, Z: torch.Tensor, S: torch.Tensor
-                        ) -> torch.Tensor:
-    """``(K,)`` ``weight sum_k relu(d_k - radius)^2`` of rollouts ``Z (K, H+1, n_x)`` against
-    the whitened training latents ``S``."""
-    c = {**LATENT_SUPPORT_DEFAULTS, **ls}
-    Zk = Z[:, -1:] if c["where"] == "terminal" else Z[:, 1:]
-    d = nn_dist(Zk / lcs.z_std, S)
-    return float(c["weight"]) * (d - float(c["radius"])).clamp_min(0.0).square().sum(1)
-
-
-def check_ee_support(es: dict) -> None:
-    """``MppiParams.ee_support`` keys and ranges (the npz is checked when loaded)."""
-    if not isinstance(es, dict) or not set(es) <= EE_SUPPORT_KEYS \
-            or not {"file", "pulley_pose7"} <= set(es):
-        raise ValueError(f"ee_support {es!r}: need file, pulley_pose7, within "
-                         f"{sorted(EE_SUPPORT_KEYS)}")
-    if not isinstance(es["file"], (str, Path)):
-        raise TypeError(f"ee_support.file {es['file']!r} must be an npz path")
-    pose = np.asarray(es["pulley_pose7"], dtype=np.float64)
-    if pose.shape != (7,) or not np.all(np.isfinite(pose)) or np.linalg.norm(pose[3:]) < 1e-6:
-        raise ValueError(f"ee_support.pulley_pose7 {es['pulley_pose7']}: 7 finite, xyz + wxyz")
-    c = {**EE_SUPPORT_DEFAULTS, **es}
-    for k in ("radius_mm", "weight"):
-        if not (math.isfinite(float(c[k])) and float(c[k]) >= 0.0):
-            raise ValueError(f"ee_support.{k} {c[k]} must be finite >= 0")
-    m = c["max_points"]
-    if isinstance(m, bool) or int(m) != m or m < 1:
-        raise ValueError(f"ee_support.max_points {m} must be an int >= 1")
-    if c["where"] not in LATENT_SUPPORT_WHERE:
-        raise ValueError(f"ee_support.where {c['where']!r}: one of {LATENT_SUPPORT_WHERE}")
-
-
-def load_ee_support(es: dict) -> np.ndarray:
-    """``(M, 6)`` float64 training EE positions of ``MppiParams.ee_support`` in ``P``'s frame
-    (m): ``R q + t`` per arm of every ``ceil(N / max_points)``-th ``ee_pos`` row."""
-    with np.load(Path(es["file"]), allow_pickle=False) as f:
-        E = np.asarray(f["ee_pos"], dtype=np.float64)
-    if E.ndim != 2 or len(E) < 1 or E.shape[1] != N_P or not np.all(np.isfinite(E)):
-        raise ValueError(f"ee support {es['file']}: ee_pos {E.shape} must be finite (N >= 1, 6)")
-    E = E[::-(-len(E) // int(es.get("max_points", EE_SUPPORT_DEFAULTS["max_points"])))]
-    pose = np.asarray(es["pulley_pose7"], dtype=np.float64)
-    R = _quat_mat_t(torch.as_tensor(pose[3:] / np.linalg.norm(pose[3:]))).numpy()
-    return np.concatenate([E[:, sl] @ R.T + pose[:3] for sl in POS_SLICES], axis=1)
-
-
-def ee_support_cost(es: dict, P: torch.Tensor, S_mm: torch.Tensor) -> torch.Tensor:
-    """``(K,)`` ``weight sum_k relu((d_k - radius_mm) / EE_SUPPORT_SCALE_MM)^2`` of rollouts
-    ``P (K, H+1, 6)`` (m) against the training EE positions ``S_mm`` (mm, ``P``'s frame)."""
-    c = {**EE_SUPPORT_DEFAULTS, **es}
-    Pk = P[:, -1:] if c["where"] == "terminal" else P[:, 1:]
-    d = nn_dist(Pk * 1e3, S_mm)
-    return float(c["weight"]) * ((d - float(c["radius_mm"])) / EE_SUPPORT_SCALE_MM).clamp_min(
-        0.0).square().sum(1)
-
-
-def support_hinge(P: torch.Tensor, sbox: torch.Tensor) -> torch.Tensor:
-    """``(..., 6)`` metres outside ``sbox`` = ``[lo, hi]`` ``(2, 6)`` per coordinate (0 inside)."""
-    return (sbox[0] - P).clamp_min(0.0) + (P - sbox[1]).clamp_min(0.0)
-
-
-def load_goal_set(path, n_x: int | None = None) -> np.ndarray:
-    """``(K, n_x)`` float64 ``z_goals`` of a ``goal_set.py`` npz."""
-    with np.load(Path(path), allow_pickle=False) as f:
-        G = np.asarray(f["z_goals"], dtype=np.float64)
-    if G.ndim != 2 or len(G) < 1 or (n_x is not None and G.shape[1] != n_x) \
-            or not np.all(np.isfinite(G)):
-        raise ValueError(f"goal set {path}: z_goals {G.shape} must be finite (K >= 1, {n_x})")
-    return G
-
-
-def load_value(v: dict, n_x: int, z_std) -> LatentValue:
-    """``MppiParams.value``'s network, refused unless trained on this latent (n_x, z_std)."""
-    vf = LatentValue.load(v["path"])
-    if vf.n_x != n_x:
-        raise ValueError(f"value {v['path']}: n_x {vf.n_x} != deploy {n_x}")
-    vf.check_z_std(z_std)
-    return vf
-
-
-def value_tensors(lcs: "TorchLcs", v: dict) -> tuple:
-    return load_value(v, lcs.n_x, lcs.z_std_np).torch_params(lcs.tensor)
-
-
-def softmin_sq(D: torch.Tensor, tau: float) -> torch.Tensor:
-    """Soft-min over the last dim: ``m - tau log mean exp(-(D - m) / tau)``, ``m = min D``; in
-    [min, mean], == min for tau 0 or one column, == D for identical columns."""
-    m = D.amin(-1)
-    if tau <= 0.0 or D.shape[-1] == 1:
-        return m
-    return m - tau * torch.log(torch.exp(-(D - m.unsqueeze(-1)) / tau).mean(-1))
-
-
-def goal_set_dist(z, G: np.ndarray, z_std: np.ndarray, tau: float = 0.0) -> float:
-    """Whitened distance of ``z`` to the set ``G`` (sqrt of ``softmin_sq`` of d^2, float64)."""
-    d2 = np.sum(((np.asarray(z, np.float64) - G) / z_std) ** 2, axis=-1)
-    return float(np.sqrt(softmin_sq(torch.as_tensor(d2, dtype=torch.float64), tau)))
-
-
-def scaled_weights(params: "MppiParams", scales: dict) -> "MppiParams":
-    """``params`` with ``w_q / w_T / w_r / w_s`` multiplied by ``scales`` (missing = 1)."""
-    return dataclasses.replace(params, **{k: getattr(params, k) * float(scales.get(k, 1.0))
-                                          for k in W_KEYS})
-
-
-@dataclass
-class GuardState:
-    mode: str  # normal | near | hold
-    prior_scale: float  # demo prior actions x this (0 = a zero-action prior)
-    goal: np.ndarray | None  # hold: the goal replacing the stage goal (None: keep it)
-    cold: bool  # hold entry: solve without the warm start / anchor
-    entered: bool  # hold entered on this latent
-
-
-class OvershootGuard:
-    """Seated-goal-distance logic of ``MppiParams.overshoot`` (no EE terms; d = whitened latent
-    distance to the seated goal). ``update`` once per solve -> ``GuardState``; ``params_for``
-    gives the solve's weights. Hold enters after ``streak`` latents under ``enter_k x tol`` or,
-    with ``stall``, in the last stage with min d under ``k x tol`` once d has not dropped ``eps``
-    below its last anchor for ``latents`` solves; it latches (``exit_k`` None) or leaves above
-    ``exit_k x tol``. Goal ``best`` = the episode's minimum-d latent so far.
-    """
-
-    def __init__(self, ov: dict) -> None:
-        check_overshoot(ov)
-        self.ov, self.tol = ov, float(ov["seat_tol"])
-        self.hold_cfg = ov.get("hold")
-        self.streak, self.hold, self.since_best = 0, False, 0
-        self.z_entry = self.z_best = None
-        self.d_best = self.d_anchor = math.inf
-
-    def fade(self, d: float, last_stage: bool) -> float:
-        if last_stage and self.ov.get("fade_last_stage"):
-            return 0.0
-        f = self.ov.get("fade")
-        if f is None:
-            return 1.0
-        lo, hi = float(f[0]) * self.tol, float(f[1]) * self.tol
-        return float(min(max((d - lo) / (hi - lo), 0.0), 1.0))
-
-    def update(self, z, d: float, last_stage: bool) -> GuardState:
-        h, entered = self.hold_cfg, False
-        sl = (h or {}).get("stall")
-        if d < self.d_anchor - (float(sl.get("eps", 0.0)) if sl else 0.0):
-            self.since_best, self.d_anchor = 0, d
-        else:
-            self.since_best += 1
-        if d < self.d_best:
-            self.z_best, self.d_best = np.array(z), d
-        if h is not None:
-            if self.hold and h.get("exit_k") is not None and d > float(h["exit_k"]) * self.tol:
-                self.hold, self.streak = False, 0
-            if not self.hold:
-                self.streak = self.streak + 1 if d < float(h.get("enter_k", 1.0)) * self.tol \
-                    else 0
-                stalled = (sl is not None and last_stage
-                           and self.since_best >= int(sl["latents"])
-                           and self.d_best < float(sl.get("k", 1.0)) * self.tol)
-                if self.streak >= int(h.get("streak", 1)) or stalled:
-                    self.hold, entered = True, True
-                    self.z_entry = np.array(z)
-        if self.hold:
-            g = h.get("goal", "seat")
-            goal = None if g == "seat" else self.z_entry if g == "entry" else self.z_best
-            return GuardState("hold", 0.0, goal, entered and bool(h.get("cold", False)), entered)
-        n = self.ov.get("near")
-        mode = "near" if n is not None and d < float(n["k"]) * self.tol else "normal"
-        return GuardState(mode, self.fade(d, last_stage), None, False, False)
-
-    def params_for(self, params: "MppiParams", mode: str) -> "MppiParams":
-        if mode == "hold":
-            return scaled_weights(params, self.hold_cfg)
-        if mode == "near":
-            return scaled_weights(params, {"w_T": self.ov["near"].get("w_T", 1.0)})
-        return params
-
-    def variants(self, params: "MppiParams") -> list["MppiParams"]:
-        """The non-normal weight sets this guard can use (node warm-up)."""
-        out = [self.params_for(params, "hold")] if self.hold_cfg is not None else []
-        return out + ([self.params_for(params, "near")] if self.ov.get("near") else [])
-
-
 @dataclass
 class _Box:
     lb: torch.Tensor
@@ -1085,60 +419,79 @@ def safety_limits(params: MppiParams) -> np.ndarray:
                  params.rot_envelope_rad()]
 
 
+# --- cost ---------------------------------------------------------------------------------------
+# Each helper adds its terms to ``cost`` in a fixed order (the solve must stay bit-identical).
+
 def plan_cost(lcs: TorchLcs, params: MppiParams, Z: torch.Tensor, P: torch.Tensor,
               R: torch.Tensor, U: torch.Tensor, z_goal: torch.Tensor, half: torch.Tensor,
               u_anchor: torch.Tensor | None, lim: torch.Tensor | None = None,
-              anchor_on: torch.Tensor | None = None, clr: Clearance | None = None,
-              C: torch.Tensor | None = None, u_demo: torch.Tensor | None = None,
-              prior_on: torch.Tensor | None = None, sbox: torch.Tensor | None = None,
-              gset: torch.Tensor | None = None, vt: tuple | None = None,
-              lsup: torch.Tensor | None = None, esup: torch.Tensor | None = None
-              ) -> tuple[torch.Tensor, torch.Tensor]:
+              anchor_on: torch.Tensor | None = None, C: torch.Tensor | None = None,
+              u_demo: torch.Tensor | None = None, prior_on: torch.Tensor | None = None,
+              terms: CostTerms | None = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """``(cost (K,), violating knots (K,), envelope violated (K,) bool)`` of rolled-out plans
-    (knots 1..H).
+    ``Z / P / R`` of inputs ``U`` (knots 1..H).
 
-    ``lim`` = ``safety_limits`` as a tensor (default: from ``params``); ``anchor_on`` (0/1)
-    gates the ``u_anchor`` smoothness term without a branch (CUDA graphs). ``C`` = the
-    ``Clearance`` distances of the rollout (knots under ``clr``'s thresholds count as violating;
-    ``clr.w_soft`` x hinge^2 below ``soft_margin_m``). ``z_goal`` ``(n_x,)`` or one row per
-    knot ``(H, n_x)``. ``u_demo`` ``(H, n_u)``: the demo action prior (``params.prior_weight``),
-    gated by ``prior_on`` (0/1) like the anchor. ``sbox`` ``(2, 6)``: ``params.support_box``'s
-    ``[lo, hi]`` as a tensor (default: from ``params``). ``gset`` ``(K_g, n_x)``: with
-    ``params.goal_set`` the set replacing ``z_goal`` (default: loaded from ``params``). ``vt``:
-    ``params.value``'s ``value_tensors`` (default: loaded from ``params``). ``lsup`` ``(M, n_x)``:
-    ``params.latent_support``'s training latents, whitened (default: loaded from ``params``).
-    ``esup`` ``(M, 6)``: ``params.ee_support``'s training EE positions in mm (default: loaded).
+    ``z_goal`` ``(n_x,)`` or one row per knot ``(H, n_x)``. ``lim``: ``safety_limits`` as a tensor
+    (default: from ``params``). ``anchor_on`` / ``prior_on`` (0/1 tensors) gate the anchor and
+    prior terms without a branch (CUDA graphs). ``C``: the rollout's ``Clearance`` distances.
+    ``terms``: the loaded optional terms (default: ``load_cost_terms``).
     """
     if lim is None:
         lim = lcs.tensor(safety_limits(params))
+    if terms is None:
+        terms = load_cost_terms(lcs, params, with_clearance=C is not None)
+    cost = _goal_cost(lcs, params, Z, z_goal, terms)
+    cost = _add_learned_costs(cost, lcs, params, Z, P, terms)
+    cost = _add_input_costs(cost, params, U, half, u_anchor, anchor_on, u_demo, prior_on)
+    env = (R[:, 1:, 0] > lim[4]) | (R[:, 1:, 1] > lim[5])  # rotation envelope
+    pz_f, pz_u = P[:, 1:, 2], P[:, 1:, 5]
+    bad = (pz_f < lim[0]) | (pz_f > lim[1]) | (pz_u < lim[2]) | (pz_u > lim[3]) | env
+    if C is not None:
+        clr = terms.clear
+        bad = bad | clearance_bad(C, clr.lim)
+        if clr.w_soft > 0.0:
+            cost = cost + clr.w_soft * (clr.soft_margin - C[:, 1:]).clamp_min(0.0).square().sum(
+                (1, 2))
+    sb = params.support_box
+    if sb is not None:
+        hinge = support_hinge(P[:, 1:], terms.sbox)
+        cost = cost + float(sb["weight"]) * (hinge * 1e3).square().sum((1, 2))
+        if sb.get("hard_margin_m") is not None:
+            bad = bad | (hinge > float(sb["hard_margin_m"])).any(-1)
+    n_bad = bad.sum(1).to(cost.dtype)
+    return cost + params.safety_penalty * n_bad, n_bad, env.any(1)
+
+
+def _goal_cost(lcs, params, Z, z_goal, terms) -> torch.Tensor:
+    """``w_q`` x summed + ``w_T`` x terminal whitened squared goal distance (or goal-set soft-min)."""
     w = 1.0 / lcs.z_std
     if params.goal_set is None:
         dz = (Z[:, 1:] - z_goal) * w
         track = (dz * dz).sum(-1)
     else:
-        if gset is None:
-            gset = lcs.tensor(load_goal_set(params.goal_set, lcs.n_x))
-        dz = (Z[:, 1:, None] - gset) * w
+        dz = (Z[:, 1:, None] - terms.gset) * w
         track = softmin_sq((dz * dz).sum(-1), float(params.goal_set_tau))
-    cost = params.w_q * track.sum(1) + params.w_T * track[:, -1]
+    return params.w_q * track.sum(1) + params.w_T * track[:, -1]
+
+
+def _add_learned_costs(cost, lcs, params, Z, P, terms) -> torch.Tensor:
+    """+ learned value, latent support, EE support (each when on)."""
     vv = params.value
     if vv is not None:
-        if vt is None:
-            vt = value_tensors(lcs, vv)
         if vv.get("where", "terminal") == "terminal":
-            cost = cost + float(vv["weight"]) * value_forward(vt, Z[:, -1])
+            cost = cost + float(vv["weight"]) * value_forward(terms.value, Z[:, -1])
         else:
-            cost = cost + float(vv["weight"]) * value_forward(vt, Z[:, 1:]).sum(1)
-    ls = params.latent_support
-    if ls is not None:
-        if lsup is None:
-            lsup = lcs.tensor(load_latent_support(ls, lcs.n_x) / lcs.z_std_np)
-        cost = cost + latent_support_cost(lcs, ls, Z, lsup)
-    es = params.ee_support
-    if es is not None:
-        if esup is None:
-            esup = lcs.tensor(load_ee_support(es) * 1e3)
-        cost = cost + ee_support_cost(es, P, esup)
+            cost = cost + float(vv["weight"]) * value_forward(terms.value, Z[:, 1:]).sum(1)
+    if params.latent_support is not None:
+        cost = cost + latent_support_cost(lcs, params.latent_support, Z, terms.lsup)
+    if params.ee_support is not None:
+        cost = cost + ee_support_cost(params.ee_support, P, terms.esup)
+    return cost
+
+
+def _add_input_costs(cost, params, U, half, u_anchor, anchor_on, u_demo, prior_on
+                     ) -> torch.Tensor:
+    """+ input size, smoothness (incl. vs the last sent input), demo prior; scaled by ``half``."""
     un = U / half
     cost = cost + params.w_r * (un * un).sum((1, 2))
     if params.w_s > 0.0:
@@ -1152,35 +505,10 @@ def plan_cost(lcs: TorchLcs, params: MppiParams, Z: torch.Tensor, P: torch.Tenso
         dd = (U - u_demo) / half
         term = params.prior_weight * (dd * dd).sum((1, 2))
         cost = cost + (term if prior_on is None else prior_on * term)
-    pz_f, pz_u = P[:, 1:, 2], P[:, 1:, 5]
-    env = (R[:, 1:, 0] > lim[4]) | (R[:, 1:, 1] > lim[5])
-    bad = (pz_f < lim[0]) | (pz_f > lim[1]) | (pz_u < lim[2]) | (pz_u > lim[3]) | env
-    if C is not None:
-        bad = bad | clearance_bad(C, clr.lim)
-        if clr.w_soft > 0.0:
-            cost = cost + clr.w_soft * (clr.soft_margin - C[:, 1:]).clamp_min(0.0).square().sum(
-                (1, 2))
-    sb = params.support_box
-    if sb is not None:
-        if sbox is None:
-            sbox = lcs.tensor(support_limits(sb))
-        hinge = support_hinge(P[:, 1:], sbox)
-        cost = cost + float(sb["weight"]) * (hinge * 1e3).square().sum((1, 2))
-        if sb.get("hard_margin_m") is not None:
-            bad = bad | (hinge > float(sb["hard_margin_m"])).any(-1)
-    n_bad = bad.sum(1).to(cost.dtype)
-    return cost + params.safety_penalty * n_bad, n_bad, env.any(1)
+    return cost
 
 
-def support_limits(sb: dict) -> np.ndarray:
-    """``(2, 6)`` float64 ``[lo, hi]`` of ``MppiParams.support_box``."""
-    return np.stack([np.asarray(sb[k], dtype=np.float64) for k in ("lo", "hi")])
-
-
-def clearance_bad(C: torch.Tensor, clim: torch.Tensor) -> torch.Tensor:
-    """``(K, H)`` knots 1..H with the UR or the Franka set under its threshold."""
-    return (C[:, 1:, 0] < clim[0]) | (C[:, 1:, 1] < clim[1])
-
+# --- the solver ---------------------------------------------------------------------------------
 
 def warm_start(u_prev_plan, H: int, n_u: int) -> np.ndarray:
     """Previous plan shifted by one, last input repeated (zeros without one)."""
@@ -1199,17 +527,23 @@ def _pick(x: torch.Tensor, i: torch.Tensor) -> torch.Tensor:
 
 
 ESS_GRID = np.logspace(-5.0, 3.0, 161)  # temperature candidates x median(J - min J)
-N_STATS = 10  # cost_min/mean, plan cost/viol, entropy, frac_pen, fallback, ess, temp, frac_env
-# clearance on: frac_clear_penalised, plan min UR / Franka (knots 1..H), plan violating knots,
-# knot-0 UR / Franka (the current poses)
-N_CLEAR_STATS = 6
+# The solve's scalar stats, packed after the plan / Z / P (``plan_violations`` int, ``fallback``
+# bool on the host).
+STAT_NAMES = ("cost_min", "cost_mean", "plan_cost", "plan_violations", "weight_entropy",
+              "frac_penalised", "fallback", "ess", "temperature_abs", "frac_env_penalised")
+N_STATS = len(STAT_NAMES)
+# With clearance: C (H+1, 2) of the plan, then these (m on the device, mm in the info).
+CLEAR_STAT_NAMES = ("frac_clear_penalised", "clear_min_ur_mm", "clear_min_f_mm",
+                    "clear_violating", "clear_now_ur_mm", "clear_now_f_mm")
+N_CLEAR_STATS = len(CLEAR_STAT_NAMES)
 
 
 class MppiSolver:
-    """One MPPI solve = ``n_iter`` passes + the mean plan's evaluation, on static buffers.
+    """One MPPI solve = ``n_iter`` passes + the mean plan's evaluation, on static ``s_*`` buffers.
 
     On CUDA the whole solve is one captured CUDA graph (fixed shapes; noise drawn into a static
     buffer before the replay); limits/anchor are buffer inputs so one graph serves every call.
+    Its outputs are packed into ``self.out`` (one device -> host copy, see ``_unpack``).
     """
 
     def __init__(self, lcs: TorchLcs, params: MppiParams, use_graph: bool | None = None
@@ -1229,21 +563,9 @@ class MppiSolver:
         cuda = lcs.device.type == "cuda"
         self.use_graph = cuda and params.cuda_graph if use_graph is None else use_graph
         self.roll = lcs.rollout_fused if cuda and params.fused_rollout else lcs.rollout
-        self.clear = clearance_for(lcs, params)
+        self.terms = load_cost_terms(lcs, params)
+        self.clear = self.terms.clear
         self.clear_fused = cuda and params.fused_rollout
-        self.s_sbox = (None if params.support_box is None
-                       else t(support_limits(params.support_box)))
-        self.g_set = (None if params.goal_set is None
-                      else load_goal_set(params.goal_set, nx))
-        self.s_gset = None if self.g_set is None else t(self.g_set)
-        self.vfn = None if params.value is None else load_value(params.value, nx, lcs.z_std_np)
-        self.s_value = None if self.vfn is None else self.vfn.torch_params(t)
-        self.lsup_np = (None if params.latent_support is None else
-                        load_latent_support(params.latent_support, nx) / lcs.z_std_np)
-        self.s_lsup = None if self.lsup_np is None else t(self.lsup_np)
-        self.esup_np = (None if params.ee_support is None
-                        else load_ee_support(params.ee_support) * 1e3)
-        self.s_esup = None if self.esup_np is None else t(self.esup_np)
         if self.clear is not None:
             self.s_q0 = t(np.tile([1.0, 0.0, 0.0, 0.0], (2, 1)))
         self.graph = None
@@ -1251,6 +573,7 @@ class MppiSolver:
             self._capture()
 
     def _weights(self, cost: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """``(w (K,), ESS, temperature)``: softmax of ``-cost / temperature``."""
         c = cost - cost.min()
         scale = c.median() + 1e-9
         if self.p.ess_frac is None:
@@ -1267,32 +590,34 @@ class MppiSolver:
             w, temp = _pick(W, idx), _pick(temps, idx)
         return w, 1.0 / (w * w).sum(), temp
 
+    def _cost(self, Z, P, R, U, C):
+        b = self.box
+        return plan_cost(self.lcs, self.p, Z, P, R, U, self.s_goal, b.half, self.s_anchor,
+                         lim=self.s_lim, anchor_on=self.s_anchor_on, C=C, u_demo=self.s_udemo,
+                         prior_on=self.s_prior_on, terms=self.terms)
+
     def _body(self) -> None:
-        lcs, p, box = self.lcs, self.p, self.box
+        """The captured solve: sample, roll out, cost, reweight x ``n_iter``; then the mean plan."""
+        p, box = self.p, self.box
         mean = torch.maximum(torch.minimum(self.s_mean0, box.ub), box.lb)
         for i in range(p.n_iter):
             U = torch.maximum(torch.minimum(mean + box.sigma * self.s_eps[i], box.ub), box.lb)
             U[0] = mean
             Z, P, R = self.roll(self.s_z0, self.s_p0, U, self.s_rot0, p.pgd_iters)
             C = self._clearance(P, U)
-            cost, n_bad, env = plan_cost(lcs, p, Z, P, R, U, self.s_goal, box.half, self.s_anchor,
-                                    self.s_lim, self.s_anchor_on, self.clear, C, self.s_udemo,
-                                    self.s_prior_on, self.s_sbox, self.s_gset, self.s_value,
-                                    self.s_lsup, self.s_esup)
+            cost, n_bad, env = self._cost(Z, P, R, U, C)
             w, ess, temp = self._weights(cost)
             mean = (w[:, None, None] * U).sum(0)
         Zm, Pm, Rm = self.roll(self.s_z0, self.s_p0, mean[None], self.s_rot0, p.pgd_iters)
         Cm = self._clearance(Pm, mean[None])
-        cost_m, bad_m, _ = plan_cost(lcs, p, Zm, Pm, Rm, mean[None], self.s_goal, box.half,
-                                  self.s_anchor, self.s_lim, self.s_anchor_on, self.clear, Cm,
-                                  self.s_udemo, self.s_prior_on, self.s_sbox, self.s_gset,
-                                  self.s_value, self.s_lsup, self.s_esup)
+        cost_m, bad_m, _ = self._cost(Zm, Pm, Rm, mean[None], Cm)
+        # fall back to the last pass's best sample when it violates fewer knots than the mean
         best = torch.argmin(cost)
         fb = (bad_m[0] > 0) & (_pick(n_bad, best) < bad_m[0])
         plan = torch.where(fb, _pick(U, best), mean)
         Zp = torch.where(fb, _pick(Z, best), Zm[0])
         Pp = torch.where(fb, _pick(P, best), Pm[0])
-        stats = torch.stack([
+        stats = torch.stack([  # STAT_NAMES
             cost.min(), cost.mean(), torch.where(fb, _pick(cost, best), cost_m[0]),
             torch.where(fb, _pick(n_bad, best), bad_m[0]),
             -(w * torch.log(w.clamp_min(EPS))).sum(), (n_bad > 0).to(cost.dtype).mean(),
@@ -1300,7 +625,7 @@ class MppiSolver:
         parts = [plan.reshape(-1), Zp.reshape(-1), Pp.reshape(-1), stats]
         if self.clear is not None:
             Cp = torch.where(fb, _pick(C, best), Cm[0])
-            parts += [Cp.reshape(-1), torch.stack([
+            parts += [Cp.reshape(-1), torch.stack([  # CLEAR_STAT_NAMES
                 clearance_bad(C, self.clear.lim).any(1).to(cost.dtype).mean(),
                 Cp[1:, 0].min(), Cp[1:, 1].min(),
                 clearance_bad(Cp[None], self.clear.lim).sum().to(cost.dtype),
@@ -1323,6 +648,29 @@ class MppiSolver:
         with torch.cuda.graph(self.graph):
             self._body()
 
+    def _unpack(self, out: np.ndarray
+                ) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict, dict]:
+        """``self.out`` on the host -> ``(plan (H, n_u), Z (H+1, n_x), P (H+1, 6), stats,
+        clearance stats)``."""
+        H, nu, nx = self.p.H, self.lcs.n_u, self.lcs.n_x
+        sizes = [H * nu, (H + 1) * nx, (H + 1) * N_P, N_STATS]
+        if self.clear is not None:
+            sizes += [(H + 1) * 2, N_CLEAR_STATS]
+        parts = np.split(out, np.cumsum(sizes)[:-1])
+        st = parts[3]
+        stats = dict(zip(STAT_NAMES, st))
+        stats["plan_violations"], stats["fallback"] = int(st[3]), bool(st[6])
+        if self.clear is not None:
+            cs = parts[5]
+            clear = {"frac_clear_penalised": cs[0], "clear_min_ur_mm": cs[1] * 1e3,
+                     "clear_min_f_mm": cs[2] * 1e3, "clear_violating": int(cs[3]),
+                     "clear_now_ur_mm": cs[4] * 1e3, "clear_now_f_mm": cs[5] * 1e3,
+                     "C": parts[4].reshape(H + 1, 2)}
+        else:
+            clear = {}
+        return (parts[0].reshape(H, nu), parts[1].reshape(H + 1, nx),
+                parts[2].reshape(H + 1, N_P), stats, clear)
+
     def solve(self, z0, p0, rot0, z_goal, u_prev_plan, gen: torch.Generator,
               limits: np.ndarray | None = None, q_now=None, u_demo=None
               ) -> tuple[np.ndarray, dict]:
@@ -1332,6 +680,7 @@ class MppiSolver:
         t0 = time.perf_counter()
         lcs, p = self.lcs, self.p
         H, nu, nx = p.H, lcs.n_u, lcs.n_x
+        # inputs -> the graph's static buffers
         self.s_z0.copy_(lcs.tensor(z0))
         self.s_p0.copy_(lcs.tensor(p0))
         self.s_rot0.copy_(lcs.tensor(np.zeros((2, 3)) if rot0 is None else rot0).reshape(2, 3))
@@ -1359,37 +708,19 @@ class MppiSolver:
             self.graph.replay()
         else:
             self._body()
-        out = self.out.double().cpu().numpy()
-        n_plan, n_z = H * nu, (H + 1) * nx
-        plan = out[:n_plan].reshape(H, nu)
-        Zp = out[n_plan:n_plan + n_z].reshape(H + 1, nx)
-        Pp = out[n_plan + n_z:n_plan + n_z + (H + 1) * N_P].reshape(H + 1, N_P)
-        extra = {}
-        if self.clear is not None:
-            n_c = (H + 1) * 2
-            cs = out[-N_CLEAR_STATS:]
-            out = out[:-N_CLEAR_STATS]
-            extra = {"frac_clear_penalised": cs[0], "clear_min_ur_mm": cs[1] * 1e3,
-                     "clear_min_f_mm": cs[2] * 1e3, "clear_violating": int(cs[3]),
-                     "clear_now_ur_mm": cs[4] * 1e3, "clear_now_f_mm": cs[5] * 1e3,
-                     "C": out[-n_c:].reshape(H + 1, 2)}
-            out = out[:-n_c]
-        st = out[-N_STATS:]
-        info = {"cost_min": st[0], "cost_mean": st[1], "plan_cost": st[2],
-                "plan_violations": int(st[3]), "weight_entropy": st[4], "frac_penalised": st[5],
-                "fallback": bool(st[6]), "ess": st[7], "temperature_abs": st[8],
-                "frac_env_penalised": st[9],
-                "goal_dist_H": (lcs.whitened_dist(Zp[-1], goal[-1]) if self.g_set is None else
-                                goal_set_dist(Zp[-1], self.g_set, lcs.z_std_np, p.goal_set_tau)),
-                "Z": Zp, "P": Pp,
-                **extra, "solve_ms": (time.perf_counter() - t0) * 1e3}
-        if self.vfn is not None:
-            info["value_H"] = float(self.vfn(Zp[-1]))
-        if self.lsup_np is not None:
-            d = nn_dist_np(Zp / lcs.z_std_np, self.lsup_np)
+        plan, Zp, Pp, stats, clear = self._unpack(self.out.double().cpu().numpy())
+        T = self.terms
+        info = {**stats,
+                "goal_dist_H": (lcs.whitened_dist(Zp[-1], goal[-1]) if T.gset_np is None else
+                                goal_set_dist(Zp[-1], T.gset_np, lcs.z_std_np, p.goal_set_tau)),
+                "Z": Zp, "P": Pp, **clear, "solve_ms": (time.perf_counter() - t0) * 1e3}
+        if T.vfn is not None:
+            info["value_H"] = float(T.vfn(Zp[-1]))
+        if T.lsup_np is not None:
+            d = nn_dist_np(Zp / lcs.z_std_np, T.lsup_np)
             info["support_d0"], info["support_dmax"] = float(d[0]), float(d[1:].max())
-        if self.esup_np is not None:
-            d = nn_dist_np(Pp * 1e3, self.esup_np)
+        if T.esup_np is not None:
+            d = nn_dist_np(Pp * 1e3, T.esup_np)
             info["ee_support_d0"], info["ee_support_dmax"] = float(d[0]), float(d[1:].max())
         return plan, info
 
@@ -1404,24 +735,9 @@ def goal_rows(z_goal, H: int, n_x: int) -> np.ndarray:
     return g.copy()
 
 
-def nn_dist_np(Q, S: np.ndarray) -> np.ndarray:
-    """``(n,)`` float64 Euclidean distance of each row of ``Q (n, d)`` to its nearest row of
-    ``S (M, d)``."""
-    q = np.asarray(Q, dtype=np.float64).reshape(-1, S.shape[1])
-    return np.sqrt(((q[:, None] - S[None]) ** 2).sum(-1).min(1))
-
+# --- entry points -------------------------------------------------------------------------------
 
 _SOLVERS: dict = {}
-_CLEARANCE: dict = {}
-
-
-def clearance_for(lcs: TorchLcs, params: MppiParams) -> Clearance | None:
-    if params.clearance is None:
-        return None
-    key = (id(lcs), repr(sorted(params.clearance.items())))
-    if key not in _CLEARANCE:
-        _CLEARANCE[key] = Clearance(params.clearance, lcs)
-    return _CLEARANCE[key]
 
 
 def solver_for(lcs: TorchLcs, params: MppiParams) -> MppiSolver:
@@ -1440,10 +756,8 @@ def mppi_plan(lcs: TorchLcs, params: MppiParams, z0, p0, rot0, z_goal, u_prev_pl
               gen: torch.Generator, q_now=None, u_demo=None) -> tuple[np.ndarray, dict]:
     """``(U (H, n_u) float64, info)``; ``u_prev_plan`` warm-starts and anchors smoothness.
 
-    Sample 0 of every pass is the current mean. The returned plan is the weighted mean, unless
-    it violates more safety knots than the best sample (rejection). ``q_now`` (2, 4) ``wxyz``:
-    the current orientations, needed with ``params.clearance``. ``z_goal`` ``(n_x,)`` or
-    ``(H, n_x)``; ``u_demo`` ``(H, n_u)`` = the demo action prior's inputs (``prior_*``).
+    ``q_now`` (2, 4) ``wxyz``: the current orientations, needed with ``params.clearance``.
+    ``z_goal`` ``(n_x,)`` or ``(H, n_x)``; ``u_demo`` ``(H, n_u)``: the demo action prior's inputs.
     """
     return solver_for(lcs, params).solve(z0, p0, rot0, z_goal, u_prev_plan, gen,
                                          safety_limits(params), q_now, u_demo)
@@ -1456,86 +770,14 @@ def rollout_cost(lcs: TorchLcs, params: MppiParams, z0, p0, rot0, z_goal, U,
     Ut = lcs.tensor(np.asarray(U, dtype=np.float64))[None]
     Z, P, R = lcs.rollout(z0, p0, Ut, rot0, params.pgd_iters)
     anchor = None if u_anchor is None else lcs.tensor(u_anchor)
-    clr = clearance_for(lcs, params)
-    if clr is not None and q_now is None:
+    terms = load_cost_terms(lcs, params)
+    if terms.clear is not None and q_now is None:
         raise ValueError("clearance needs q_now (the current wxyz orientations)")
-    C = None if clr is None else clr.torch_path(P, Ut, lcs.tensor(q_now))
+    C = None if terms.clear is None else terms.clear.torch_path(P, Ut, lcs.tensor(q_now))
     ud = None if u_demo is None else lcs.tensor(np.asarray(u_demo, dtype=np.float64))
     cost, n_bad, _ = plan_cost(lcs, params, Z, P, R, Ut, lcs.tensor(z_goal), box.half, anchor,
-                               clr=clr, C=C, u_demo=ud)
+                               C=C, u_demo=ud, terms=terms)
     return float(cost[0]), int(n_bad[0]), Z[0].double().cpu().numpy()
-
-
-class PolicyPrior:
-    """``prior_mode: policy``: the BC prior ``pi`` (``bc_prior.BcPrior`` weights) rolled through
-    the LCS from the current ``(z, P)``: ``u_k = clip(pi(z_k[, P_k]))`` to ``params.bounds`` (P
-    an input only for a "zp" prior),
-    ``z_{k+1}`` = LCS step, ``P_{k+1} = P_k + u_k[:6]``, k < H. Runs before the solve, as its own
-    CUDA graph on CUDA (the solver's graph is unchanged)."""
-
-    def __init__(self, path, lcs: TorchLcs, params: MppiParams, deploy=None,
-                 use_graph: bool | None = None) -> None:
-        from task_common.bc_prior import BcPrior
-
-        bc = BcPrior.load(path)
-        if bc.n_x != lcs.n_x or bc.n_u != lcs.n_u:
-            raise ValueError(f"bc_prior n_x/n_u {bc.n_x}/{bc.n_u} != deploy {lcs.n_x}/{lcs.n_u}")
-        if deploy is not None:
-            bc.check_deploy(deploy)
-        t = lcs.tensor
-        self.lcs, self.H, self.iters = lcs, params.H, params.pgd_iters
-        self.layers = [(t(w), t(b)) for w, b in bc.layers]
-        self.use_p = bc.inputs == "zp"
-        self.in_mean, self.in_std = t(bc.in_mean), t(bc.in_std)
-        self.u_mid, self.u_half = t(bc.u_mid), t(bc.u_half)
-        lb, ub = params.bounds(lcs)
-        self.lb, self.ub = t(lb), t(ub)
-        self.betas = lcs.nesterov_betas(self.iters)
-        self.s_z, self.s_p = t(np.zeros(lcs.n_x)), t(np.zeros(N_P))
-        self.graph = None
-        cuda = lcs.device.type == "cuda"
-        if (cuda and params.cuda_graph) if use_graph is None else use_graph:
-            self._capture()
-
-    def forward(self, Z: torch.Tensor, P: torch.Tensor) -> torch.Tensor:
-        """``u`` (unclipped) for ``Z (K, n_x)``, ``P (K, 6)`` (unused for a "z" prior)."""
-        x = ((torch.cat([Z, P], -1) if self.use_p else Z) - self.in_mean) / self.in_std
-        for i, (w, b) in enumerate(self.layers):
-            x = torch.addmm(b, x, w)
-            if i + 1 < len(self.layers):
-                x = torch.relu(x)
-        return self.u_mid + self.u_half * x
-
-    def _body(self) -> None:
-        z, p, out = self.s_z[None], self.s_p[None], []
-        for _ in range(self.H):
-            u = torch.maximum(torch.minimum(self.forward(z, p), self.ub), self.lb)
-            z, _ = self.lcs.step(z, u, p, self.iters, self.betas)
-            p = p + u[:, :N_P]
-            out.append(u[0])
-        self.out = torch.stack(out)
-
-    def _capture(self) -> None:
-        dev = self.lcs.device
-        s = torch.cuda.Stream(device=dev)
-        s.wait_stream(torch.cuda.current_stream(dev))
-        with torch.cuda.stream(s):
-            for _ in range(2):
-                self._body()
-        torch.cuda.current_stream(dev).wait_stream(s)
-        self.graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(self.graph):
-            self._body()
-
-    def __call__(self, z0, p0) -> np.ndarray:
-        """``(H, n_u)`` float64 prior sequence from ``z0 (n_x,)``, ``p0 (6,)``."""
-        self.s_z.copy_(self.lcs.tensor(z0).reshape(-1))
-        self.s_p.copy_(self.lcs.tensor(p0).reshape(-1))
-        if self.graph is not None:
-            self.graph.replay()
-        else:
-            self._body()
-        return self.out.double().cpu().numpy()
 
 
 # --- poses (wxyz, numpy) ------------------------------------------------------------------------

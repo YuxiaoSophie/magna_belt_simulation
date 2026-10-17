@@ -51,6 +51,7 @@ for _p in (REPO / "src", REPO / "scripts" / "lcs"):
 import overshoot_offline as oo
 import torch
 
+from task_common import mppi_costs
 from task_common.latent_encoder import LATENT_STATE_CHANNEL, latent_state_message
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -156,8 +157,8 @@ def b1(pre, tree) -> tuple[bool, str]:
     s0 = tree.solver_for(lcs, p)
     s1 = tree.solver_for(lcs, dataclasses.replace(p, support_box=good))
     s2 = tree.solver_for(lcs, dataclasses.replace(p, support_box={**good, "weight": 2.0}))
-    keyed = s0 is not s1 and s1 is not s2 and s0.s_sbox is None \
-        and torch.equal(s1.s_sbox, lcs.tensor(tree.support_limits(good)))
+    keyed = s0 is not s1 and s1 is not s2 and s0.terms.sbox is None \
+        and torch.equal(s1.terms.sbox, lcs.tensor(mppi_costs.support_limits(good)))
     return ok and keyed, (f"{len(yamls) - n_on} yamls: to_dict == pre + support_box None; {n_on} "
                           f"with the box load; {refused}/{len(bad)} bad blocks refused; solver "
                           f"keyed on the box {keyed}" + (f"; {notes[:3]}" if notes else ""))
@@ -193,7 +194,7 @@ def b2(tree) -> tuple[bool, str]:
         p_on = dataclasses.replace(p_off, support_box=sb)
         c_on, n_on, _ = tree.plan_cost(lcs, p_on, Z, Pt, R, U, goal, half, None)
         c_ex, n_ex, _ = tree.plan_cost(lcs, p_on, Z, Pt, R, U, goal, half, None,
-                                       sbox=lcs.tensor(tree.support_limits(sb)))
+                                       terms=mppi_costs.CostTerms(sbox=lcs.tensor(mppi_costs.support_limits(sb))))
         extra_bad = 0.0 if hm is None else (hinge > hm).any(-1).sum(-1)
         exp = w * want.sum((1, 2)) + p_off.safety_penalty * extra_bad
         got = (c_on - c_off).numpy()

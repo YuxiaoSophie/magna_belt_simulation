@@ -40,6 +40,7 @@ for _p in (REPO / "src", REPO / "scripts" / "lcs"):
 
 import torch
 
+from task_common import mppi_guards
 from task_common.latent_encoder import LATENT_STATE_CHANNEL, latent_state_message
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"  # cpu: clearance off (torch path slow)
@@ -253,7 +254,7 @@ def o3(pre_node, tree_node) -> tuple[bool, str]:
 
 
 def o4(tree) -> tuple[bool, str]:
-    G = tree.OvershootGuard
+    G = mppi_guards.OvershootGuard
     ok, notes = True, []
 
     def chk(c, msg):
@@ -330,7 +331,7 @@ def o5(tree, tree_node) -> tuple[bool, str]:
     ok, notes = True, []
     keys_ok = all({"d_seat", "prior_scale", "mode"} <= set(x) for x in rows)
     calls = calls[-len(rows):]  # drop the warm-up solves
-    g = tree.OvershootGuard(ov)
+    g = mppi_guards.OvershootGuard(ov)
     seat = node.stages[-1].goal
     base_w = node.params
     n_hold = 0

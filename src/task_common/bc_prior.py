@@ -6,7 +6,7 @@ An MLP ``pi -> u`` (12-d cmd_delta) as pure numpy weights in ``bc_prior.npz``; `
 ReLU hidden layers, ``u = u_mid + u_half * y`` (the deploy box's centre / half-width; zero-width
 channels -> 1).
 ``encoder_sha256`` = ``encoder_fingerprint`` of the deploy whose encoder made the latents; the
-torch rollout used by the node is ``mppi_lcs.PolicyPrior``. numpy only.
+torch rollout used by the node is ``mppi_guards.PolicyPrior``. numpy only.
 """
 
 from __future__ import annotations

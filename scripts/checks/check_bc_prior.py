@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Checks of the MILES-BC policy prior (``train_bc_prior.py``, ``task_common.bc_prior``,
-``MppiParams.prior_mode`` / ``bc_prior``, ``mppi_lcs.PolicyPrior``, node, loop ``demo_prior.mode``).
+``MppiParams.prior_mode`` / ``bc_prior``, ``mppi_guards.PolicyPrior``, node, loop ``demo_prior.mode``).
 
 B1 params: defaults demo / None; bad mode, policy without bc_prior, bc_prior without policy, policy
    + prior_sync, policy + stage_no_timeout_into refused; the cached solver ignores both fields.
@@ -50,6 +50,8 @@ for _p in (REPO / "src", REPO / "scripts" / "lcs"):
 
 import overshoot_offline as oo
 import torch
+
+from task_common import mppi_guards
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"  # cpu: clearance off
 CMP = REPO / "data/lcs/realfirst/cmp"
@@ -171,7 +173,7 @@ def b3(tree, bc_path: Path, zp_path: Path | None) -> tuple[bool, str]:
         if path is None:
             continue
         bc = BcPrior.load(path)
-        pp = tree.PolicyPrior(path, tl, prm, dep)
+        pp = mppi_guards.PolicyPrior(path, tl, prm, dep)
         rng = np.random.default_rng(0)
         Z = bc.in_mean[:bc.n_x] + bc.in_std[:bc.n_x] * rng.normal(size=(2000, bc.n_x)) * 1.5
         P = np.r_[0.37, 0.02, 0.06, 0.52, -0.03, 0.05] + 0.03 * rng.normal(size=(2000, 6))
@@ -195,8 +197,8 @@ def b3(tree, bc_path: Path, zp_path: Path | None) -> tuple[bool, str]:
                f"forward {dp:.1e} rollout {roll_p:.1e}")
         if torch.cuda.is_available():
             tc = tree.TorchLcs.from_deploy(dep, "cuda")
-            g = tree.PolicyPrior(path, tc, prm, dep)
-            e = tree.PolicyPrior(path, tc, prm, dep, use_graph=False)
+            g = mppi_guards.PolicyPrior(path, tc, prm, dep)
+            e = mppi_guards.PolicyPrior(path, tc, prm, dep, use_graph=False)
             gd = max(float(np.max(np.abs(g(Z[k], P[k]) - e(Z[k], P[k])))) for k in range(20))
             ok = ok and g.graph is not None and gd < 1e-6
             msg += f", CUDA graph vs eager {gd:.1e}"
@@ -234,7 +236,7 @@ def b4(tree_node, tree, bc_path: Path) -> tuple[bool, str]:
     other = json.loads(C1_0_DEPLOY.read_text())["deploy"]
     refused = 0
     try:
-        tree.PolicyPrior(bc_path, tree.TorchLcs.from_deploy(other, "cpu"), tree.MppiParams(), other)
+        mppi_guards.PolicyPrior(bc_path, tree.TorchLcs.from_deploy(other, "cpu"), tree.MppiParams(), other)
     except ValueError:
         refused = 1
     ok = len(rows) > 10 and worst < 1e-3 and log_ok and refused == 1

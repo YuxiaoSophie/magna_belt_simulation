@@ -14,12 +14,12 @@ per-frame latents from a time-indexed progress index with a bounded hold), ``--d
 Config ``prior_sync: stage`` (stage mode, off by default): the prior's demo index follows the
 stage (``prior_sync_index``) instead of the wall clock.
 Config ``prior_mode: policy`` + ``bc_prior: PATH`` (off by default): the prior sequence is the BC
-policy rolled through the LCS from the current state (``mppi_lcs.PolicyPrior``) instead of the
+policy rolled through the LCS from the current state (``mppi_guards.PolicyPrior``) instead of the
 demo's actions; JSONL ``prior_u0`` / ``prior_ms``.
 ``--waypoint-bank BANK.json`` (``latent_waypoints.py --bank-out``): at the first latent the
 reference demo (waypoints, tols, action prior with ``--demo-actions auto``) becomes the bank
 entry whose initial latent is nearest; ``--goal waypoints:PATH`` is the base until then.
-Config ``overshoot`` (``mppi_lcs.OvershootGuard``, off by default): on the latent distance to
+Config ``overshoot`` (``mppi_guards.OvershootGuard``, off by default): on the latent distance to
 the seated (last) goal, fade the demo prior's actions to zero, then hold (prior off, scaled
 weights, optional entry / best-latent goal); JSONL ``d_seat`` / ``prior_scale`` / ``mode``.
 Config ``support_box`` (``MppiParams.support_box``, off by default): soft data-support box on the
@@ -94,22 +94,23 @@ from task_common.latent_encoder import (
 from task_common.lcm_contract import LcmChannels
 from task_common.lcs_dataset import delta_rotvec
 from task_common.magna_process import check_private_url
-from task_common.mppi_lcs import (
+from task_common.mppi_costs import (
     EE_SUPPORT_DEFAULTS,
     LATENT_SUPPORT_DEFAULTS,
-    MppiParams,
-    OvershootGuard,
-    PolicyPrior,
-    TorchLcs,
     clearance_for,
-    franka_knots,
     goal_set_dist,
     load_goal_set,
     load_value,
+    support_limits,
+)
+from task_common.mppi_guards import OvershootGuard, PolicyPrior
+from task_common.mppi_lcs import (
+    MppiParams,
+    TorchLcs,
+    franka_knots,
     mppi_plan,
     qmul,
     quat_exp,
-    support_limits,
 )
 
 METADATA_NAME = "mppi_controller"

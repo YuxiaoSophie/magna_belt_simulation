@@ -58,6 +58,7 @@ for _p in (REPO / "src", REPO / "scripts" / "checks"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+from task_common import mppi_costs
 from task_common import mppi_lcs as tree
 
 ES = REPO / "data/lcs/realfirst/cmp/encoder_study"
@@ -137,15 +138,15 @@ def s1(head) -> tuple[bool, str]:
     s0 = tree.solver_for(lcs, p)
     s1_ = tree.solver_for(lcs, dataclasses.replace(p, latent_support=LS))
     s2 = tree.solver_for(lcs, dataclasses.replace(p, latent_support={**LS, "weight": 2.0}))
-    keyed = s0 is not s1_ and s1_ is not s2 and s0.s_lsup is None and s1_.s_lsup is not None
+    keyed = s0 is not s1_ and s1_ is not s2 and s0.terms.lsup is None and s1_.terms.lsup is not None
     with np.load(CACHE) as f:
         z = f["z_t"]
-    sub = tree.load_latent_support(LS, lcs.n_x)
-    sub7 = tree.load_latent_support({**LS, "max_points": 7})
+    sub = mppi_costs.load_latent_support(LS, lcs.n_x)
+    sub7 = mppi_costs.load_latent_support({**LS, "max_points": 7})
     stride = math.ceil(len(z) / 3000)
     sub_ok = (np.array_equal(sub, z[::stride]) and len(sub) <= 3000
               and np.array_equal(sub7, z[::math.ceil(len(z) / 7)]) and len(sub7) <= 7
-              and np.array_equal(tree.load_latent_support({**LS, "max_points": 10 ** 6}), z))
+              and np.array_equal(mppi_costs.load_latent_support({**LS, "max_points": 10 ** 6}), z))
     ok &= keyed and sub_ok
     notes.append(f"V21c_n0.yaml to_dict == pre + None, with the block == pre + it; "
                  f"{refused}/{len(bad)} bad blocks refused; solver keyed {keyed}; subsample "
@@ -156,7 +157,7 @@ def s1(head) -> tuple[bool, str]:
 def s2(head) -> tuple[bool, str]:
     rng = np.random.default_rng(1)
     lt, lh = (m.TorchLcs.from_deploy(DEPLOY, "cpu") for m in (tree, head))
-    S = tree.load_latent_support(LS, lt.n_x)
+    S = mppi_costs.load_latent_support(LS, lt.n_x)
     pt, ph = base_params(tree), base_params(head)
     K, H = 64, pt.H
     Z = rollouts(rng, S, lt.z_std_np, K, H)
@@ -205,7 +206,7 @@ def s2(head) -> tuple[bool, str]:
 def s3() -> tuple[bool, str]:
     rng = np.random.default_rng(2)
     lcs = tree.TorchLcs.from_deploy(DEPLOY, "cpu", torch.float64)
-    S = tree.load_latent_support(LS, lcs.n_x)
+    S = mppi_costs.load_latent_support(LS, lcs.n_x)
     p_off = tree.MppiParams(K=16, H=8)
     K, H = 16, 8
     Z = rollouts(rng, S, lcs.z_std_np, K, H)
@@ -228,8 +229,8 @@ def s3() -> tuple[bool, str]:
         rows.append(f"r {radius} w {weight} {where}: {int((want > 0).sum())}/{K} samples "
                     f"penalised")
     S_w = S / lcs.z_std_np
-    d_np = tree.nn_dist_np(Z[5] / lcs.z_std_np, S_w)
-    d_t = tree.nn_dist(t(Z[5]) / lcs.z_std, t(S_w)).numpy()
+    d_np = mppi_costs.nn_dist_np(Z[5] / lcs.z_std_np, S_w)
+    d_t = mppi_costs.nn_dist(t(Z[5]) / lcs.z_std, t(S_w)).numpy()
     rel_np = float(np.max(np.abs(d_np - d[5]) / d[5]))
     rel_t = float(np.max(np.abs(d_t - d[5]) / d[5]))
     ok = worst <= 1e-6 and rel_np <= 1e-9 and rel_t <= 1e-9
@@ -241,17 +242,17 @@ def s3() -> tuple[bool, str]:
 def s4(device: str) -> tuple[bool, str]:
     rng = np.random.default_rng(3)
     lcs = tree.TorchLcs.from_deploy(DEPLOY, "cpu")
-    S_w = lcs.tensor(tree.load_latent_support(LS, lcs.n_x) / lcs.z_std_np)
+    S_w = lcs.tensor(mppi_costs.load_latent_support(LS, lcs.n_x) / lcs.z_std_np)
     Q = lcs.tensor(rng.normal(size=(37, 5, lcs.n_x)) * 2.0)
-    full = tree.nn_dist(Q, S_w, chunk=10 ** 9)
-    diffs = {c: float((tree.nn_dist(Q, S_w, chunk=c) - full).abs().max())
+    full = mppi_costs.nn_dist(Q, S_w, chunk=10 ** 9)
+    diffs = {c: float((mppi_costs.nn_dist(Q, S_w, chunk=c) - full).abs().max())
              for c in (1, 7, 64, None)}
     ok_chunk = all(v <= 1e-4 for v in diffs.values())  # float32 matmul blocking differs per chunk
     n_q, M = 1024 * 24, S_w.shape[0]
-    rows = max(1, tree.LATENT_SUPPORT_CHUNK_ELEMS // M)
+    rows = max(1, mppi_costs.LATENT_SUPPORT_CHUNK_ELEMS // M)
     mb = rows * M * 4 / 1e6
     # Solver: its plan cost == rollout_cost of its plan with the term biting.
-    S = tree.load_latent_support(LS, lcs.n_x)
+    S = mppi_costs.load_latent_support(LS, lcs.n_x)
     z0 = S[100] + lcs.z_std_np * 1.2 * rng.normal(size=lcs.n_x)
     goal = S[-1] + lcs.z_std_np * 2.0
     p0 = np.r_[0.37, 0.0, 0.08, 0.51, -0.02, 0.09]
@@ -305,7 +306,7 @@ def s5(seeds: int, out_json: Path | None) -> tuple[bool, str]:
     sv = pt.solves
     lcs = tree.TorchLcs.from_deploy(DEPLOY, "cpu")
     nx = lcs.n_x
-    S = tree.load_latent_support(LS, nx)
+    S = mppi_costs.load_latent_support(LS, nx)
     Rp = pulley_rot()
     t_rel = np.array([s.t[0] for s in sv]) - sv[0].t[0]
     picks = sorted({int(np.argmin(np.abs(t_rel - tt))) for tt in (0.5, 0.83, 1.17, 1.5, 2.0)})
@@ -419,11 +420,11 @@ def e1() -> tuple[bool, str]:
     s0 = tree.solver_for(lcs, p)
     s1_ = tree.solver_for(lcs, dataclasses.replace(p, ee_support=ES_))
     s2 = tree.solver_for(lcs, dataclasses.replace(p, ee_support={**ES_, "radius_mm": 20.0}))
-    keyed = s0 is not s1_ and s1_ is not s2 and s0.s_esup is None and s1_.s_esup is not None
-    W = tree.load_ee_support(ES_)
+    keyed = s0 is not s1_ and s1_ is not s2 and s0.terms.esup is None and s1_.terms.esup is not None
+    W = mppi_costs.load_ee_support(ES_)
     back = ee_pulley_mm(W, ES_["pulley_pose7"])
     frame_err = float(np.abs(back - ee_train_mm(ES_)).max())
-    W7 = tree.load_ee_support({**ES_, "max_points": 7})
+    W7 = mppi_costs.load_ee_support({**ES_, "max_points": 7})
     ok &= keyed and frame_err < 1e-9 and len(W) <= 3000 and len(W7) <= 7
     return bool(ok), (f"from_yaml carries the block; {refused}/{len(bad)} bad blocks refused; "
                       f"solver keyed {keyed}; {len(W)} points (stride); P frame -> "
@@ -434,7 +435,7 @@ def e3() -> tuple[bool, str]:
     rng = np.random.default_rng(4)
     lcs = tree.TorchLcs.from_deploy(DEPLOY, "cpu", torch.float64)
     K, H = 16, 8
-    P = ee_rollouts(rng, tree.load_ee_support(ES_), K, H)
+    P = ee_rollouts(rng, mppi_costs.load_ee_support(ES_), K, H)
     t = lcs.tensor
     Z = t(rng.normal(size=(K, H + 1, lcs.n_x)))
     rest = (t(P), t(np.zeros((K, H + 1, 2))), t(rng.normal(size=(K, H, 12)) * 1e-3),
@@ -454,7 +455,7 @@ def e3() -> tuple[bool, str]:
         rel[want == 0.0] = np.abs(got[want == 0.0])
         worst = max(worst, float(rel.max()))
         rows.append(f"r {r:g} w {w:g} {where}: {int((want > 0).sum())}/{K} penalised")
-    d_np = tree.nn_dist_np(P[5] * 1e3, tree.load_ee_support(ES_) * 1e3)
+    d_np = mppi_costs.nn_dist_np(P[5] * 1e3, mppi_costs.load_ee_support(ES_) * 1e3)
     rel_np = float(np.max(np.abs(d_np - d[5]) / d[5]))
     ok = worst <= 1e-6 and rel_np <= 1e-9
     return ok, (f"term vs pulley-frame numpy NN max rel err {worst:.1e} ({'; '.join(rows)}; d "
@@ -464,14 +465,14 @@ def e3() -> tuple[bool, str]:
 def e4() -> tuple[bool, str]:
     rng = np.random.default_rng(5)
     lcs = tree.TorchLcs.from_deploy(DEPLOY, "cpu")
-    S = tree.load_ee_support(ES_)
+    S = mppi_costs.load_ee_support(ES_)
     S_mm = lcs.tensor(S * 1e3)
     Q = lcs.tensor(ee_rollouts(rng, S, 37, 4) * 1e3)
-    full = tree.nn_dist(Q, S_mm, chunk=10 ** 9)
-    diffs = {c: float((tree.nn_dist(Q, S_mm, chunk=c) - full).abs().max())
+    full = mppi_costs.nn_dist(Q, S_mm, chunk=10 ** 9)
+    diffs = {c: float((mppi_costs.nn_dist(Q, S_mm, chunk=c) - full).abs().max())
              for c in (1, 7, 64, None)}
     ok_chunk = all(v <= 1e-3 for v in diffs.values())  # mm; float32 matmul blocking differs per chunk
-    Sl = tree.load_latent_support(LS, lcs.n_x)
+    Sl = mppi_costs.load_latent_support(LS, lcs.n_x)
     z0, goal = Sl[100], Sl[-1] + lcs.z_std_np * 2.0
     p0 = S[50] + np.r_[0.0, 0.04, 0.0, 0.0, 0.0, 0.03]  # 50 mm off one training row
     prm = base_params(tree, K=256, n_iter=2, ee_support={**ES_, "radius_mm": 20.0,
@@ -512,7 +513,7 @@ def e5(seeds: int, out_json: Path | None) -> tuple[bool, str]:
     with np.load(CACHE) as f:
         full = np.asarray(f["ee_pos"], np.float64) * 1e3
     d_full = cKDTree(full).query(ee_pulley_mm(P0, ES_["pulley_pose7"]))[0]
-    d_sub = tree.nn_dist_np(P0 * 1e3, tree.load_ee_support(ES_) * 1e3)
+    d_sub = mppi_costs.nn_dist_np(P0 * 1e3, mppi_costs.load_ee_support(ES_) * 1e3)
     m10 = t_rel < 10.0
     at = {tt: int(np.argmin(np.abs(t_rel - tt))) for tt in (0.0, 1.0, 2.0, 3.0, 5.0)}
     t_max = t_rel[m10][np.argmax(d_full[m10])]

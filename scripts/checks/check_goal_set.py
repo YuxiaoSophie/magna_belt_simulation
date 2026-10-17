@@ -55,6 +55,7 @@ import torch
 from check_support_box import load_loop, load_pair
 from check_waypoint_schedule import dry, mtimes
 
+from task_common import mppi_costs
 from task_common.latent_encoder import LATENT_STATE_CHANNEL, latent_state_message
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -146,7 +147,7 @@ def g1(pre, tree, S) -> tuple[bool, str]:
         for Z in (np.zeros((0, 10)), np.zeros((3, 9)), np.full((2, 10), np.nan)):
             np.savez(Path(tmp) / "b.npz", z_goals=Z)
             try:
-                tree.load_goal_set(Path(tmp) / "b.npz", 10)
+                mppi_costs.load_goal_set(Path(tmp) / "b.npz", 10)
             except ValueError:
                 bad_npz += 1
     lcs = tree.TorchLcs.from_deploy(DEPLOY, DEVICE)
@@ -154,8 +155,8 @@ def g1(pre, tree, S) -> tuple[bool, str]:
     s0 = tree.solver_for(lcs, q)
     s1 = tree.solver_for(lcs, dataclasses.replace(q, goal_set=S["demo14"]))
     s2 = tree.solver_for(lcs, dataclasses.replace(q, goal_set=S["demo14"], goal_set_tau=1.0))
-    keyed = (s0 is not s1 and s1 is not s2 and s0.s_gset is None
-             and torch.equal(s1.s_gset, lcs.tensor(S["Z14"])))
+    keyed = (s0 is not s1 and s1 is not s2 and s0.terms.gset is None
+             and torch.equal(s1.terms.gset, lcs.tensor(S["Z14"])))
     ok = ok and refused == 5 and bad_npz == 3 and keyed
     return ok, (f"{n} yamls: to_dict == pre + goal_set None / tau 0; {refused}/5 bad params, "
                 f"{bad_npz}/3 bad npz refused; solver keyed on the set {keyed}"
@@ -197,7 +198,7 @@ def g2(tree, S) -> tuple[bool, str]:
                 pr = dataclasses.replace(p0, goal_set=str(Path(tmp) / "r.npz"), goal_set_tau=tau)
                 c1, n1, _ = tree.plan_cost(lcs, pr, Z, P, R, U, g, half, None)
                 c2, _, _ = tree.plan_cost(lcs, pr, Z, P, R, U, g, half, None,
-                                          gset=lcs.tensor(G))
+                                          terms=mppi_costs.CostTerms(gset=lcs.tensor(G)))
                 want = p0.w_q * (ref - single).sum(1) + p0.w_T * (ref - single)[:, -1]
                 if not (np.allclose((c1 - c0).numpy(), want, rtol=1e-10, atol=1e-9)
                         and torch.equal(c1, c2) and torch.equal(n0, n1)
@@ -205,7 +206,7 @@ def g2(tree, S) -> tuple[bool, str]:
                     ok = False
                     notes.append(f"random set tau {tau}")
                 z = Zn[0, 3]
-                gd = tree.goal_set_dist(z, G, zs, tau)
+                gd = mppi_costs.goal_set_dist(z, G, zs, tau)
                 d2 = (((z - G) / zs) ** 2).sum(-1)
                 r = d2.min() if tau == 0 else d2.min() - tau * np.log(np.exp(-(d2 - d2.min())
                                                                             / tau).mean())
@@ -259,7 +260,7 @@ def g3(pre, tree, S) -> tuple[bool, str]:
                                                          "goal_set_tau": 1.0})
     c, nb, _ = tree.rollout_cost(lcs, prm, z[0], p0, None, wp.z_wp[-1], U1, u_demo=ud)
     rel = abs(c - info["plan_cost"]) / max(abs(c), 1.0)
-    gdh = tree.goal_set_dist(info["Z"][-1], S["Z14"], lcs.z_std_np, 1.0)
+    gdh = mppi_costs.goal_set_dist(info["Z"][-1], S["Z14"], lcs.z_std_np, 1.0)
     ok = ok and rel < 1e-4 and nb == info["plan_violations"] \
         and abs(gdh - info["goal_dist_H"]) < 1e-9
     return ok, (f"{n} configs x cold + warm: set off pre == tree, set of 1 == off (plans, stats); "
@@ -339,7 +340,7 @@ def g4(pre_node, tree_node, tree, S) -> tuple[bool, str]:
         if r["stage"] != last:
             continue
         z = zmap[int(r["utime"])]
-        d_ok = d_ok and abs(r["dist"] - tree.goal_set_dist(z, S["Z14"], zs, 0.5)) < 1e-12 \
+        d_ok = d_ok and abs(r["dist"] - mppi_costs.goal_set_dist(z, S["Z14"], zs, 0.5)) < 1e-12 \
             and abs(r["d_single"] - lcs.whitened_dist(z, goal)) < 1e-12
     ok = ok and plans_before and d_ok and n_diff > 0
     # "reached" and skip-ahead on a set member far from the goal demo

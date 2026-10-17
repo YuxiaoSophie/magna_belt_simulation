@@ -5,7 +5,7 @@ state: the 2F-85 colliders frozen in the UR ``tracking_frame`` (``Gripper.points
 as-held set), the Franka hand's mesh colliders frozen in ``finger_tip``, the plate box and the
 revolved pulleys (all world frame), plus the two clearance thresholds. :func:`distance_numpy`
 is the reference (``Board.min_distance`` on the transformed sets, i.e. ``Gripper.predict``);
-``mppi_lcs`` runs the same maths batched on the GPU.
+``mppi_costs.Clearance`` runs the same maths batched on the GPU.
 """
 
 from __future__ import annotations

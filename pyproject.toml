@@ -25,3 +25,11 @@ newton = { path = "external/newton", editable = true }
 # First-party roots: src/ for the task packages, lcmtypes/ for the generated dairlib/drake/robotiq
 # packages (see src/task_common/__init__.py).
 src = ["src", "lcmtypes"]
+line-length = 100
+# generated LCM types, vendored newton, one-off experiment scripts under data/
+extend-exclude = ["lcmtypes", "external", "data"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.1",
+]

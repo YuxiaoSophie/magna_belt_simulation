@@ -456,9 +456,9 @@ T1ga_f = T1ga + 42 more operator attempts (39 failed). Details: `docs/realfirst-
 | V47a | `v12_82/orig544l16/JPGGM544L16_s4` | V44 recipe, latent 16 | T1ga_f_tr | 4 | not run (decoder probe 3.87 mm) | V12-82 |
 | V47b | `v12_82/orig544l16/JPGGM544L16_s6` | V44 recipe, latent 16 | T1ga_f_tr | 6 | not run (decoder probe 2.86 mm) | V12-82 |
 | V47c | `v12_82/orig544l16/JPGGM544L16_s5` | V44 recipe, latent 16 (collapsed dynamics, eff_rank 1.26) | T1ga_f_tr | 5 | not run (decoder probe 2.57 mm) | V12-82 |
-| V48a | `v12_88/v48/V48_s4` | V45 recipe without current-state recon or the one-step decoded next state; decoded LCS rollout recon at k 1..7 (belt_ms K 7, γ 0.9, multi-step latent weight 0); violation grad to the encoder on | T1ga_f_tr | 4 | suite pending (held-out h7 3.62 mm) | V12-88 |
-| V48b | `v12_88/v48/V48_s6` | V45 recipe without current-state recon or the one-step decoded next state; decoded LCS rollout recon at k 1..7 (belt_ms K 7, γ 0.9, multi-step latent weight 0); violation grad to the encoder on (h24 rollout diverges: 506 mm) | T1ga_f_tr | 6 | suite pending (h7 3.12 mm) | V12-88 |
-| V48c | `v12_88/v48/V48_s5` | V45 recipe without current-state recon or the one-step decoded next state; decoded LCS rollout recon at k 1..7 (belt_ms K 7, γ 0.9, multi-step latent weight 0); violation grad to the encoder on; 1 contact mode on held-out data | T1ga_f_tr | 5 | suite pending (h7 3.49 mm) | V12-88 |
+| V48a | `v12_88/v48/V48_s4` | V45 recipe without current-state recon or the one-step decoded next state; decoded LCS rollout recon at k 1..7 (belt_ms K 7, γ 0.9, multi-step latent weight 0); violation grad to the encoder on | T1ga_f_tr | 4 | H 7 UR30/F20: 18/20 (up-20 0/2) (held-out h7 3.62 mm) | V12-88 |
+| V48b | `v12_88/v48/V48_s6` | V45 recipe without current-state recon or the one-step decoded next state; decoded LCS rollout recon at k 1..7 (belt_ms K 7, γ 0.9, multi-step latent weight 0); violation grad to the encoder on (h24 rollout diverges: 506 mm) | T1ga_f_tr | 6 | H 7 UR30/F20: **20/20** (h7 3.12 mm) | V12-88 |
+| V48c | `v12_88/v48/V48_s5` | V45 recipe without current-state recon or the one-step decoded next state; decoded LCS rollout recon at k 1..7 (belt_ms K 7, γ 0.9, multi-step latent weight 0); violation grad to the encoder on; 1 contact mode on held-out data | T1ga_f_tr | 5 | H 7 UR30/F20: 11/20 (slanted 9) (h7 3.49 mm) | V12-88 |
 
 V21c with the EE data-support MPPI cost (weights 1 / 10): 12/22 each (V12-59b, eval tags
 `V21c_n0_ees1/10`, no new model).

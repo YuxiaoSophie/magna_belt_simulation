@@ -63,7 +63,7 @@ KEYS_OPTIONAL = (
 BELT_SEG_KEY = "pcd_belt_seg"
 BELT_SEG_META_KEYS = ("version", "frame", "pulley_pose7_known", "noise_spec", "seg_spec",
                       "source")
-BELT_SEG_SOURCES = ("record", "offline")
+BELT_SEG_SOURCES = ("record", "offline", "rerender")  # rerender: scripts/lcs/rerender_clouds.py
 LEGACY_CLOUD_KEYS = ("pcd_kept", "pcd_removed")
 EXTRA_PREFIX = "sim_"
 _RESERVED_EXTRAS = ("step", "time", "meta")

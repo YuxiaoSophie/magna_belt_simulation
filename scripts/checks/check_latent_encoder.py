@@ -10,7 +10,10 @@ E10 (``belt_cloud_pointnet`` deploys only) resample determinism + permutation in
 A ``belt_cloud_pointmae`` deploy (torch Point-MAE encoder) runs the belt-cloud path; its z is
 order-free through the sorting resample only, and batch / single encodes agree to the float32 tol.
 A ``belt_cloud_pointnet`` deploy runs E0-E4 on its segmented pulley-frame clouds (``pc_raw`` ->
-``pc_in``), z to REF_Z_F32_TOL_REL x max(1, max|z|) of the float32 torch reference.
+``pc_in``), z to REF_Z_F32_TOL_REL x max(1, max|z|) of the float32 torch reference. A
+``scene_belt_prop_pointnet`` deploy (V4a's inputs, ``LatentEncoder``) runs the V4a checks with E1
+needing one resize path only (its clouds may all be shorter than ``num_points``) and E2 at the
+deploy's ``reference_z_f32_tol_rel`` x max(1, max|z|) (pc_global likewise).
 ``[SKIP]`` (exit 0) if the deploy export is absent.
 
 Run:
@@ -52,6 +55,14 @@ REF_Z_F32_TOL_REL = 1e-5
 
 def _belt_cloud(ctx: SimpleNamespace) -> bool:
     return isinstance(ctx.enc, le.BeltCloudPointNetEncoder)
+
+
+def _f32_tol_rel(ctx: SimpleNamespace) -> float | None:
+    """The deploy's float32 reference tol of a scene_belt_prop_pointnet export, else None."""
+    with np.load(ctx.deploy, allow_pickle=False) as d:
+        if "encoder_type" not in d.files or str(d["encoder_type"]) != le.SCENE_BELT_PROP_TYPE:
+            return None
+        return max(REF_Z_F32_TOL_REL, float(d["reference_z_f32_tol_rel"]))
 
 
 def _require(ok: bool, message: str) -> None:
@@ -145,8 +156,12 @@ def check_e1(ctx: SimpleNamespace) -> str:
             n_lin += 1
         else:
             n_tile += 1
-    _require(n_lin > 0 and n_tile > 0, f"linspace {n_lin} / tiling {n_tile}: a path is missing")
-    return f"K={len(r['pc_raw'])} bit-exact (linspace {n_lin}, tiling {n_tile}); belt identity"
+    if _f32_tol_rel(ctx) is None:
+        _require(n_lin > 0 and n_tile > 0, f"linspace {n_lin} / tiling {n_tile}: a path is missing")
+    miss = (f" [{'linspace' if not n_lin else 'tiling'} path not covered by the reference frames]"
+            if not (n_lin and n_tile) else "")
+    return (f"K={len(r['pc_raw'])} bit-exact (linspace {n_lin}, tiling {n_tile}); belt "
+            f"identity{miss}")
 
 
 @check("E2 encoder vs torch z")
@@ -160,12 +175,16 @@ def check_e2(ctx: SimpleNamespace) -> str:
     zb = ctx.enc.encode_batch(list(r["pc_raw"]), r["prop"], r["belt_raw"])
     b_err = float(np.abs(zb - r["z"]).max())
     g_err = float(np.abs(ctx.enc.pc_global(r["pc_resized"]) - r["pc_global"]).max())
+    rel = _f32_tol_rel(ctx)
+    tol = 1e-5 if rel is None else max(1e-5, rel * max(1.0, float(np.abs(r["z"]).max())))
+    g_tol = 1e-5 if rel is None else 1e-5 * max(1.0, float(np.abs(r["pc_global"]).max()))
     _require(z.dtype == np.float64 and z.shape == r["z"].shape, f"z {z.dtype} {z.shape}")
-    _require(z_err <= 1e-5, f"max |encode - z| = {z_err:.2e} > 1e-5")
-    _require(b_err <= 1e-5, f"max |encode_batch - z| = {b_err:.2e} > 1e-5")
-    _require(g_err <= 1e-5, f"max |pc_global - ref| = {g_err:.2e} > 1e-5")
+    _require(z_err <= tol, f"max |encode - z| = {z_err:.2e} > {tol:.1e}")
+    _require(b_err <= tol, f"max |encode_batch - z| = {b_err:.2e} > {tol:.1e}")
+    _require(g_err <= g_tol, f"max |pc_global - ref| = {g_err:.2e} > {g_tol:.1e}")
     return (f"max |encode - z| {z_err:.2e}, encode_batch {b_err:.2e}, pc_global {g_err:.2e} "
-            f"(|z| max {np.abs(r['z']).max():.2f})")
+            f"(|z| max {np.abs(r['z']).max():.2f}"
+            + (")" if rel is None else f"; tol z {tol:.1e}, pc_global {g_tol:.1e})"))
 
 
 def _e2_belt_cloud(ctx: SimpleNamespace) -> str:

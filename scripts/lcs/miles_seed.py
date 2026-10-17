@@ -111,6 +111,18 @@ def demo_start_file(name: str) -> Path:
     return Path(start[0]) if start else GV / set_name / f"{vid}_osc.npz"
 
 
+def load_ref(name: str) -> dict:
+    """A registered demo (marks from its phases), or an MPC rollout given ``--extra-demo`` marks."""
+    entry = DEMOS[name]
+    if len(entry) < 5:
+        return dp.load_demo(entry[0])
+    with np.load(entry[0], allow_pickle=True) as d:
+        ee_f, ee_u, t = (np.asarray(d[k], np.float64) for k in ("sim_ee_franka", "sim_ee_ur", "sim_time"))
+    if abs(float(np.median(np.diff(t))) - dp.FRAME_DT_S) > 1e-6:
+        raise ValueError(f"{entry[0]}: frame period != {dp.FRAME_DT_S}")
+    return {"path": str(entry[0]), "ee_f": ee_f, "ee_u": ee_u, "labels": None, **entry[4]}
+
+
 TAU_BUFFERS = (V11 / "seed" / "buffer.json", V11 / "seed_ext" / "buffer.json")
 LCS_ROOT = Path.home() / "git" / "lcs_learning"
 PY_LCS = LCS_ROOT / ".venv" / "bin" / "python"
@@ -554,7 +566,7 @@ class Collector:
         args, sim, ctx = self.args, self.sim, self.ctx
         ep, set_name, vid = DEMOS[name][:3]
         start_file = demo_start_file(name)
-        demo = dp.load_demo(ep)
+        demo = load_ref(name)
         with np.load(ep, allow_pickle=True) as d:
             demo.update(seg=d["pcd_belt_seg"], belt=np.asarray(d["sim_belt_xyz"], np.float64),
                         state=np.asarray(d["state"]), pcd_belt=np.asarray(d["pcd_belt"]))
@@ -888,8 +900,9 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", type=Path, required=True, help="new dir")
     p.add_argument("--lcm-url", required=True)
     p.add_argument("--demos", default=",".join(DEMOS), help=f"comma list of {sorted(DEMOS)}")
-    p.add_argument("--extra-demo", action="append", default=[], metavar="NAME=EPISODE,START",
-                   help="register another demo: its episode .npz and start snapshot .npz")
+    p.add_argument("--extra-demo", action="append", default=[], metavar="NAME=EPISODE,START[,M:L:H]",
+                   help="register another demo: its episode .npz and start snapshot .npz; an MPC "
+                        "rollout (no demo phases) also needs its move0:latch:first_hold frames")
     p.add_argument("--waypoints", type=lambda s: [int(x) for x in s.split(",")], default=None,
                    help="explicit demo frames (default: the stride rule)")
     p.add_argument("--wp-stride", type=int, default=5)
@@ -925,6 +938,8 @@ def create_parser() -> argparse.ArgumentParser:
                         "walk continues; stop only on grasp loss / unreachable")
     p.add_argument("--diag-restore", action="store_true",
                    help="sim-only diagnostic: restore the waypoint after an invalid cycle")
+    p.add_argument("--cloud-noise", default="off", metavar="PRESET|JSON",
+                   help="belt-seg cloud noise (belt_cloud presets: off, mild, real_like, harsh)")
     p.add_argument("--osc-timeout-s", type=float, default=5.0)
     p.add_argument("--no-loader-check", dest="loader_check", action="store_false")
     p.add_argument("--dry-run", action="store_true")
@@ -937,10 +952,13 @@ def main() -> int:
     harness.check_private_url(args.lcm_url)
     for x in args.extra_demo:
         name, rest = x.split("=", 1)
-        ep, start = (REPO_ROOT / Path(v.strip()) for v in rest.split(","))
+        ep, start, *mk = (v.strip() for v in rest.split(","))
+        ep, start = REPO_ROOT / Path(ep), REPO_ROOT / Path(start)
         if not (ep.is_file() and start.is_file()):
             raise SystemExit(f"--extra-demo {x}: missing episode or start file")
         DEMOS[name] = (ep, start.parent.name, start.name.removesuffix("_osc.npz"), start)
+        if mk:
+            DEMOS[name] += (dict(zip(("move0", "latch", "first_hold"), map(int, mk[0].split(":")), strict=True)),)
     names = [x.strip() for x in args.demos.split(",") if x.strip()]
     if unknown := [x for x in names if x not in DEMOS]:
         raise SystemExit(f"--demos {unknown}: not in {sorted(DEMOS)}")
@@ -954,7 +972,7 @@ def main() -> int:
     logger.info(f"[MILES] tau {tau} mm (p{args.tau_pct:g} of {spread['pairs']} same-grasp demo "
                 f"pairs, {time.perf_counter() - t_spread:.1f} s), GT tau {args.gt_tau}")
     for di, name in enumerate(names):
-        demo = dp.load_demo(DEMOS[name][0])
+        demo = load_ref(name)
         marks = {k: demo[k] for k in ("move0", "latch", "first_hold")}
         last = len(demo["ee_f"]) - 1
         wps = args.waypoints or (
@@ -997,10 +1015,10 @@ def main() -> int:
         jaws = sorted({w.ur_gripper_byte for w in nominal if w.ur_gripper_byte is not None})
         board, gripper = sim.clearance_geometry(jaw_bytes=tuple(jaws))
         plate = board.plate
-        cloud = cli.cloud_options(argparse.Namespace(cloud_noise="off", belt_seg=True,
+        cloud = cli.cloud_options(argparse.Namespace(cloud_noise=args.cloud_noise, belt_seg=True,
                                                      no_pcd=False))
         ctx = argparse.Namespace(
-            args=argparse.Namespace(no_pcd=False), mode="miles", encoder=None, sim=sim,
+            args=argparse.Namespace(no_pcd=False, belt_seg_source="camera"), mode="miles", encoder=None, sim=sim,
             board=board, gripper=gripper, thresholds=DEFAULT_THRESHOLDS,
             tangent=pert.belt_tangent(nominal), cloud_rng=None,
             cloud={**cloud, "origins": cli.sim_camera_origins(sim)},

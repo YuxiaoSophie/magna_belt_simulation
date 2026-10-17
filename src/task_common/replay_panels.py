@@ -213,7 +213,8 @@ class TrajectoryChart:
 
     def __init__(self, gui: Any, x: np.ndarray, series: list[np.ndarray],
                  labels: tuple[str, ...], *, title: str | None, y_label: str,
-                 x_label: str = "t (s)", aspect: float = 2.0, visible: bool = True) -> None:
+                 x_label: str = "t (s)", aspect: float = 2.0, visible: bool = True,
+                 styles: list[dict] | None = None) -> None:
         self.x = np.asarray(x, dtype=np.float64)
         self.series = [np.asarray(v, dtype=np.float64) for v in series]
         lo, hi = PlotsPanel._range(self.series)
@@ -222,8 +223,9 @@ class TrajectoryChart:
         self.sends = 0
         lines = [uplot.Series(label=x_label)]
         for i, label in enumerate(labels):
-            lines.append(uplot.Series(label=label, stroke=COLORS[i % len(COLORS)], width=1.5,
-                                      spanGaps=True))
+            style = {"stroke": COLORS[i % len(COLORS)], "width": 1.5, "spanGaps": True,
+                     **(styles[i] if styles else {})}  # spanGaps False: NaN rows split a series into pieces
+            lines.append(uplot.Series(label=label, **style))
         lines.append(uplot.Series(label="now", stroke=NOW_COLOR, width=1.5, dash=[4, 4],
                                   points={"show": False}))
         self.handle = gui.add_uplot(
@@ -234,20 +236,36 @@ class TrajectoryChart:
     def _data(self, t: float) -> tuple[np.ndarray, ...]:
         k = int(np.searchsorted(self.x, t))
         xs = np.insert(self.x, k, [t, t])
-        ys = [np.insert(y, k, [np.nan, np.nan]) for y in self.series]
+        ys = [np.insert(y, k, [self._at(y, k, t)] * 2) for y in self.series]
         now = np.full(len(xs), np.nan)
         now[k:k + 2] = self.y_range
         return (xs, *ys, now)
 
+    def _at(self, y: np.ndarray, k: int, t: float) -> float:
+        """y at the inserted "now" x: on the segment k-1..k (keeps split series unbroken), else NaN."""
+        if 0 < k < len(y) and np.isfinite(y[k - 1]) and np.isfinite(y[k]) and self.x[k] > self.x[k - 1]:
+            return float(np.interp(t, self.x[k - 1:k + 1], y[k - 1:k + 1]))
+        return np.nan
+
+    def set_values(self, i: int, values: np.ndarray) -> None:
+        """Replace series ``i`` only (same x, fixed y range): no rescale, no relabel; resent on
+        the next :meth:`set_time`."""
+        self.series[i] = np.asarray(values, dtype=np.float64)
+        self.sent_t = None
+
     def set_series(self, x: np.ndarray, series: list[np.ndarray],
-                   labels: tuple[str, ...] | None = None) -> None:
+                   labels: tuple[str, ...] | None = None,
+                   y_range: tuple[float, float] | None = None) -> None:
         """Replace the data (same number of series) and rescale y; resent on the next
         :meth:`set_time`."""
         self.x = np.asarray(x, dtype=np.float64)
         self.series = [np.asarray(v, dtype=np.float64) for v in series]
-        lo, hi = PlotsPanel._range(self.series)
-        self.y_range = (min(lo, 0.0), hi)
-        self.handle.scales = PlotsPanel._scales(self.y_range)
+        if y_range is None:
+            lo, hi = PlotsPanel._range(self.series)
+            y_range = (min(lo, 0.0), hi)
+        if y_range != self.y_range:
+            self.y_range = y_range
+            self.handle.scales = PlotsPanel._scales(self.y_range)
         if labels is not None:
             lines = list(self.handle.series)
             for i, label in enumerate(labels, start=1):

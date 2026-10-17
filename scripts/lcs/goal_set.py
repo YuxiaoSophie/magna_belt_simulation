@@ -25,7 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from task_common.latent_encoder import LatentEncoder
+from task_common.latent_encoder import LatentEncoder, encode_episode_frames, episode_input_keys
 
 SEG_KEY = "pcd_belt_seg"
 VERSION = 1
@@ -47,11 +47,18 @@ def final_cloud(episode) -> np.ndarray:
 
 
 def final_latent(enc, episode) -> np.ndarray:
-    """``(n_x,)`` the node's latent of the episode's last frame."""
-    z = enc.encode(final_cloud(episode))
-    if getattr(enc, "last_empty", False):
+    """``(n_x,)`` the node's latent of the episode's last frame (``pcd_belt_seg``; other
+    encoders their ``episode_input_keys``)."""
+    keys = episode_input_keys(enc)
+    with np.load(episode, allow_pickle=True) as d:
+        missing = [k for k in keys if k not in d.files]
+        if missing:
+            raise SystemExit(f"{episode}: no {missing}"
+                             + (" (record with --belt-seg)" if SEG_KEY in missing else ""))
+        z, empty = encode_episode_frames(enc, d, [len(d[keys[0]]) - 1])
+    if empty[0]:
         raise SystemExit(f"{episode}: empty final belt cloud")
-    return z
+    return z[0]
 
 
 def select_rows(rows: list[dict], kinds, include_successes: bool, all_demos: bool,

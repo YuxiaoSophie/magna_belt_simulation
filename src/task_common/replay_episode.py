@@ -19,6 +19,7 @@ import numpy as np
 from loguru import logger
 
 from task_common import prediction_video as pv
+from task_common.belt_cloud import known_large_pulley_pose7, quat_wxyz_matrix
 from task_common.recording import Recording
 from task_common.replay_app import ReplayApp
 from task_common.replay_panels import NOW_SERIES_CSS, PLOT_PERIOD_S, TrajectoryChart
@@ -31,6 +32,9 @@ RMSE_LABEL = "one-step prediction RMSE (mm)"
 CACHE_EPISODES = 8
 # Just over the 3.3 mm belt radius: the video's 1.5 mm tubes hide inside the scene belt.
 PRED_TUBE_M, TRUE_TUBE_M = 0.0036, 0.0034
+PRED_POINT_M = 0.004  # unordered decoder points (belt_cloud_pointnet) cannot form a tube
+SEG_POINT_M = 0.0015
+SEG_COLOR = (230, 60, 230)
 
 
 def list_episodes(root: Path) -> list[str]:
@@ -105,9 +109,13 @@ class PredictionPanel:
 
     def __init__(self, deploy: Path = pv.DEPLOY, decoder: Path = pv.DECODER, *,
                  solver: str = "lcp", show_pred: bool = True, show_true: bool = False,
-                 true_color=pv.GOLD, pred_color=pv.PRED_BLUE) -> None:
+                 show_seg: bool = True, true_color=pv.GOLD, pred_color=pv.PRED_BLUE) -> None:
         self.model = pv.OneStepModel(deploy, decoder, solver)
-        self.show = {"pred": bool(show_pred), "true": bool(show_true)}
+        self.show = {"pred": bool(show_pred), "true": bool(show_true), "seg": bool(show_seg)}
+        self.episode: pv.Episode | None = None
+        self.seg_points = None
+        pose = known_large_pulley_pose7()
+        self._pulley_R, self._pulley_c = quat_wxyz_matrix(pose[3:7]), pose[:3]
         self.colors = {"pred": pred_color, "true": true_color}
         self.results: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.result: dict[str, Any] | None = None
@@ -118,11 +126,14 @@ class PredictionPanel:
 
     def build_gui(self, app: ReplayApp) -> None:
         gui = app.gui
+        self.server = app.server
+        self.points = None
         self.tubes = {"pred": pv.BeltTubes(app.server, radius=PRED_TUBE_M),
                       "true": pv.BeltTubes(app.server, radius=TRUE_TUBE_M)}
         with app._display_folder:
             self.boxes = {"pred": gui.add_checkbox("Predicted belt k+1", self.show["pred"]),
-                          "true": gui.add_checkbox("True belt k+1", self.show["true"])}
+                          "true": gui.add_checkbox("True belt k+1", self.show["true"]),
+                          "seg": gui.add_checkbox("Recorded belt cloud", self.show["seg"])}
         with gui.add_folder("One-step prediction") as self.folder:
             self.status = gui.add_markdown("")
             self.now_text = gui.add_markdown("")
@@ -153,12 +164,13 @@ class PredictionPanel:
     def on_run_loaded(self, app: ReplayApp, rec: Recording) -> None:
         if not isinstance(rec, EpisodeRecording):
             raise TypeError("PredictionPanel needs an EpisodeReplayApp")
+        self.episode = rec.episode
         res = self.result = self.predict(rec.path, rec.episode)
         rmse = res["rmse_model_mm"]
         short = lambda p: f"{p.parent.name}/{p.name}"
         self.status.content = (
             f"model `{short(self.model.deploy)}`, `{short(self.model.decoder_path)}` "
-            f"({self.model.solver})  \nRMSE mean {rmse.mean():.3f} / max {rmse.max():.3f} mm "
+            f"({self.model.solver})  \n{self._metric} mean {rmse.mean():.3f} / max {rmse.max():.3f} mm "
             f"(no-motion {res['rmse_nomotion_mm'].mean():.3f}); {res['compute_s']:.1f} s")
         logger.info(f"[REPLAY] one-step {rec.path.name}: RMSE mean {rmse.mean():.3f} / max "
                     f"{rmse.max():.3f} mm, {len(rmse)} predictions in {res['compute_s']:.1f} s "
@@ -193,10 +205,51 @@ class PredictionPanel:
         valid = res is not None and k < len(res["pred"])
         for name, key in (("pred", "pred"), ("true", "true_next")):
             tubes = self.tubes[name]
+            if name == "pred" and self.model.belt_cloud:
+                self._draw_points(res[key][k] if valid and self.show[name] else None)
+                continue
             if valid and self.show[name]:
                 tubes.tube(name, res[key][k], self.colors[name])
             elif name in tubes.handles:
                 tubes.handles[name].visible = False
+        self._draw_seg(k)
         if res is not None:
-            self.now_text.content = (f"k = {k}: RMSE {res['rmse_model_mm'][k]:.3f} mm" if valid
-                                     else f"k = {k}: last frame, no k+1")
+            self.now_text.content = (
+                f"k = {k}: {self._metric} {res['rmse_model_mm'][k]:.3f} mm" if valid
+                else f"k = {k}: last frame, no k+1")
+            seg = self.episode.seg if self.episode is not None else None
+            if seg is not None and k < len(seg):
+                self.now_text.content += f"; recorded belt cloud {len(seg[k])} pts"
+
+    @property
+    def _metric(self) -> str:
+        return "Chamfer RMS" if self.model.belt_cloud else "RMSE"
+
+    def _draw_seg(self, k: int) -> None:
+        """The episode's recorded pcd_belt_seg (known pulley frame) in world."""
+        seg = self.episode.seg if self.episode is not None else None
+        if not self.show["seg"] or seg is None or k >= len(seg) or not len(seg[k]):
+            if self.seg_points is not None:
+                self.seg_points.visible = False
+            return
+        pts = (seg[k].astype(np.float64) @ self._pulley_R.T + self._pulley_c).astype(np.float32)
+        if self.seg_points is not None:
+            self.seg_points.remove()
+        self.seg_points = self.server.scene.add_point_cloud(
+            f"{pv.BeltTubes.ROOT}/seg_points", pts, SEG_COLOR, point_size=SEG_POINT_M,
+            point_shape="circle", precision="float32")
+
+    def _draw_points(self, pts: np.ndarray | None) -> None:
+        if pts is None:
+            if self.points is not None:
+                self.points.visible = False
+            return
+        pts = np.asarray(pts, np.float32)
+        if self.points is not None and self.points.points.shape == pts.shape:
+            self.points.points, self.points.visible = pts, True
+            return
+        if self.points is not None:
+            self.points.remove()
+        self.points = self.server.scene.add_point_cloud(
+            f"{pv.BeltTubes.ROOT}/pred_points", pts, self.colors["pred"], point_size=PRED_POINT_M,
+            point_shape="circle", precision="float32")

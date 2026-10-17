@@ -3,7 +3,8 @@
 
 The 11 starts of V12-22 (``cmp/a1_sim/run.sh``): V12-17's 4 grasps (set2 gv_00 / gv_06, set3
 gv_02 / gv_03), V12-20's UR z -30 / +15 mm, V12-21's UR grasp angles up-30 / -20 / +20 / +30,
-nominal pre_place_1; 2 episodes each, 42 s, the harness flags of a1_sim (clean belt-seg cloud,
+nominal pre_place_1 (up-30 dropped by default since V12-75: its belt starts hooked on the small
+pulley); 2 episodes each, 42 s, the harness flags of a1_sim (clean belt-seg cloud,
 clearance, stage goals on latent waypoints, demo prior, offset 20). ``--resets suite`` (default)
 = a1_sim's: the grasps restore the snapshot, then a scripted reset with V12-17's seed; the rest
 2 snapshot episodes (``snapshot``: every start 2 snapshot episodes). Run dirs
@@ -60,6 +61,8 @@ SUITE = [("set2_gv_00", f"{G}/set2", "gv_00", 20261008),
            for p in ("up-30", "up-20", "up+20", "up+30")],
          ("nominal", f"{STARTS}/pre_place_1_osc.npz", "", None)]
 KEYS = [k for k, *_ in SUITE]
+DROPPED = ("up-30",)  # belt hooked on the small pulley at t 0: no controller can seat it (V12-75)
+DEFAULT_KEYS = [k for k in KEYS if k not in DROPPED]
 SEED_BUFFERS = ["data/lcs/realfirst/v1_1/seed/buffer.json",
                 "data/lcs/realfirst/v1_1/seed_ext/buffer.json",
                 "data/lcs/realfirst/cmp/demos_ext2/buffer.json"]
@@ -128,12 +131,15 @@ def cmd_write(a) -> int:
     out = (REPO / a.out).resolve()
     if a.port < 7780 or a.port in (7667, 8081, 8082):
         raise SystemExit(f"--port {a.port}: private ports >= 7780 only")
+    if a.scene and not (REPO / a.scene).is_file():
+        raise SystemExit(f"--scene {a.scene}: no such file")
     names = [x[0] for x in a.arm]
     if len(set(names)) != len(names) or not all(n.replace("-", "").replace("_", "").isalnum()
                                                 for n in names):
         raise SystemExit(f"arm names {names}: unique, [A-Za-z0-9_-]")
-    starts = [s for s in SUITE if not a.starts or s[0] in a.starts.split(",")]
-    if a.starts and len(starts) != len(a.starts.split(",")):
+    keys = start_keys(a.starts)
+    starts = [s for s in SUITE if s[0] in keys]
+    if len(starts) != len(keys):
         raise SystemExit(f"--starts {a.starts}: keys within {KEYS}")
     arms, pre = [], []
     for name, dep, wp, cfg in a.arm:
@@ -153,14 +159,17 @@ def cmd_write(a) -> int:
         arms.append({"name": name, "deploy": str(Path(dep).resolve()), "waypoints": wp,
                      "mppi_config": str((REPO / cfg).resolve())})
     da = a.demo_actions == "auto"
+    es = "" if a.early_stop == "off" else f" --early-stop {a.early_stop}"
     runs = [(s, arm) for s in starts for arm in arms] if a.order == "start" else \
         [(s, arm) for arm in arms for s in starts]
     q = shlex.quote
     sh = ["#!/bin/bash",
           (f"# hard suite (run_hard_suite.py write): arms {names}, {len(starts)} starts x "
            f"{a.repeats}, {a.max_episode_s:g} s, resets {a.resets}, port {a.port}"
-           + ("" if da else ", no --mppi-demo-actions")),
+           + ("" if da else ", no --mppi-demo-actions") + (f", early stop {a.early_stop}" if es else "")
+           + f", cloud noise {a.cloud_noise}" + (f", scene {a.scene}" if a.scene else "")),
           "set -u", f"cd {REPO}", f"B={rel(out)}", "STATUS=$B/run.status",
+          *([f"export ROUND_BELT_SCENE={q(a.scene)}"] if a.scene else []),
           (f"if ss -lupn 2>/dev/null | grep -qE ':{a.port}[[:space:]]'; then "
            f"echo 'run.sh: a socket holds port {a.port}' >&2; exit 3; fi")]
     for wpo, c in pre:
@@ -176,10 +185,10 @@ def cmd_write(a) -> int:
            "  rs=(--reset \"$4\"); [ \"$4\" = scripted ] && rs+=(--reset-spec slack_mm=10 seed=$5)",
            "  uv run --frozen python scripts/lcs/eval_learned_mpc.py --mode learned \\",
            (f"    --lcm-url '{url(a.port)}' --record --max-episode-s {a.max_episode_s:g} "
-            "--settle-s 0.5 \\"),
+            "--settle-s 0.5" + es + " \\"),
            (f"    --pace 1 --deploy $6 --demo-goals none --start-states $2 \"${{vv[@]}}\" "
             f"--repeats {a.repeats} \\"),
-           "    --belt-seg --cloud-noise off --controller mppi --mppi-config $8 \\",
+           f"    --belt-seg --cloud-noise {q(a.cloud_noise)} --controller mppi --mppi-config $8 \\",
            "    --mppi-goal waypoints --mppi-stages all --mppi-max-duration-s 30.0 --mppi-debug \\",
            f"    --label {a.label}_$1 --out $B/$1 --mppi-clearance --mppi-clearance-ur-min-mm 3.0 \\",
            "    --mppi-clearance-franka-min-mm 2.0 \"${rs[@]}\" --mppi-waypoints $7 \\",
@@ -199,10 +208,10 @@ def cmd_write(a) -> int:
                 "seed=$5)"),
                "  uv run --frozen python scripts/lcs/eval_learned_mpc.py --mode learned \\",
                (f"    --lcm-url '{url(a.port)}' --record --max-episode-s {a.max_episode_s:g} "
-                "--settle-s 0.5 \\"),
+                "--settle-s 0.5" + es + " \\"),
                (f"    --pace 1 --deploy $6 --demo-goals none --start-states $2 \"${{vv[@]}}\" "
                 f"--repeats {a.repeats} \\"),
-               "    --belt-seg --cloud-noise off --params $7 \\",
+               f"    --belt-seg --cloud-noise {q(a.cloud_noise)} --params $7 \\",
                f"    --label {a.label}_$1 --out $B/$1 \"${{rs[@]}}\" > $B/$1.log 2>&1",
                "  echo \"$1 rc $? $(date -Is)\" >> $STATUS",
                "}"]
@@ -225,6 +234,7 @@ def cmd_write(a) -> int:
                                   for s in starts],
          "repeats": a.repeats, "max_episode_s": a.max_episode_s, "resets": a.resets,
          "port": a.port, "order": a.order, **({} if da else {"demo_actions": None}),
+         "cloud_noise": a.cloud_noise, **({"scene": a.scene} if a.scene else {}),
          "waypoint_rule": {**WP_RULE, "goal_demo": GOAL_DEMO, "demos": SEED_BUFFERS}},
         indent=1) + "\n")
     print(f"wrote {rel(out / 'run.sh')}: {len(runs)} runs ({len(arms)} arms x {len(starts)} "
@@ -277,6 +287,11 @@ def episode_metrics(d: Path, ep: dict) -> dict:
 
 def complete(idx: dict) -> bool:
     return "summary" in idx
+
+
+def start_keys(arg: str | None) -> list[str]:
+    """--starts: None = DEFAULT_KEYS, 'all' = KEYS, else the comma list."""
+    return DEFAULT_KEYS if arg is None else KEYS if arg == "all" else arg.split(",")
 
 
 def collect(dirs: list[Path]) -> list[dict]:
@@ -358,7 +373,8 @@ def summary_md(rows: list[dict]) -> str:
 
 def cmd_summarize(a) -> int:
     dirs = [(REPO / d).resolve() for d in a.dir]
-    rows = collect(dirs)
+    keys = start_keys(a.starts)
+    rows = [r for r in collect(dirs) if r["start"] in keys]
     if not rows:
         raise SystemExit(f"no hard-suite run dirs (<arm>_<start>, start in {KEYS}) under {a.dir}")
     out = (REPO / a.out).resolve() if a.out else dirs[0]
@@ -384,14 +400,20 @@ def main() -> int:
     w.add_argument("--resets", choices=("suite", "snapshot"), default="suite")
     w.add_argument("--repeats", type=int, default=2)
     w.add_argument("--max-episode-s", type=float, default=42.0)
+    w.add_argument("--early-stop", default="10,16,15", metavar="W_ENGAGED,W_FAIL,T_MIN|off",
+                   help="eval --early-stop (early_stop/sweep.py: re-score older suites with the same rule); off = full episodes")
     w.add_argument("--order", choices=("start", "arm"), default="start")
-    w.add_argument("--starts", default=None, help=f"comma subset of {','.join(KEYS)}")
+    w.add_argument("--cloud-noise", default="off", help="eval --cloud-noise preset of every arm")
+    w.add_argument("--scene", default=None,
+                   help="ROUND_BELT_SCENE for every run (a scene variant, e.g. assets/round_belt_task/round_belt_scene_zed720.yaml)")
+    w.add_argument("--starts", default=None, help=f"comma subset of {','.join(KEYS)} or all (default: without {','.join(DROPPED)})")
     w.add_argument("--label", default="hard_suite")
     w.add_argument("--demo-actions", choices=("auto", "none"), default="auto",
                    help="none: no --mppi-demo-actions (the node gets no demo action inputs)")
     s = sub.add_parser("summarize", help="hard_suite.{json,md}")
     s.add_argument("--dir", action="append", required=True)
     s.add_argument("--out", default=None, help="default: the first --dir")
+    s.add_argument("--starts", default=None, help=f"comma subset or all (default: without {','.join(DROPPED)})")
     a = ap.parse_args()
     return cmd_write(a) if a.cmd == "write" else cmd_summarize(a)
 

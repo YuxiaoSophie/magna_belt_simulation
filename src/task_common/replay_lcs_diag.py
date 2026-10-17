@@ -4,7 +4,9 @@
 Accuracy: from each solve's encoded latent ``z0_i`` (``x_sol`` knot 0) the deploy's LCS is rolled
 ``k`` steps with the executed actions (``u_sol[:, 0]`` of solves ``i..i+k-1``; the node records
 ``U_exec``, the noise-perturbed plan) and compared with ``z0_{i+k}``: whitened latent distance and
-the Chamfer RMS (mm) between the two decoded belts. A gap in the solve times (not one control
+the Chamfer RMS (mm) between the two decoded belts; with the recorded belt clouds (``observed``),
+also the decoded prediction vs the recorded cloud of solve ``i+k`` (k = 0: the decoded encoding,
+i.e. the reconstruction floor). A gap in the solve times (not one control
 period apart) makes every window across it NaN. Contact forces: ``lam`` at
 ``(z0_i, u_sol[:, 0]_i)`` and at the plan's last action knot ``N-1`` (``x_sol``/``u_sol`` rows).
 The LCS is ``TorchLcs`` (CPU, float64) with the deploy's ``lcs_forward_solver``.
@@ -129,11 +131,13 @@ class DiagResult:
     horizons: tuple[int, ...]
     latent_err: dict[int, np.ndarray]
     belt_err_mm: dict[int, np.ndarray] | None
+    belt_obs_mm: dict[int, np.ndarray] | None  # decoded prediction vs recorded cloud, k = 0, 1, N
     lam0: np.ndarray  # (S, n_lam) at (z0_i, u0_i)
     lam_last: np.ndarray  # (S, n_lam) at the plan's last action knot
     period_s: float
     gaps: int
     compute_ms: float = 0.0
+    recon: tuple[np.ndarray, np.ndarray] | None = None  # (frame times, encode -> decode vs recorded cloud mm)
     notes: list[str] = field(default_factory=list)
 
 
@@ -144,8 +148,10 @@ def consecutive(t0: np.ndarray, period: float) -> np.ndarray:
 
 def compute(lcs: DiagLcs, time_s: np.ndarray, x_sols: list[np.ndarray],
             u_sols: list[np.ndarray], t_knots: list[np.ndarray],
-            decoder: LatentDecoder | None) -> DiagResult:
-    """All series for one run; ``x_sols`` (n_x+6, N+1), ``u_sols`` (12, N), ``t_knots`` (N+1,)."""
+            decoder: LatentDecoder | None,
+            observed: list[np.ndarray | None] | None = None) -> DiagResult:
+    """All series for one run; ``x_sols`` (n_x+6, N+1), ``u_sols`` (12, N), ``t_knots`` (N+1,);
+    ``observed``: per solve the recorded belt cloud ``(M, 3)`` in the decoder's frame (None = unknown)."""
     n_x = lcs.n_x
     if x_sols[0].shape[0] != n_x + N_P:
         raise ValueError(f"x_sol has {x_sols[0].shape[0] - N_P} latents, deploy n_x {n_x}")
@@ -164,6 +170,17 @@ def compute(lcs: DiagLcs, time_s: np.ndarray, x_sols: list[np.ndarray],
     horizons = tuple(sorted({1, n}))
     latent: dict[int, np.ndarray] = {}
     belt: dict[int, np.ndarray] | None = None if decoder is None else {}
+    obs: dict[int, np.ndarray] | None = None if decoder is None or observed is None else {}
+
+    def vs_observed(z: np.ndarray, j: np.ndarray) -> np.ndarray:
+        dec, out = decoder.decode_batch(z), np.full(len(j), np.nan)
+        for r, jj in enumerate(j):
+            if observed[jj] is not None and len(observed[jj]):
+                out[r] = 1e3 * chamfer_rms(dec[r:r + 1], np.asarray(observed[jj])[None])[0]
+        return out
+
+    if obs is not None:
+        obs[0] = vs_observed(Z0, np.arange(S))
     broken = np.concatenate([[0], np.cumsum(~link)])  # breaks among links 0..j-1
     for k in horizons:
         lat = np.full(S, np.nan)
@@ -181,11 +198,18 @@ def compute(lcs: DiagLcs, time_s: np.ndarray, x_sols: list[np.ndarray],
                 b[idx] = 1e3 * chamfer_rms(decoder.decode_batch(z),
                                            decoder.decode_batch(Z0[idx + k]))
                 belt[k] = b
-        elif belt is not None:
-            belt[k] = np.full(S, np.nan)
+            if obs is not None:
+                o = np.full(S, np.nan)
+                o[idx] = vs_observed(z, idx + k)
+                obs[k] = o
+        else:
+            if belt is not None:
+                belt[k] = np.full(S, np.nan)
+            if obs is not None:
+                obs[k] = np.full(S, np.nan)
         latent[k] = lat
     return DiagResult(time_s=np.asarray(time_s, dtype=np.float64), horizons=horizons,
-                      latent_err=latent, belt_err_mm=belt, lam0=lam0, lam_last=lam_last,
+                      latent_err=latent, belt_err_mm=belt, belt_obs_mm=obs, lam0=lam0, lam_last=lam_last,
                       period_s=period, gaps=int((~link).sum()))
 
 

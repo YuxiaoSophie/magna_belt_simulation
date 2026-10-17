@@ -33,6 +33,7 @@ from task_common.replay_lcs_diag import (
     DiagLcs,
     DiagResult,
     active_set,
+    chamfer_rms,
     compute,
     mppi_pgd_iters,
     stats,
@@ -49,12 +50,14 @@ if TYPE_CHECKING:
     from task_common.replay_app import ReplayApp
 
 LAYERS = ("planned_belt", "planned_ee", "actions", "target_belt")
-DIAG_LAYERS = ("lcs_accuracy", "contact_forces")
+DIAG_LAYERS = ("lcs_accuracy", "goal_distance", "reconstruction", "contact_forces")
+REPO_ROOT = Path(__file__).resolve().parents[2]
 ALL_LAYERS = LAYERS + DIAG_LAYERS
 REMOVED_LAYERS = ("action_rotation", "readout")  # old --learned-layers names, ignored
 LAYER_LABELS = {"planned_belt": "Planned belt", "planned_ee": "Planned EE",
                 "actions": "Planned actions", "target_belt": "Target belt",
-                "lcs_accuracy": "LCS accuracy", "contact_forces": "Contact forces λ"}
+                "lcs_accuracy": "LCS accuracy", "goal_distance": "Latent goal distance",
+                "reconstruction": "Reconstruction error", "contact_forces": "Contact forces λ"}
 DEFAULT_DEBUG_CHANNEL = "LEARNED_MPC_DEBUG"
 FRANKA_PLAN_CHANNEL = "TARGET_CARTESIAN_POSE_TRAJECTORY"
 ROOT = "/replay/learned_mpc"
@@ -323,6 +326,12 @@ class LearnedMpcPanel:
         self.lcs_iters_source = ""
         self.diag: DiagResult | None = None
         self.belt_why: str | None = None
+        self.obs_why: str | None = None
+        self.obs_n = 0
+        self.ep_frames: tuple[np.ndarray, list, np.ndarray] | None = None
+        self.goal_data: tuple | None = None
+        self._goal_cur: int | None = None
+        self.fan_why: str | None = None
         self._diag_t = 0.0
         self._diag_sent = 0.0
         self._diag_dirty = False
@@ -355,9 +364,18 @@ class LearnedMpcPanel:
                 title="LCS prediction error (whitened latent)", y_label="|(ẑ - z) / z_std|",
                 aspect=1.6, visible=False)
             self.belt_chart = TrajectoryChart(
-                gui, np.zeros(0), [np.zeros(0)] * 2, ("k = 1", "k = N"),
-                title="LCS prediction error (decoded belt)", y_label="Chamfer RMS mm",
+                gui, np.zeros(0), [np.zeros(0)] * 3, ("k = 0", "k = 1", "k = N"),
+                title="LCS prediction error (decoded prediction vs recorded belt cloud)",
+                y_label="Chamfer RMS mm",
                 aspect=1.6, visible=False)
+            self.goal_chart = TrajectoryChart(
+                gui, np.zeros(0), [np.zeros(0)] * 4, self._goal_labels(),
+                title="Latent distance to the goal (whitened): measured, and the current solve's plan",
+                y_label="|(z - goal) / z_std|", aspect=1.6, visible=False, styles=self._goal_styles())
+            self.recon_chart = TrajectoryChart(
+                gui, np.zeros(0), [np.zeros(0)], ("encode → decode",),
+                title="Reconstruction error per recorded frame (decoded encoding vs recorded belt cloud)",
+                y_label="Chamfer RMS mm", aspect=1.6, visible=False)
             bars = [uplot.Series(label="λ index")]
             for label, color, fill in zip(("knot 0", "knot N-1"), COLORS, BAR_FILL, strict=False):
                 bars.append(uplot.Series(label=label, stroke=color, fill=fill, width=1.0,
@@ -378,7 +396,9 @@ class LearnedMpcPanel:
         if name in DIAG_LAYERS:
             self._ensure_diag()
             self._diag_visibility()
-            self.latent_chart.sent_t = self.belt_chart.sent_t = self._lam_sent = None
+            self.latent_chart.sent_t = self.belt_chart.sent_t = self.recon_chart.sent_t = None
+            self.goal_chart.sent_t = None
+            self._lam_sent = None
         self._update(app, app.current_frame, app.current_step)
 
     def set_action_scale(self, app: ReplayApp, value: float) -> None:
@@ -421,7 +441,8 @@ class LearnedMpcPanel:
         start = time.perf_counter()
         self.solves, self.current, self._drawn = [], -1, {}
         self.run_key, self.control_dt = str(Path(rec.path).resolve()), rec.control_dt
-        self.lcs = self.diag = self.belt_why = self._lam_sent = None
+        self.lcs = self.diag = self.belt_why = self.obs_why = self._lam_sent = self.ep_frames = None
+        self.goal_data = self._goal_cur = self.fan_why = None
         self._diag_dirty = False
         self.decoder = self.demo_belts = self.goal_frames = self.target_source = None
         self.staged = False
@@ -524,9 +545,11 @@ class LearnedMpcPanel:
         if key not in self._cache:
             start = time.perf_counter()
             try:
+                observed, self.obs_why = self._recorded_clouds()
+                self.obs_n = sum(o is not None for o in observed) if observed else 0
                 res = compute(self.lcs, np.array([s.step * self.control_dt for s in self.solves]),
                               [s.x_sol for s in self.solves], [s.u_sol for s in self.solves],
-                              [s.t for s in self.solves], self.decoder)
+                              [s.t for s in self.solves], self.decoder, observed)
             except (ValueError, RuntimeError, IndexError) as exc:
                 for name in DIAG_LAYERS:
                     self.available[name] = f"LCS diagnostics failed: {exc!r}"
@@ -534,22 +557,128 @@ class LearnedMpcPanel:
                 self.diag_status.content = self.available["lcs_accuracy"]
                 logger.warning(f"[REPLAY] {self.available['lcs_accuracy']}")
                 return
+            if self.ep_frames is not None and self.decoder is not None:
+                t_f, seg, lat = self.ep_frames
+                dec = self.decoder.decode_batch(lat)
+                res.recon = (t_f, np.array([1e3 * chamfer_rms(dec[f:f + 1], np.asarray(seg[f], dtype=np.float64)[None])[0]
+                                            if len(seg[f]) else np.nan for f in range(len(lat))]))
             res.compute_ms = 1e3 * (time.perf_counter() - start)
             self._cache[key] = res
         self.diag = res = self._cache[key]
+        self._goal_fans()
+        self._goal_send(force=True)
+        if res.recon is not None:
+            self.recon_chart.set_series(res.recon[0], [res.recon[1]])
         n = res.horizons[-1]
         labels = ("k = 1", f"k = {n}")
         self.latent_chart.set_series(res.time_s, [res.latent_err[1], res.latent_err[n]], labels)
-        if res.belt_err_mm is not None:
-            self.belt_chart.set_series(res.time_s, [res.belt_err_mm[1], res.belt_err_mm[n]],
-                                       labels)
+        if res.belt_obs_mm is not None:
+            self.belt_chart.set_series(res.time_s, [res.belt_obs_mm[k] for k in (0, 1, n)],
+                                       ("k = 0 (decoded encoding)", *labels))
+        elif res.belt_err_mm is not None:  # no recorded clouds: vs the decoded encoding
+            self.belt_chart.set_series(
+                res.time_s, [np.full(len(res.time_s), np.nan), res.belt_err_mm[1], res.belt_err_mm[n]],
+                ("-", "k = 1 (vs decoded z)", f"k = {n} (vs decoded z)"))
         top = float(np.nanmax(np.concatenate([res.lam0.ravel(), res.lam_last.ravel(), [0.0]])))
         self.lam_plot.scales = self._bar_scales(self.lcs.n_lam, (0.0, 1.05 * top or 1.0))
         self.lam_plot.axes = self._bar_axes(self.lcs.n_lam)
         self.lam_plot.series = tuple({**sr, "label": f"knot {n - 1}"} if i == 2 else sr
                                      for i, sr in enumerate(self.lam_plot.series))
-        self.diag_status.content = self.diag_summary()
+        self.diag_status.content = ""  # summary goes to the log only
         logger.info(f"[REPLAY] LCS diagnostics: {self.diag_summary(markdown=False)}")
+
+    @staticmethod
+    def _goal_labels() -> tuple[str, ...]:
+        return ("stage goal (measured)", "final goal (measured)", "current plan, stage goal", "current plan, final goal")
+
+    @staticmethod
+    def _goal_styles() -> list[dict]:
+        return [{"stroke": COLORS[0], "width": 2.0}, {"stroke": COLORS[1], "width": 2.0},
+                {"stroke": COLORS[0], "width": 3.0, "spanGaps": False, "dash": [6, 3]},
+                {"stroke": COLORS[1], "width": 3.0, "spanGaps": False, "dash": [6, 3]}]
+
+    def _final_goal(self) -> tuple[np.ndarray | None, str | None]:
+        """The final waypoint latent of the run's ``latent_waypoints.npz`` (the eval's ``mppi_waypoints``),
+        checked against the recorded ``dist_final``."""
+        idx = Path(self.run_key).parent.parent / "index.json"
+        try:
+            wp = json.loads(idx.read_text())["args"]["mppi_waypoints"]
+            with np.load(REPO_ROOT / wp if not Path(wp).is_absolute() else wp, allow_pickle=True) as w:
+                g = np.asarray(w["z_wp"], dtype=np.float64)[-1]
+        except (OSError, KeyError, ValueError, TypeError) as exc:
+            return None, f"no waypoints ({exc!r})"
+        s0 = self.solves[0]
+        d = float(np.linalg.norm((s0.x_sol[:self.lcs.n_x, 0] - g) / self.lcs.z_std))
+        if abs(d - s0.scalars.get("dist_final", np.nan)) > 1e-3 * (1.0 + d):
+            return None, f"final waypoint gives {d:.3f}, recorded dist_final {s0.scalars.get('dist_final')}"
+        return g, None
+
+    def _goal_fans(self) -> None:
+        """Per solve the planned knots' distances to its stage goal (``z_ref`` column 0) and to the
+        final goal, on a shared time grid with the measured distances."""
+        n_x, sd = self.lcs.n_x, self.lcs.z_std
+        g, self.fan_why = self._final_goal()
+        t0 = np.array([s.step * self.control_dt for s in self.solves])
+        tk = [t0[i] + (s.t - s.t[0]) for i, s in enumerate(self.solves)]
+        grid = np.unique(np.round(np.concatenate([t0, *tk]), 6))
+        at = [np.searchsorted(grid, np.round(t, 6)) for t in tk]
+        fans = {"stage": [], "final": []}
+        for s, ix in zip(self.solves, at, strict=True):
+            Z = s.x_sol[:n_x].T
+            fans["stage"].append((ix, np.linalg.norm((Z - s.z_ref[:n_x, 0]) / sd, axis=1)))
+            if g is not None:
+                fans["final"].append((ix, np.linalg.norm((Z - g) / sd, axis=1)))
+        measured = [np.full(len(grid), np.nan) for _ in range(2)]
+        i0 = np.searchsorted(grid, np.round(t0, 6))
+        for m, k in zip(measured, ("dist_ref", "dist_final"), strict=True):
+            m[i0] = [s.scalars.get(k, np.nan) for s in self.solves]
+        plans = np.concatenate([d for fl in fans.values() for _, d in fl] or [np.zeros(1)])
+        top = max(np.nanmax(np.concatenate(measured)), np.nanpercentile(plans, 99))
+        self.goal_data = (grid, measured, fans, (0.0, 1.05 * float(top)))  # y fixed for the run
+        self._goal_cur = None
+
+    def _goal_send(self, force: bool = False) -> None:
+        """Whole chart once per run (``force``), then only the current plan's two series when the
+        current solve changes; the y range stays fixed."""
+        if self.goal_data is None or (not force and self._goal_cur == self.current):
+            return
+        grid, measured, fans, y_range = self.goal_data
+        self._goal_cur = self.current
+        cur = [np.full(len(grid), np.nan) for _ in range(2)]
+        for c, name in zip(cur, ("stage", "final"), strict=True):
+            if 0 <= self.current < len(fans[name]):
+                ix, d = fans[name][self.current]
+                c[ix] = d
+        if force:
+            self.goal_chart.set_series(grid, [*measured, *cur], y_range=y_range)
+        else:
+            self.goal_chart.set_values(2, cur[0])
+            self.goal_chart.set_values(3, cur[1])
+
+    def _recorded_clouds(self) -> tuple[list[np.ndarray | None] | None, str | None]:
+        """Per solve the recorded ``pcd_belt_seg`` (pulley frame) of the frame whose recorded latent
+        is the solve's z0, from the eval episode ``<out>/<run>.npz`` beside ``<out>/recordings/<run>``."""
+        run = Path(self.run_key)
+        ep = run.parent.parent / f"{run.name}.npz"
+        if not ep.is_file():
+            return None, f"no episode {ep.name} beside the recording"
+        with np.load(ep, allow_pickle=True) as d:
+            if "pcd_belt_seg" not in d.files or "sim_latent" not in d.files:
+                return None, f"{ep.name} has no pcd_belt_seg / sim_latent"
+            seg, lat = list(d["pcd_belt_seg"]), np.asarray(d["sim_latent"], dtype=np.float64)
+            utime = np.asarray(d["utime"], dtype=np.float64) if "utime" in d.files else None
+        z0 = np.stack([s.x_sol[:self.lcs.n_x, 0] for s in self.solves])
+        if lat.ndim != 2 or lat.shape[1] != z0.shape[1]:
+            return None, f"{ep.name} latents {lat.shape} vs n_x {z0.shape[1]}"
+        dist = np.linalg.norm(z0[:, None] - lat[None], axis=-1)
+        j = dist.argmin(1)
+        ok = dist[np.arange(len(j)), j] <= 1e-4 * (1.0 + np.linalg.norm(z0, axis=1))
+        if not ok.any():
+            return None, f"no solve latent matches a frame of {ep.name}"
+        if utime is not None:  # every recorded frame on the solves' time axis
+            off = np.median([s.step * self.control_dt - s.utime * 1e-6 for s in self.solves])
+            self.ep_frames = (utime * 1e-6 + off, seg, lat)
+        return [np.asarray(seg[f], dtype=np.float64) if o else None for f, o in zip(j, ok)], None
 
     def diag_summary(self, markdown: bool = True) -> str:
         res, lcs = self.diag, self.lcs
@@ -565,17 +694,43 @@ class LearnedMpcPanel:
             return f"{name} median / p90: {', '.join(parts)}"
 
         lines.append(row("latent |dz/σ|", res.latent_err, ".3f"))
-        lines.append(row("belt Chamfer RMS mm", res.belt_err_mm, ".2f")
-                     if res.belt_err_mm is not None else f"belt error off: {self.belt_why}")
+        if res.belt_obs_mm is not None:
+            k0 = stats(res.belt_obs_mm[0])
+            lines.append(row("belt Chamfer RMS mm, decoded prediction vs recorded cloud",
+                             res.belt_obs_mm, ".2f") + f", k=0 (decoded encoding) {k0[0]:.2f} / {k0[1]:.2f}"
+                         f" ({self.obs_n} of {len(self.solves)} solves matched to a recorded frame)")
+        elif res.belt_err_mm is not None:
+            lines.append(row("belt Chamfer RMS mm, vs decoded encoding", res.belt_err_mm, ".2f")
+                         + f" (recorded clouds off: {self.obs_why})")
+        else:
+            lines.append(f"belt error off: {self.belt_why}")
+        st = [int(s.scalars["stage"]) for s in self.solves if "stage" in s.scalars]
+        if st:
+            t0 = self.solves[0].step * self.control_dt  # times from the first solve
+            ch = [f"+{self.solves[i].step * self.control_dt - t0:.2f} s -> stage {st[i]}"
+                  for i in range(1, len(st)) if st[i] != st[i - 1]]
+            d_fin = [s.scalars.get("dist_final", np.nan) for s in self.solves]
+            lines.append(f"latent goal distance: stage {st[0]} at start; {', '.join(ch) or 'no stage change'}; "
+                         f"final-goal distance start {d_fin[0]:.2f}, min {np.nanmin(d_fin):.2f}, end {d_fin[-1]:.2f}")
+        if self.fan_why:
+            lines.append(f"final-goal plan off: {self.fan_why}")
+        if res.recon is not None:
+            e = res.recon[1][np.isfinite(res.recon[1])]
+            lines.append(f"reconstruction (encode → decode) over all {len(res.recon[1])} recorded frames: median "
+                         f"{np.median(e):.2f}, p90 {np.percentile(e, 90):.2f}, max {e.max():.2f} mm")
         return ("  \n" if markdown else "; ").join(lines)
 
     def _diag_visibility(self) -> None:
         acc, lam = self.shown("lcs_accuracy"), self.shown("contact_forces")
+        goal, rec = self.shown("goal_distance"), self.shown("reconstruction")
         ready = self.diag is not None
-        self.diag_folder.visible = acc or lam or any(
+        self.diag_folder.visible = acc or lam or goal or rec or any(
             n in self.requested and self.available.get(n) for n in DIAG_LAYERS)
         self.latent_chart.handle.visible = acc and ready
-        self.belt_chart.handle.visible = acc and ready and self.diag.belt_err_mm is not None
+        self.recon_chart.handle.visible = rec and ready and self.diag.recon is not None
+        self.goal_chart.handle.visible = goal and ready
+        self.belt_chart.handle.visible = acc and ready and (self.diag.belt_obs_mm is not None
+                                                            or self.diag.belt_err_mm is not None)
         self.lam_plot.visible = self.lam_text.visible = lam and ready
         if not ready:
             why = next((self.available[n] for n in DIAG_LAYERS if n in self.requested
@@ -622,9 +777,14 @@ class LearnedMpcPanel:
 
     def _send_diag(self) -> None:
         self._diag_sent, self._diag_dirty = time.perf_counter(), False
+        if self.shown("goal_distance"):
+            self._goal_send()
+            self.goal_chart.set_time(self._diag_t)
+        if self.shown("reconstruction") and self.diag.recon is not None:
+            self.recon_chart.set_time(self._diag_t)
         if self.shown("lcs_accuracy"):
             self.latent_chart.set_time(self._diag_t)
-            if self.diag.belt_err_mm is not None:
+            if self.diag.belt_obs_mm is not None or self.diag.belt_err_mm is not None:
                 self.belt_chart.set_time(self._diag_t)
         if self.shown("contact_forces") and self._lam_sent != self.current:
             self._lam_sent = self.current
@@ -792,7 +952,7 @@ class LearnedMpcPanel:
             if self._drawn.get(name) != key:
                 draw(app, solve)
                 self._drawn[name] = key
-        if self.diag is not None and (self.shown("lcs_accuracy") or self.shown("contact_forces")):
+        if self.diag is not None and any(self.shown(n) for n in DIAG_LAYERS):
             self._diag_t = step * self.control_dt
             if (getattr(app, "playing", False)
                     and time.perf_counter() - self._diag_sent < PLOT_PERIOD_S):

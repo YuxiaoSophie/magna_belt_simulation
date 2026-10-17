@@ -18,6 +18,7 @@ import dataclasses
 import functools
 import json
 import math
+import os
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +27,9 @@ import numpy as np
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SCENE_YAML = REPO_ROOT / "assets" / "round_belt_task" / "round_belt_scene.yaml"
+# as round_belt_task.constants.SCENE_DIRECTIVES (ROUND_BELT_SCENE variant)
+SCENE_YAML = (REPO_ROOT / os.environ["ROUND_BELT_SCENE"] if os.environ.get("ROUND_BELT_SCENE")
+              else REPO_ROOT / "assets" / "round_belt_task" / "round_belt_scene.yaml")
 BOARD_WELD_CHILD = "board::board"
 PULLEY_JOINT = "large_round_pulley_joint"
 POINT_CLOUD_NAME = "cropped_point_cloud"
@@ -397,12 +400,19 @@ def belt_seg_frame(xyz, rgb, noise_spec: CloudNoiseSpec, seg_spec: BeltSegSpec,
 def belt_seg_meta(noise_spec: CloudNoiseSpec, seg_spec: BeltSegSpec, source: str,
                   pose7_known=None) -> dict:
     """The ``sim_meta["belt_seg"]`` block (``docs/lcs-dataset.md``)."""
-    if source not in ("record", "offline"):
-        raise ValueError(f"belt_seg source {source!r} not in ('record', 'offline')")
+    if source not in ("record", "offline", "rerender"):
+        raise ValueError(f"belt_seg source {source!r} not in ('record', 'offline', 'rerender')")
     pose = known_large_pulley_pose7() if pose7_known is None else np.asarray(pose7_known)
     return {"version": SEG_VERSION, "frame": SEG_FRAME,
             "pulley_pose7_known": [float(v) for v in pose], "noise_spec": noise_spec.to_dict(),
-            "seg_spec": seg_spec.to_dict(), "source": source}
+            "seg_spec": seg_spec.to_dict(), "source": source, "scene": scene_info()}
+
+
+def scene_info() -> dict:
+    """Scene file of the cloud (camera resolution, voxel size) + its point-cloud settings."""
+    pc = _cloud_params(_directives(SCENE_YAML))
+    return {"path": str(SCENE_YAML.relative_to(REPO_ROOT)) if SCENE_YAML.is_relative_to(REPO_ROOT) else str(SCENE_YAML),
+            "voxel_size": float(pc.get("voxel_size", 0.0))}
 
 
 def jaw_centres_from_poses(ee_franka7, ee_ur7) -> np.ndarray:

@@ -1,7 +1,8 @@
 """Torch-free learned latent encoder, learned-LCS step and the ``LATENT_STATE`` LCM message.
 
 ``LatentEncoder`` reproduces ``lcs_learning``'s ``PointNetObsAutoEncoder.encode`` from an exported
-``deploy.npz`` (BatchNorm folded, float32 inside); ``BeltMlpEncoder`` and
+``deploy.npz`` (BatchNorm folded, float32 inside; also ``encoder_type`` scene_belt_prop_pointnet,
+the belt-cloud trainer's V4a-input model); ``BeltMlpEncoder`` and
 ``BeltCloudPointNetEncoder`` are opt-in ``encoder_type`` variants; ``LearnedLcs`` is the trained
 PGD forward step (float64); ``DemoGoals`` loads the harness's ``demo_goals.npz``; ``LatentDecoder``
 maps a latent back to belt points (``decoder.npz``, exporter ``--decoder-out``). numpy + LCM types
@@ -33,6 +34,7 @@ _ENC = "encoder__"
 _DEC = "decoder__"
 BELT_CLOUD_TYPE = "belt_cloud_pointnet"
 POINTMAE_TYPE = "belt_cloud_pointmae"
+SCENE_BELT_PROP_TYPE = "scene_belt_prop_pointnet"  # V4a's inputs, trained by the belt-cloud recipe
 
 
 def resize_points_ordered(xyz, n_points: int) -> np.ndarray:
@@ -102,6 +104,9 @@ class LatentEncoder:
             return BeltCloudPointNetEncoder(weights)
         if "encoder_type" in weights and str(_scalar(weights["encoder_type"])) == POINTMAE_TYPE:
             return BeltCloudPointMAEEncoder(weights, device)
+        if "encoder_type" in weights and str(_scalar(weights["encoder_type"])) == (
+                SCENE_BELT_PROP_TYPE):
+            return LatentEncoder(weights)
         return cls(weights)
 
     def preprocess(self, pc_raw) -> np.ndarray:
@@ -289,6 +294,33 @@ class BeltCloudPointMAEEncoder(BeltCloudPointNetEncoder):
     def _fuse(self, g: np.ndarray) -> np.ndarray:
         g = np.asarray(g)
         return self._net.head(g.reshape(-1, g.shape[-1])).reshape(*g.shape[:-1], -1)
+
+
+def episode_input_keys(encoder) -> tuple[str, ...]:
+    """The episode npz keys ``encode_episode_frames`` reads for ``encoder``."""
+    if isinstance(encoder, BeltCloudPointNetEncoder):
+        return ("pcd_belt_seg",)
+    if isinstance(encoder, LatentEncoder):
+        return ("pcd", "state", "pcd_belt")
+    raise TypeError(f"no episode inputs for {type(encoder).__name__}")
+
+
+def encode_episode_frames(encoder, npz, frames) -> tuple[np.ndarray, np.ndarray]:
+    """``(len(frames), n_x)`` per-frame ``encode`` latents (as the node) and ``(len(frames),)``
+    empty flags of a recorded episode (``npz``: an open npz or a dict with
+    ``episode_input_keys``): ``pcd_belt_seg`` for the belt-cloud encoders, else
+    ``(pcd, state, pcd_belt)``."""
+    frames = list(frames)
+    if isinstance(encoder, BeltCloudPointNetEncoder):
+        seg = npz["pcd_belt_seg"]
+        zs, empty = [], []
+        for t in frames:
+            zs.append(encoder.encode(np.asarray(seg[t], dtype=np.float32)))
+            empty.append(bool(encoder.last_empty))
+        return np.stack(zs), np.asarray(empty, dtype=bool)
+    pcd, state, belt = (npz[k] for k in episode_input_keys(encoder))
+    z = np.stack([encoder.encode(pcd[t], state[t], belt[t]) for t in frames])
+    return z, np.zeros(len(frames), dtype=bool)
 
 
 def encoder_input(encoder, frame: dict) -> np.ndarray:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -22,7 +23,9 @@ from utils.directives import Directive, parse_directives
 ASSETS_DIR = REPO_ROOT / "assets"
 COMMON_ASSETS_DIR = ASSETS_DIR / "common"
 ROUND_BELT_ASSETS_DIR = ASSETS_DIR / "round_belt_task"
-SCENE_DIRECTIVES = ROUND_BELT_ASSETS_DIR / "round_belt_scene.yaml"
+# ROUND_BELT_SCENE: a scene variant (e.g. round_belt_scene_zed720.yaml: denser cameras / voxels), repo-relative or absolute
+SCENE_DIRECTIVES = (REPO_ROOT / os.environ["ROUND_BELT_SCENE"] if os.environ.get("ROUND_BELT_SCENE")
+                    else ROUND_BELT_ASSETS_DIR / "round_belt_scene.yaml")
 LCM_SIM_PARAMS = ROUND_BELT_ASSETS_DIR / "round_belt_lcm_sim.yaml"
 
 _D = parse_directives(SCENE_DIRECTIVES)

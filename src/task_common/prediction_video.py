@@ -25,7 +25,13 @@ import viser
 import warp as wp
 
 from task_common import REPO_ROOT
-from task_common.latent_encoder import LatentDecoder, LatentEncoder, LearnedLcs
+from task_common.belt_cloud import known_large_pulley_pose7, quat_wxyz_matrix
+from task_common.latent_encoder import (
+    BeltCloudPointNetEncoder,
+    LatentDecoder,
+    LatentEncoder,
+    LearnedLcs,
+)
 from task_common.replay_learned_mpc import _tube_faces, tube_vertices
 from task_common.replay_video import LEGEND_FONT, LEGEND_PANEL, LEGEND_TEXT, CameraPose
 from task_common.sim_snapshot import load as load_snapshot
@@ -93,6 +99,9 @@ class OneStepModel:
         self.lcs = LearnedLcs.load(deploy)
         self.dec = LatentDecoder.load(decoder)
         self._subsets = _subset_inverses(self.lcs.F)
+        # belt_cloud_pointnet: encodes pcd_belt_seg, decodes unordered pulley-frame points
+        self.belt_cloud = isinstance(self.enc, BeltCloudPointNetEncoder)
+        self._pulley = known_large_pulley_pose7() if self.dec.frame != "world" else None
 
     def encode(self, pcd, prop, belt) -> np.ndarray:
         return self.enc.encode(pcd, prop, belt)
@@ -110,7 +119,19 @@ class OneStepModel:
         return z @ s.A.T + u @ s.B.T + lam @ s.D.T + s.d
 
     def decode(self, z) -> np.ndarray:
-        return self.dec.decode_batch(np.atleast_2d(z))
+        """``(B, P, 3)`` world-frame points."""
+        pts = self.dec.decode_batch(np.atleast_2d(z))
+        if self._pulley is None:
+            return pts
+        return (pts @ quat_wxyz_matrix(self._pulley[3:]).T + self._pulley[:3]).astype(np.float32)
+
+    def observation(self, ep: Episode, k: int) -> np.ndarray:
+        """The cloud the encoder takes at frame ``k``."""
+        if not self.belt_cloud:
+            return ep.pcd[k]
+        if ep.seg is None:
+            raise ValueError(f"{ep.path.name}: no pcd_belt_seg for the belt-cloud encoder")
+        return ep.seg[k]
 
 
 @dataclass
@@ -125,6 +146,7 @@ class Episode:
     dt: float
     outcome: str
     data: dict = field(repr=False)
+    seg: list[np.ndarray] | None = None  # pcd_belt_seg (pulley frame) when recorded
 
     @classmethod
     def load(cls, path: Path) -> Episode:
@@ -134,7 +156,9 @@ class Episode:
         return cls(Path(path), [np.asarray(p, np.float32) for p in data["pcd"]],
                    data["state"].astype(np.float32), data["pcd_belt"].astype(np.float32),
                    data["actions"].astype(np.float32).astype(np.float64),
-                   float(meta["lcs_format"]["sample_period_s"]), str(data["sim_outcome"]), data)
+                   float(meta["lcs_format"]["sample_period_s"]), str(data["sim_outcome"]), data,
+                   [np.asarray(p, np.float32) for p in data["pcd_belt_seg"]]
+                   if "pcd_belt_seg" in data else None)
 
     @property
     def frames(self) -> int:
@@ -144,16 +168,21 @@ class Episode:
 def one_step(model: OneStepModel, ep: Episode, k: int) -> dict[str, np.ndarray]:
     """``decode(step(encode(obs_k), u_k))`` and ``decode(encode(obs_{k+1}))``, single-sample
     calls (the check re-derives these bit-exactly)."""
-    z = model.encode(ep.pcd[k], ep.prop[k], ep.belt[k])
-    z1 = model.encode(ep.pcd[k + 1], ep.prop[k + 1], ep.belt[k + 1])
+    z = model.encode(model.observation(ep, k), ep.prop[k], ep.belt[k])
+    z1 = model.encode(model.observation(ep, k + 1), ep.prop[k + 1], ep.belt[k + 1])
     z_hat = model.step(z, ep.u[k])
     return {"z": z, "z_next_pred": z_hat[0], "pred": model.decode(z_hat)[0],
             "recon_next": model.decode(z1)[0]}
 
 
 def rmse_mm(a, b) -> np.ndarray:
-    d = np.asarray(a, np.float64) - np.asarray(b, np.float64)
-    return 1e3 * np.sqrt((d ** 2).mean(axis=(-1, -2)))
+    """Per-point RMSE for matching ordered belts, else (unordered decoder points) Chamfer RMS."""
+    a, b = np.asarray(a, np.float64), np.asarray(b, np.float64)
+    if a.shape != b.shape:
+        d2 = np.maximum((a * a).sum(-1)[..., :, None] + (b * b).sum(-1)[..., None, :]
+                        - 2.0 * a @ np.swapaxes(b, -1, -2), 0.0)
+        return 1e3 * np.sqrt(0.5 * (d2.min(-1).mean(-1) + d2.min(-2).mean(-1)))
+    return 1e3 * np.sqrt(((a - b) ** 2).mean(axis=(-1, -2)))
 
 
 def predict_episode(model: OneStepModel, ep: Episode) -> dict[str, Any]:
@@ -163,7 +192,8 @@ def predict_episode(model: OneStepModel, ep: Episode) -> dict[str, Any]:
     recon = np.stack([r["recon_next"] for r in rows])
     true, cur = ep.belt[1:], ep.belt[:-1]
     return {"pred": pred, "recon_next": recon, "true_next": true, "current": cur,
-            "point_err_mm": 1e3 * np.linalg.norm(pred.astype(np.float64) - true, axis=-1),
+            "point_err_mm": (1e3 * np.linalg.norm(pred.astype(np.float64) - true, axis=-1)
+                             if pred.shape == true.shape else None),
             "rmse_model_mm": rmse_mm(pred, true), "rmse_recon_mm": rmse_mm(recon, true),
             "rmse_nomotion_mm": rmse_mm(cur, true),
             "time_s": ep.dt * np.arange(ep.frames - 1)}
@@ -241,7 +271,8 @@ class EpisodeScene:
 
     def __init__(self, model: newton.Model, ep: Episode) -> None:
         meta = json.loads(str(ep.data["sim_meta"]))
-        path = Path(meta["start_state"])
+        st = meta["start_state"]
+        path = Path(st["file"] if isinstance(st, dict) else st)  # MILES segments: {set, id, file}
         self.snapshot_path = path if path.is_absolute() else REPO_ROOT / path
         snap = load_snapshot(self.snapshot_path)
         labels = [str(b) for b in model.body_label]

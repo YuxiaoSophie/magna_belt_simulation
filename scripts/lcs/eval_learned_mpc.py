@@ -63,7 +63,9 @@ from round_belt_task.motion import MotionError
 from round_belt_task.osc_bridge import OscTimeout
 from round_belt_task.outcome import (
     LABELS,
+    classify,
     classify_episode,
+    frame_metrics,
     slant_episode,
 )
 from round_belt_task.waypoints import (
@@ -122,7 +124,7 @@ N_KNOTS = 7
 END_POLL_S = 0.05
 UR_EXACT_DT_TOL_S = 1e-6  # line knot times are utime-quantised (1 us)
 RESET_ARG_DEFAULTS = {"reset": "snapshot", "reset_spec": []}
-CLOUD_ARG_DEFAULTS = {"cloud_noise": "off", "belt_seg": False}
+CLOUD_ARG_DEFAULTS = {"cloud_noise": "off", "belt_seg": False, "belt_seg_source": "camera"}
 CONTROLLERS = ("magna", "mppi")
 DEFAULT_MPPI_CONFIG = REPO_ROOT / "data" / "lcs" / "realfirst" / "v1" / "mppi.yaml"
 MPPI_ARG_DEFAULTS = {"controller": "magna", "mppi_config": DEFAULT_MPPI_CONFIG,
@@ -169,6 +171,9 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--pace", type=float, default=1.0,
                    help="minimum wall seconds per simulated second (0 = free-running)")
     p.add_argument("--settle-s", type=float, default=0.5, help="after the end marker")
+    p.add_argument("--early-stop", default=None, metavar="W_ENGAGED,W_FAIL,T_MIN",
+                   help="end the episode once the per-frame outcome label has held W_ENGAGED s (engaged) or "
+                        "W_FAIL s (any other label), not before T_MIN s (default: off)")
     p.add_argument("--record", action="store_true",
                    help="a RunRecorder run per episode under <out>/recordings/")
     p.add_argument("--no-pcd", action="store_true",
@@ -189,6 +194,11 @@ def create_parser() -> argparse.ArgumentParser:
                         "(RNG [crc32(start id), repeat, 11])")
     p.add_argument("--belt-seg", action="store_true", default=CLOUD_ARG_DEFAULTS["belt_seg"],
                    help="also store pcd_belt_seg (colour-segmented belt, known pulley frame)")
+    p.add_argument("--belt-seg-source", choices=("camera", "gt"),
+                   default=CLOUD_ARG_DEFAULTS["belt_seg_source"],
+                   help="pcd_belt_seg (encoder input + record): camera = colour-segmented cloud; "
+                        "gt = the 150 sim material points in the known pulley frame (SIM GT, "
+                        "diagnostic only, V12-62)")
     p.add_argument("--reset", choices=("snapshot", "scripted"),
                    default=RESET_ARG_DEFAULTS["reset"],
                    help="between episodes: snapshot restore, or scripted_reset.py (lift, return "
@@ -738,6 +748,8 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int,
         if ctx.cloud["seg"] is not None:
             extras_meta["belt_seg"] = bc.belt_seg_meta(ctx.cloud["noise"], ctx.cloud["seg"],
                                                        "record", ctx.cloud["pose"])
+            if ctx.args.belt_seg_source == "gt":
+                extras_meta["belt_seg"]["points"] = "sim_gt_pcd_belt"
     post = {"outcome": np.array(label), "status": np.array(status), "mode": np.array(ctx.mode),
             "start_state": np.array(json.dumps(start)),
             "wrap_deg": metrics["wrap_deg"], "h_median_mm": metrics["h_median_mm"],
@@ -962,6 +974,8 @@ def _run_loop(sim, ctx: EvalContext, ctrl, sampler, events_raw: list) -> dict:
     lead_gain = sim.arm_kd / sim.arm_ke / sim.frame_dt
     lead_key = None
     max_steps = round(args.max_episode_s / dt)
+    es = [float(x) for x in args.early_stop.split(",")] if args.early_stop else None
+    es_lab, es_t0 = None, 0.0
     settle_steps = round(args.settle_s / dt)
     min_wall = args.pace * dt
     frames: list[dict] = []
@@ -985,6 +999,14 @@ def _run_loop(sim, ctx: EvalContext, ctrl, sampler, events_raw: list) -> dict:
             if abort is None and not all(frames[-1]["grasp_ok"]):
                 abort = f"grasp lost at step {k} ({sim.grasp_state().describe()})"
                 status, reason, finished = "aborted", abort, True
+            if es is not None and not finished and abort is None and end_at is None:
+                lab = classify(frame_metrics(frames[-1]["belt"], frames[-1]["pulley_raw"], th=ctx.thresholds),
+                               ctx.thresholds)
+                t = k * dt
+                if lab != es_lab:
+                    es_lab, es_t0 = lab, t
+                if t >= es[2] and t - es_t0 >= (es[0] if lab == "engaged" else es[1]):
+                    reason, finished = f"early stop: {lab} held {t - es_t0:.1f} s at {t:.1f} s", True
             if finished:
                 break
         w0 = time.perf_counter()
@@ -1089,7 +1111,9 @@ def _sample(sim, ctx: EvalContext, sampler, k: int, s0: int, publish: bool,
                                     bc.jaw_centres_from_poses(ee_f, ee_u), c["pose"])
             xyz, rgb = out["pcd"], out["pcd_rgb"]
             if c["seg"] is not None:
-                frame["pcd_belt_seg"] = out["pcd_belt_seg"]
+                frame["pcd_belt_seg"] = (out["pcd_belt_seg"] if ctx.args.belt_seg_source == "camera"
+                                         else bc.to_pulley_frame(frame["belt_pts"], c["pose"])
+                                         .astype(np.float32))
         frame["cloud"], frame["pcd_rgb"] = lcs.camera_points(xyz), rgb
     timing["render"] += time.perf_counter() - r0
     frame["latent"] = np.full(ctx.encoder.latent_dim if ctx.encoder else 16, np.nan)

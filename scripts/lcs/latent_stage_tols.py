@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Stage-1 ("pre_place_2 reached") latent tolerance from the seed demos' own spread.
 
-Encodes (numpy twin, ``pcd_belt_seg``) each demo's pre_place_2 latch frame (first frame after
-the last ``move:pre_place_2``, ``realfirst_loop.goal_frames``) and the ``--window`` frames after
-it; ``tol_1`` = max(p``--percentile`` of their whitened distance to ``z_goal_stage1``,
-``--floor``). Same on the last ``--n-last`` frames vs ``z_goal_stage2`` -> ``tol_2`` (report
-only: stage 2 ends on its timeout). The node fires "reached" after ``streak`` consecutive
-latents with ``0 <= dist < tol`` (``MppiParams.stage_reach_streak``).
+Encodes (numpy twin, ``pcd_belt_seg``; other encoders their ``episode_input_keys``) each demo's
+pre_place_2 latch frame (first frame after the last ``move:pre_place_2``,
+``realfirst_loop.goal_frames``) and the ``--window`` frames after it; ``tol_1`` =
+max(p``--percentile`` of their whitened distance to ``z_goal_stage1``, ``--floor``). Same on the
+last ``--n-last`` frames vs ``z_goal_stage2`` -> ``tol_2`` (report only: stage 2 ends on its
+timeout). The node fires "reached" after ``streak`` consecutive latents with ``0 <= dist < tol``
+(``MppiParams.stage_reach_streak``).
 
     uv run --frozen python scripts/lcs/latent_stage_tols.py --deploy <deploy.npz> \\
         --demos data/lcs/realfirst/v1_1/seed/demo/*.npz \\
@@ -28,7 +29,12 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
-from task_common.latent_encoder import LatentEncoder, LearnedLcs
+from task_common.latent_encoder import (
+    LatentEncoder,
+    LearnedLcs,
+    encode_episode_frames,
+    episode_input_keys,
+)
 
 STREAK = 3
 N_LAST = 13
@@ -51,13 +57,19 @@ def latch_frame(labels: list[str]) -> int:
     return mv[-1] + 1
 
 
-def load_episode(path: Path) -> dict:
+def load_episode(path: Path, keys=(SEG_KEY,)) -> dict:
+    """``obs``: the encoder inputs ``keys`` (``episode_input_keys``; ``seg`` the list of
+    ``pcd_belt_seg`` when among them), ``n``: frame count."""
     with np.load(path, allow_pickle=True) as d:
-        if SEG_KEY not in d.files:
-            raise SystemExit(f"{path}: no {SEG_KEY} (record with --belt-seg)")
+        for k in keys:
+            if k not in d.files:
+                raise SystemExit(f"{path}: no {k}"
+                                 + (" (record with --belt-seg)" if k == SEG_KEY else ""))
         meta = json.loads(str(d["sim_meta"]))
         phase = np.asarray(d["sim_phase"], dtype=np.int64)
-        out = {"seg": list(d[SEG_KEY]), "ee_f": np.asarray(d["sim_ee_franka"], np.float64),
+        out = {"obs": {k: d[k] for k in keys}, "n": len(d[keys[0]]),
+               **({"seg": list(d[SEG_KEY])} if SEG_KEY in keys else {}),
+               "ee_f": np.asarray(d["sim_ee_franka"], np.float64),
                "ee_u": np.asarray(d["sim_ee_ur"], np.float64),
                "stage": np.asarray(d["sim_stage"]) if "sim_stage" in d.files else None,
                "outcome": str(d["sim_outcome"]) if "sim_outcome" in d.files else None,
@@ -74,6 +86,12 @@ def encode_frames(enc, seg: list, frames) -> tuple[np.ndarray, int]:
         zs.append(enc.encode(np.asarray(seg[t], dtype=np.float32)))
         n_empty += bool(enc.last_empty)
     return np.stack(zs), n_empty
+
+
+def encode_obs(enc, ep: dict, frames) -> tuple[np.ndarray, int]:
+    """``encode_frames`` of any encoder on ``load_episode(path, episode_input_keys(enc))``."""
+    z, empty = encode_episode_frames(enc, ep["obs"], frames)
+    return z, int(empty.sum())
 
 
 def dists(lcs: LearnedLcs, Z: np.ndarray, goal: np.ndarray) -> np.ndarray:
@@ -103,15 +121,15 @@ def derive(deploy: Path, demos: list[Path], window: int, floor: float, pct: floa
     enc = LatentEncoder.load(deploy)
     rows, d1_all, d2_all = [], [], []
     for path in demos:
-        ep = load_episode(path)
+        ep = load_episode(path, episode_input_keys(enc))
         if ep["labels"] is None:
             raise SystemExit(f"{path}: sim_meta has no phase_labels")
         i = latch_frame(ep["labels"])
-        n = len(ep["seg"])
+        n = ep["n"]
         w = list(range(i, min(i + window + 1, n)))
         last = list(range(max(0, n - n_last), n))
-        Z1, e1 = encode_frames(enc, ep["seg"], w)
-        Z2, e2 = encode_frames(enc, ep["seg"], last)
+        Z1, e1 = encode_obs(enc, ep, w)
+        Z2, e2 = encode_obs(enc, ep, last)
         d1, d2 = dists(lcs, Z1, g1), dists(lcs, Z2, g2)
         d1_all += d1.tolist()
         d2_all += d2.tolist()

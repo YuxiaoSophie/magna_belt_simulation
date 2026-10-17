@@ -1,0 +1,40 @@
+# The two ZED Mini RGBD cameras of magna's round-belt scene at HD720 (1280 x 720, fx = fy ~ 700 px: ~85 x 54 deg, the
+# ZED Mini HD720 factory calibration ballpark; check against the real units). Poses as zed_cameras.yaml.
+# zed_camera is the optical frame (+Z forward, +Y down).
+directives:
+  - add_model:
+      name: zed_camera_franka_side
+      file: ../zed_camera/zed_camera.urdf
+      static: true
+  - add_weld:
+      parent: world
+      child: zed_camera_franka_side::zed_camera
+      X_PC:
+        translation: [-0.23254929, 0.78334317, 0.37133233]
+        rotation: !Rpy { deg: [-115.7028203, 0.7562726, -122.0758236] }
+  - add_model:
+      name: zed_camera_ur_side
+      file: ../zed_camera/zed_camera.urdf
+      static: true
+  - add_weld:
+      parent: world
+      child: zed_camera_ur_side::zed_camera
+      X_PC:
+        translation: [0.92596044, -0.73487673, 0.40356498]
+        rotation: !Rpy { deg: [-118.9944391, 0.53362, 34.3510054] }
+  - add_rgbd_camera:
+      name: zed_camera_franka_side
+      base_frame: zed_camera_franka_side::zed_camera
+      width: 1280
+      height: 720
+      focal_x: 700.0
+      focal_y: 700.0
+      fps: 20
+  - add_rgbd_camera:
+      name: zed_camera_ur_side
+      base_frame: zed_camera_ur_side::zed_camera
+      width: 1280
+      height: 720
+      focal_x: 700.0
+      focal_y: 700.0
+      fps: 20

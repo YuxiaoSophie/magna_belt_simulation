@@ -20,10 +20,12 @@ sub-folder holds
   lcs_accuracy    per solve i, the deploy LCS rolled k = 1 and k = N steps from the encoded latent
                   z0_i with the executed actions (u_sol[:, 0] of solves i..i+k-1) vs z0_{i+k}:
                   whitened latent error and decoded-belt Chamfer RMS (mm), at solve i's time;
-                  windows across a gap in the solve times are skipped; median / p90 in the status
+                  windows across a gap in the solve times are skipped; median / p90 in the log
+  goal_distance   whitened latent distance to the stage / final goal: measured, and the current plan
+  reconstruction  per recorded frame, decoded encoding vs recorded belt cloud (Chamfer RMS mm)
   contact_forces  the LCS contact forces λ of the current solve at (z0_i, u_sol[:, 0]_i) and at
                   the plan's last action knot, one bar per component, plus the active set
-Both use the deploy's lcs_forward_solver (pgd_symmetric with the run's MPPI pgd_iters, or
+All use the deploy's lcs_forward_solver (pgd_symmetric with the run's MPPI pgd_iters, or
 full_lcp) and are computed once per run when first shown.
 """
 

@@ -4,8 +4,8 @@
 Waypoint frames of ``--goal-demo``: ``stride, 2 stride, ...`` before the pre_place_2 latch, the
 latch, then every ``stride`` up to the first ``hold:place_3`` frame (included), then the final
 (seated) frame; frame 0 is excluded. Per waypoint ``k``: ``z_wp[k]`` = the numpy-twin ``encode``
-of the goal demo's ``pcd_belt_seg`` there (as the encoder node); ``tol[k]`` = max(p``--percentile``
-over ALL demos of their whitened distance to ``z_wp[k]`` at their time-aligned frame +-
+of the goal demo's ``pcd_belt_seg`` (other encoders: ``episode_input_keys``) there (as the
+encoder node); ``tol[k]`` = max(p``--percentile`` over ALL demos of their whitened distance to ``z_wp[k]`` at their time-aligned frame +-
 ``--window``, ``--floor``). The latch waypoint uses the stage-1 rule of
 ``latent_stage_tols.py`` (frames latch .. latch + window: an arrival, not a pass-through), so
 its tol equals that script's ``tol_1`` for the same goal vector. Alignment: frames before the
@@ -47,9 +47,9 @@ for _p in (REPO_ROOT / "src", Path(__file__).resolve().parent):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from latent_stage_tols import encode_frames, latch_frame, load_episode, sha256
+from latent_stage_tols import encode_obs, latch_frame, load_episode, sha256
 
-from task_common.latent_encoder import LatentEncoder, LearnedLcs
+from task_common.latent_encoder import LatentEncoder, LearnedLcs, episode_input_keys
 
 FIRST_HOLD = "hold:place_3"
 MIN_DURATION_S = 3.0
@@ -129,7 +129,7 @@ def derive(deploy: Path, demos: list[Path], goal_demo: Path, stride: int, window
 
     def episode(path):
         if str(path) not in eps:
-            eps[str(path)] = load_episode(path)
+            eps[str(path)] = load_episode(path, episode_input_keys(enc))
         return eps[str(path)]
 
     with np.load(deploy, allow_pickle=False) as d:
@@ -140,12 +140,12 @@ def derive(deploy: Path, demos: list[Path], goal_demo: Path, stride: int, window
         frame_dt = float(np.median(np.diff(np.asarray(d["sim_time"], dtype=np.float64))))
     if abs(frame_dt - dt) > 1e-6:
         raise SystemExit(f"{goal_demo}: frame period {frame_dt} != deploy dt {dt}")
-    n_g = len(goal["seg"])
+    n_g = goal["n"]
     key_g = (latch_frame(goal["labels"]), first_hold_frame(goal["labels"]), n_g)
     frames = waypoint_frames(*key_g, stride)
     if not 0 <= min_frame <= key_g[0]:
         raise SystemExit(f"--min-frame {min_frame}: 0 .. the latch frame {key_g[0]}")
-    z_traj, n_empty = encode_frames(enc, goal["seg"], range(n_g))
+    z_traj, n_empty = encode_obs(enc, goal, range(n_g))
     if n_empty:
         raise SystemExit(f"{goal_demo}: {n_empty} empty belt clouds")
     z_wp = z_traj[frames]
@@ -153,7 +153,7 @@ def derive(deploy: Path, demos: list[Path], goal_demo: Path, stride: int, window
     per_demo = []
     for path in demos:
         ep = episode(path)
-        n_j = len(ep["seg"])
+        n_j = ep["n"]
         key_j = (latch_frame(ep["labels"]), first_hold_frame(ep["labels"]), n_j)
         aligned = []
         for k, f in enumerate(frames):
@@ -161,7 +161,7 @@ def derive(deploy: Path, demos: list[Path], goal_demo: Path, stride: int, window
             aligned.append(t_j)
             for t in tol_frames(t_j, key_j[0], window, n_j, f == key_g[0]):
                 if (str(path), t) not in cache:
-                    cache[(str(path), t)] = encode_frames(enc, ep["seg"], [t])[0][0]
+                    cache[(str(path), t)] = encode_obs(enc, ep, [t])[0][0]
                 pooled[k].append(lcs.whitened_dist(cache[(str(path), t)], z_wp[k]))
         per_demo.append({"episode": str(path), "latch": key_j[0], "first_hold": key_j[1],
                          "n_frames": n_j, "aligned_frames": aligned})

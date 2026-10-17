@@ -2217,26 +2217,25 @@ def st_buffer(ctx: Ctx, dry: bool):
 def onpolicy_rows(ctx: Ctx, rows: list[dict]) -> list[dict]:
     """Copies of iteration i's new MPC rows with ``frame_weights`` + ``off_track``: latents =
     the episode's ``sim_latent`` (the deploy encoder's, logged by the node), else deploy_i's
-    encoding of ``pcd_belt_seg``; tube = iteration i's latent_waypoints.npz."""
+    encoding of ``pcd_belt_seg`` (``encode_episode_frames``); tube = iteration i's
+    latent_waypoints.npz."""
     from task_common import onpolicy_weighting
-    from task_common.latent_encoder import LatentEncoder
+    from task_common.latent_encoder import LatentEncoder, encode_episode_frames
 
     rule = onpolicy_weighting.rule_of(ctx.cfg["onpolicy_weighting"])
     with np.load(ctx.it() / "latent_waypoints.npz", allow_pickle=True) as d:
         wp = {k: np.asarray(d[k]) for k in ("z_traj", "z_std", "frames", "tol", "dt")}
     enc, out = None, []
     for r in rows:
+        src = "sim_latent"
         with np.load(r["episode"], allow_pickle=True) as d:
             n = len(d["actions"])
             ut = np.asarray(d["utime"], np.float64)
             z = np.asarray(d["sim_latent"], np.float64) if "sim_latent" in d.files else None
-            seg = (None if z is not None and z.shape == (n, wp["z_traj"].shape[1])
-                   else list(d["pcd_belt_seg"]))
-        src = "sim_latent"
-        if seg is not None:
-            enc = enc or LatentEncoder.load(jload(ctx.it() / "deploy.json")["deploy"])
-            z = np.stack([enc.encode(np.asarray(s, np.float32)) for s in seg]).astype(np.float64)
-            src = "encoded"
+            if z is None or z.shape != (n, wp["z_traj"].shape[1]):
+                enc = enc or LatentEncoder.load(jload(ctx.it() / "deploy.json")["deploy"])
+                z = encode_episode_frames(enc, d, range(n))[0].astype(np.float64)
+                src = "encoded"
         dt = float(np.median(np.diff(ut))) * 1e-6 if n > 1 else float(wp["dt"])
         fw, info = onpolicy_weighting.episode_weights(z, wp, dt, bool(r["label_human"]), rule)
         out.append({**r, "frame_weights": fw, "off_track": {**info, "latents": src, "dt": dt}})
@@ -2618,7 +2617,7 @@ def policy_screen(ctx: Ctx, deploy: Path, buf: dict, cfg: Path, clear_npz=None) 
 
     import torch
 
-    from task_common.latent_encoder import LatentEncoder
+    from task_common.latent_encoder import LatentEncoder, encode_episode_frames
     from task_common.mppi_lcs import MppiParams, TorchLcs, mppi_plan
 
     late = {"move:place_3", "hold:place_3", "done"}
@@ -2653,7 +2652,7 @@ def policy_screen(ctx: Ctx, deploy: Path, buf: dict, cfg: Path, clear_npz=None) 
     us, kinds = [], []
     for ep, t, kind in pick:
         with np.load(ep, allow_pickle=True) as d:
-            z = enc.encode(d["pcd_belt_seg"][t])
+            z = encode_episode_frames(enc, d, [t])[0][0]
             p0 = np.r_[d["sim_ee_franka"][t, :3], d["sim_ee_ur"][t, :3]]
             q = np.stack([d["sim_ee_franka"][t, 3:7], d["sim_ee_ur"][t, 3:7]])
         c = params.z_ceiling_above_start_m

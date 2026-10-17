@@ -30,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from latent_stage_tols import (
     dists,
-    encode_frames,
+    encode_obs,
     latch_frame,
     load_episode,
     sha256,
@@ -38,7 +38,7 @@ from latent_stage_tols import (
     streak_fire,
 )
 
-from task_common.latent_encoder import LatentEncoder
+from task_common.latent_encoder import LatentEncoder, episode_input_keys
 
 DT = 0.075
 WITHIN_S = 2.0
@@ -57,9 +57,9 @@ def nearest_err_mm(ep: dict, t: int, refs: list[dict]) -> list[float]:
 
 def rollout_row(path: Path, enc, lcs, g1, tol: float, streak: int, goal_ref: dict,
                 refs: list[dict]) -> dict:
-    ep = load_episode(path)
-    n = len(ep["seg"])
-    Z, n_empty = encode_frames(enc, ep["seg"], range(n))
+    ep = load_episode(path, episode_input_keys(enc))
+    n = ep["n"]
+    Z, n_empty = encode_obs(enc, ep, range(n))
     d1 = dists(lcs, Z, g1)
     s0 = np.flatnonzero(ep["stage"] == 0)
     sw = int(s0[-1]) + 1 if len(s0) and s0[-1] + 1 < n else None
@@ -84,9 +84,9 @@ def rollout_row(path: Path, enc, lcs, g1, tol: float, streak: int, goal_ref: dic
 
 
 def demo_row(path: Path, enc, lcs, g1, tol: float, streak: int) -> dict:
-    ep = load_episode(path)
+    ep = load_episode(path, episode_input_keys(enc))
     i = latch_frame(ep["labels"])
-    Z, n_empty = encode_frames(enc, ep["seg"], range(len(ep["seg"])))
+    Z, n_empty = encode_obs(enc, ep, range(ep["n"]))
     d1 = dists(lcs, Z, g1)
     fire = streak_fire(d1, tol, streak)
     off = None if fire is None else fire - i
@@ -109,9 +109,9 @@ def approach_proxy(paths: list[Path], enc, lcs, g1, tol: float, k: int) -> dict:
     the fraction inside tol_1 and where the streak rule would hold (clean false-reached proxy)."""
     err, d, held, pre = [], [], [], []
     for path in paths:
-        ep = load_episode(path)
+        ep = load_episode(path, episode_input_keys(enc))
         i = latch_frame(ep["labels"])
-        Z, _ = encode_frames(enc, ep["seg"], range(len(ep["seg"])))
+        Z, _ = encode_obs(enc, ep, range(ep["n"]))
         di = dists(lcs, Z, g1)
         e = np.maximum(np.linalg.norm(ep["ee_f"][:, :3] - ep["ee_f"][i, :3], axis=1),
                        np.linalg.norm(ep["ee_u"][:, :3] - ep["ee_u"][i, :3], axis=1)) * 1e3

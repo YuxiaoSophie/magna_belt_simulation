@@ -49,6 +49,7 @@ _ROD_SPEC: dict[str, Any] = {
     "stretch_damping": REQUIRED, "bend_stiffness": REQUIRED, "bend_damping": REQUIRED,
     "twist_total": 0.0, "closed": True, "body_frame_origin": "com", "margin": 0.0,
     "gap": 0.001, "density": None, "ke": None, "kd": None, "mu": None,
+    "twist_stiffness": None, "twist_damping": None, "pin_stiffness": False,
 }
 
 
@@ -63,8 +64,11 @@ def add_rod_ellipse(ctx: DirectiveContext, params: Mapping[str, Any]) -> None:
     ``stretch_damping``, ``bend_stiffness``, ``bend_damping``; optional ``twist_total``
     (0.0), ``closed`` (true), ``body_frame_origin`` ("com"), ``margin`` (0.0), ``gap``
     (0.001), ``density`` (:func:`estimate_belt_density`) and ``ke``/``kd``/``mu``
-    (``task_common.defaults.CABLE_CONTACT_*``).  Stores
-    ``extras[name] = {"bodies": [...], "joints": [...], "shapes": [...]}``.
+    (``task_common.defaults.CABLE_CONTACT_*``), optional
+    ``twist_stiffness``/``twist_damping`` (None = Newton's default: the bend values) and
+    ``pin_stiffness`` (false; true holds the stretch VBD penalty at ``stretch_stiffness``, see
+    ``BeltTaskSimulation._pin_belt_stretch_stiffness``).  Stores
+    ``extras[name] = {"bodies": [...], "joints": [...], "shapes": [...], "pin_stiffness": bool}``.
     """
     p, where, num = _params("add_rod_ellipse", params, _ROD_SPEC)
     builder, name = ctx.builder, str(p["name"])
@@ -73,6 +77,8 @@ def add_rod_ellipse(ctx: DirectiveContext, params: Mapping[str, Any]) -> None:
         raise ValueError(f"{where}: num_elements must be an integer >= 3, got {count!r}")
     if not isinstance(p["closed"], bool):
         raise ValueError(f"{where}: closed must be true or false, got {p['closed']!r}")
+    if not isinstance(p["pin_stiffness"], bool):
+        raise TypeError(f"{where}: pin_stiffness must be true or false, got {p['pin_stiffness']!r}")
     center = np.asarray(as_vec3(p["center"], where, "center"), dtype=np.float64)
     semi_x, semi_y = as_floats(p["semi_axes"], where, "semi_axes", 2)
     body_start, joint_start, shape_start = (
@@ -97,6 +103,7 @@ def add_rod_ellipse(ctx: DirectiveContext, params: Mapping[str, Any]) -> None:
             mu=num("mu", CABLE_CONTACT_MU), margin=num("margin"), gap=num("gap")),
         stretch_stiffness=num("stretch_stiffness"), stretch_damping=num("stretch_damping"),
         bend_stiffness=num("bend_stiffness"), bend_damping=num("bend_damping"),
+        **{k: num(k) for k in ("twist_stiffness", "twist_damping") if p[k] is not None},
         closed=p["closed"], body_frame_origin=str(p["body_frame_origin"]),
         label=name, color=as_vec3(p["color"], where, "color"),
     )
@@ -109,6 +116,7 @@ def add_rod_ellipse(ctx: DirectiveContext, params: Mapping[str, Any]) -> None:
         "bodies": list(bodies),
         "joints": list(range(joint_start, builder.joint_count)),
         "shapes": list(range(shape_start, builder.shape_count)),
+        "pin_stiffness": p["pin_stiffness"],
     }
 
 

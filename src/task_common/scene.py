@@ -82,6 +82,7 @@ class SceneInfo:
     pulley_bodies: list[int] = field(default_factory=list)
     pulley_joints: list[int] = field(default_factory=list)
     pulley_shapes: list[int] = field(default_factory=list)
+    belt_pin_stiffness: bool = False
 
     @property
     def proxy_bodies(self) -> list[int]:
@@ -296,4 +297,5 @@ def build_task_scene(
         point_clouds=[e for e in scene.extras.values() if isinstance(e, PointCloudSpec)],
         franka_finger_bodies=[int(b) for b in finger_bodies], franka_finger_shapes=finger_shapes,
         pulley_bodies=pulley_bodies, pulley_joints=pulley_joints, pulley_shapes=pulley_shapes,
+        belt_pin_stiffness=bool(belt.get("pin_stiffness", False)),
     )

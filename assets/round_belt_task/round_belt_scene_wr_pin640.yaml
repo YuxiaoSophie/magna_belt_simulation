@@ -1,0 +1,107 @@
+# Round-belt task scene; port of magna round-belt-scene.dmd.yaml. Schema: docs/scene-directives.md.
+# Variant (ROUND_BELT_SCENE): V12-122 MBT6-640 (640 mm, EA 332 N, stretch pinned); otherwise round_belt_scene_wr625b15.yaml.
+# (semi-axes x0.9583; the default 652 mm sits slack once seated), bend/twist x3, pulley damping
+# 0.03 (round_belt_task_board_stage2.urdf); otherwise round_belt_scene.yaml.
+# World frame is Drake's (origin at panda_link0, table top z = -0.02858).
+# Order fixes body/shape indices; keep the tabletop collider between table and board.
+directives:
+  - add_model:
+      name: table
+      file: ../common/scene.urdf
+      static: true
+      color: [0.55, 0.35, 0.14]
+  - add_weld: {parent: world, child: table::scene}
+  - add_tabletop_collision:            # not in Drake (its table is visual-only); keeps the belt up
+      name: tabletop_collision
+      table_visual: table/scene/visual0
+      top_z: -0.02858
+      thickness: 0.04
+      color: [0.55, 0.35, 0.14]
+  # Colours deliberately differ from the Drake SDF, which inverts pulley/mount colours.
+  - add_model:
+      name: board                       # Drake: nist_board
+      file: round_belt_task_board_stage2.urdf
+      static: true
+      color: [0.80, 0.80, 0.80]
+      split_components: true
+      component_colors:
+        # Small-pulley mounting plate, baked into the board mesh; max_span skips the panel.
+        - {max_span: 0.2, near_local_xy: [0.3504, 0.1964], radius: 0.05, color: [0.10, 0.10, 0.10]}
+      link_colors:
+        small_round_pulley: [0.80, 0.80, 0.80]
+        large_round_pulley: [0.10, 0.10, 0.10]
+      keep_visual_material: [rotation_marker_strip]   # URDF marker colours, not link_colors
+  - add_weld:
+      parent: world
+      child: board::board
+      X_PC:
+        translation: [0.64483928, -0.19718233, 0.01076393]
+        rotation: !Rpy { deg: [-3.32822058e-01, -6.87450103e-02, 8.95207485e+01] }
+  - add_model:
+      name: belt_chain_holder           # Drake: belt_holder
+      file: ../common/belt_chain_holder/belt_chain_holder.urdf
+      static: true
+      color: [0.20, 0.60, 1.00]
+  - add_weld:
+      parent: world
+      child: belt_chain_holder::belt_chain_holder_first_half
+      X_PC:
+        translation: [0.4736603358808432, 0.3520562100563749, -0.02858]
+        rotation: !Rpy { deg: [0.0, 0.0, 90.0] }
+  # Drake adds the cameras last; here they must stay in the contiguous static shape range.
+  - add_directives: {file: ../common/directives/zed_cameras.yaml}
+  # magna's point_cloud_* sim params (POINT_CLOUD_CROPPED).
+  - add_cropped_point_cloud:
+      name: cropped_point_cloud
+      cameras: [zed_camera_franka_side, zed_camera_ur_side]
+      crop_lower_xyz: [0.2, -0.25, 0.015]
+      crop_upper_xyz: [0.7, 0.25, 0.11]
+      voxel_size: 0.005
+  # Joint defaults are q_init_franka / q_init_franka_hand (round_belt_simulation_params.yaml).
+  - add_model:
+      name: panda_arm                   # Drake: panda
+      file: ../common/franka/urdf/panda_arm.urdf
+      default_joint_positions:
+        panda_joint1: [1.71717]
+        panda_joint2: [1.20002]
+        panda_joint3: [-1.4548]
+        panda_joint4: [-2.25837]
+        panda_joint5: [1.259265]
+        panda_joint6: [1.94719]
+        panda_joint7: [0.331838]
+      gravity_compensation: true
+      importer_options: {enable_self_collisions: false, collapse_fixed_joints: false}
+  - add_weld: {parent: world, child: panda_arm::panda_link0}
+  - add_model:
+      name: panda_hand
+      file: ../common/franka/urdf/panda_hand_with_long_fingers.urdf
+      default_joint_positions: {panda_finger_joint1: [-0.004], panda_finger_joint2: [0.004]}
+      gravity_compensation: true
+      importer_options: {enable_self_collisions: false, collapse_fixed_joints: false}
+  - add_weld:
+      parent: panda_arm::panda_link8
+      child: panda_hand::panda_hand
+      X_PC: {translation: [0.0, 0.0, 0.0], rotation: !Rpy { deg: [0.0, 0.0, -45.0] }}
+  - add_directives: {file: ../common/directives/ur10_2f85.yaml}
+  - add_weld:
+      parent: world
+      child: ur10::base_link
+      X_PC:
+        translation: [1.33235648, -0.15491427, 0.03076191]
+        rotation: !Rpy { deg: [-0.35720724, 0.72781324, 179.78723941] }
+  # Drake round_belt.sdf ellipse (0.168 x 0.248, yawed 90 deg), resized to rest on the holder's
+  # outer rim; unset params use add_rod_ellipse's defaults (round_belt_task/directives.py).
+  - add_rod_ellipse:
+      name: flexible_ellipse_cable
+      center: [0.4736603358808432, 0.3520562100563749, -0.0152]  # on the rim (top z -0.01858)
+      semi_axes: [0.08398, 0.11841]       # 640 mm rest
+      radius: 0.0033
+      num_elements: 48
+      color: [1.0, 0.5, 0.0]
+      # MISUMI MBT6-640: 16.6 N gives 5% elongation -> EA 332 N.
+      stretch_stiffness: 2.49e+4          # EA 332 N / 13.33 mm segment
+      stretch_damping: 1.0e-1
+      bend_stiffness: 2.25e-1
+      bend_damping: 1.0e-1
+      pin_stiffness: true                 # else legacy AVBD never reaches stretch_stiffness
+  - add_ground_plane: {name: ground, height_from_aabb_min_z_of: table/scene/visual0}

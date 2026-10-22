@@ -81,6 +81,7 @@ class BeltTaskSimulation:
         self._seed_control_targets(info.joint_config)
         self.solver = self._build_solver(info)
         self._pin_pulley_joint_stiffness(info)
+        self._pin_belt_stretch_stiffness(info)
         proxy_labels = [str(self.model.body_label[b]) for b in info.proxy_bodies]
         logger.info(f"[PROXY] mjc->vbd bodies: {proxy_labels}")
 
@@ -233,6 +234,25 @@ class BeltTaskSimulation:
         logger.info(f"Pulley joint VBD stiffness pinned: linear "
                     f"{defaults.VBD_RIGID_JOINT_LINEAR_KE:g} N/m, angular "
                     f"{defaults.VBD_RIGID_JOINT_ANGULAR_KE:g} N m/rad")
+
+    def _pin_belt_stretch_stiffness(self, info: SceneInfo) -> None:
+        """Opt-in (``add_rod_ellipse`` ``pin_stiffness``): rod stretch penalty = authored k."""
+        if not info.belt_pin_stiffness:
+            return
+        # Same ramp as the pulleys: unpinned the rod settles near 1e3*sqrt(F) N/m (V12-121).
+        # Shear stays on the ramp: pinned, it tilts the pinched link and pries the Franka open.
+        vbd = self.solver.solver("vbd")
+        local = {str(label): j for j, label in enumerate(vbd.model.joint_label)}
+        rod = [local[str(self.model.joint_label[g])] for g in info.belt_joints]
+        jt = vbd.model.joint_type.numpy()
+        rod = [j for j in rod if int(jt[j]) == int(newton.JointType.ROD)]
+        slots = vbd.joint_constraint_start.numpy()[rod]  # rod slot 0 = stretch
+        k_min, mat = vbd.joint_penalty_k_min.numpy(), vbd.joint_material_k.numpy()
+        k_min[slots] = mat[slots]
+        vbd.joint_penalty_k_min.assign(k_min)
+        vbd.joint_penalty_k.assign(np.maximum(vbd.joint_penalty_k.numpy(), k_min))
+        logger.info(f"Belt stretch VBD stiffness pinned on {len(rod)} rod joints: "
+                    f"{float(np.median(mat[slots])):g} N/m")
 
     def _seed_control_targets(self, cfg: JointConfig) -> None:
         ctrl_len = len(as_numpy(self.control.joint_target_q))

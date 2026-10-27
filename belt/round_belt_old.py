@@ -45,7 +45,17 @@ from newton.solvers import SolverMuJoCo, SolverVBD
 from newton.solvers.experimental.coupled import SolverCoupled, SolverCoupledProxy
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-TASK_BOARD_URDF_DIR = SCRIPT_DIR / "task_board_urdf"
+ASSET_CANDIDATES = [
+    SCRIPT_DIR / "task_board_urdf",
+    SCRIPT_DIR.parent / "task_board_urdf",
+    SCRIPT_DIR.parent.parent / "task_board_urdf",]
+TASK_BOARD_URDF_DIR = next(
+    (p for p in ASSET_CANDIDATES if p.is_dir()),
+    None,)
+if TASK_BOARD_URDF_DIR is None:
+    raise FileNotFoundError(
+        "Cannot find task_board_urdf. Checked:\n"
+        + "\n".join(str(p) for p in ASSET_CANDIDATES))
 
 ROUND_BELT_XACRO = SCRIPT_DIR / "round_belt.urdf.xacro"
 if not ROUND_BELT_XACRO.exists():

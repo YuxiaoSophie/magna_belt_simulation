@@ -35,9 +35,10 @@ my_projects/
 ├── 2f85.xml
 │   └── MuJoCo MJCF model for the Robotiq 2F-85 gripper
 │
-├── README.md
-├── round_belt.py
-├── round_belt.urdf.xacro
+├── belt/
+│   ├── README.md
+│   ├── round_belt.py
+│   └── ...
 └── ...
 ```
 
@@ -59,7 +60,7 @@ vglrun -d :1 uv run python code.py
 
 ## Files
 
-### 1. Main files
+### 1. Files under folder belt
 
 #### `round_belt.py`
 
@@ -104,22 +105,6 @@ The setup includes everything in `round_belt_old.py`, along with additional feat
 ##### Current setup
 
 Building on `round_belt.py`, this setup adds another UR10 and Robotiq 2F-85.
-
----
-
-#### `spacemouse.py`
-
-##### Current setup
-
-This is the SpaceMouse input translator used for robot teleoperation.
-
----
-
-#### `spacemouse_via_socket_sender.py`
-
-##### Current setup
-
-This is the optional SpaceMouse socket sender for running the SpaceMouse on our own computer while the Newton simulation runs on another computer.
 
 ---
 
@@ -192,6 +177,49 @@ The setup includes, in this order:
 ##### Current setup
 
 This is the commanded-motion version of the full simulation.
+
+---
+
+#### `timing_belt.py`
+
+##### Current setup
+
+This is the timing-belt version of the full-scene simulation.
+
+Building on `round_belt.py`, this setup includes:
+
+* Timing belt and task environment
+  * table
+  * task board
+  * small pulley
+  * large pulley
+  * deformable closed-loop timing belt
+  * belt dimensions: 248 mm × 168 mm × 50 mm
+  * cloth-based belt model using a triangular mesh instead of rod elements
+  * 64 circumferential cells and 8 width cells
+  * target belt mass: 33 grams
+
+* UR10 and Robotiq 2F-85
+
+* SpaceMouse control
+
+* Recording and replay
+
+---
+
+#### `spacemouse.py`
+
+##### Current setup
+
+This is the SpaceMouse input translator used for robot teleoperation.
+
+---
+
+#### `spacemouse_via_socket_sender.py`
+
+##### Current setup
+
+This is the optional SpaceMouse socket sender for running the SpaceMouse on our own computer while the Newton simulation runs on another computer.
 
 ---
 

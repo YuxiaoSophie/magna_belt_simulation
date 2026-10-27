@@ -10,6 +10,15 @@ Run it together with the producer:
     #             constantly overwrites the shared buffer
 
 The producer waits for this file to seed the buffer, so start this one first.
+
+Main simulation loop:
+    1. Reads the current SpaceMouse target.
+    2. Updates the gripper command and contact properties.
+    3. Runs inverse kinematics to compute desired joint angles.
+    4. Updates robot and gripper actuator targets.
+    5. Selects FAST proxy or ADMM coupling based on grasp state.
+    6. Executes coupled physics substeps, detects collisions, and updates joint states.
+    7. Advances simulation time and optionally records the state.
 """
 
 from __future__ import annotations

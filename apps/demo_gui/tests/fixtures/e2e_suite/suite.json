@@ -1,0 +1,92 @@
+{
+ "suite": "full",
+ "arms": [
+  {
+   "name": "V63j_tol50b",
+   "deploy": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63j/deploy_v39j/deploy.npz",
+   "waypoints": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V63j_tol50b_s1_latent_waypoints.npz",
+   "mppi_config": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V63j_stage1.yaml",
+   "stage2": {
+    "deploy": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63j_s2/deploy_v39j/deploy.npz",
+    "waypoints": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V63j_tol50b_s2_latent_waypoints.npz",
+    "mppi_config": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V63j_ch_stage2.yaml"
+   }
+  }
+ ],
+ "starts": [
+  {
+   "key": "set2_gv_00",
+   "start_states": "data/lcs/start_states/grasp_variants/set2",
+   "variants": "gv_00",
+   "reset_seed": 20261008
+  },
+  {
+   "key": "set2_gv_06",
+   "start_states": "data/lcs/start_states/grasp_variants/set2",
+   "variants": "gv_06",
+   "reset_seed": 20261009
+  },
+  {
+   "key": "set3_gv_02",
+   "start_states": "data/lcs/start_states/grasp_variants/set3",
+   "variants": "gv_02",
+   "reset_seed": 20261007
+  },
+  {
+   "key": "set3_gv_03",
+   "start_states": "data/lcs/start_states/grasp_variants/set3",
+   "variants": "gv_03",
+   "reset_seed": 20261006
+  },
+  {
+   "key": "ur_z-30",
+   "start_states": "data/lcs/start_states/ur_slant/ee_ur_z-30_osc.npz",
+   "variants": "",
+   "reset_seed": null
+  },
+  {
+   "key": "ur_z+15",
+   "start_states": "data/lcs/start_states/ur_slant/ee_ur_z+15_osc.npz",
+   "variants": "",
+   "reset_seed": null
+  },
+  {
+   "key": "up-20",
+   "start_states": "data/lcs/start_states/ur_pivot/up-20_osc.npz",
+   "variants": "",
+   "reset_seed": null
+  },
+  {
+   "key": "up+20",
+   "start_states": "data/lcs/start_states/ur_pivot/up+20_osc.npz",
+   "variants": "",
+   "reset_seed": null
+  },
+  {
+   "key": "up+30",
+   "start_states": "data/lcs/start_states/ur_pivot/up+30_osc.npz",
+   "variants": "",
+   "reset_seed": null
+  },
+  {
+   "key": "nominal",
+   "start_states": "data/lcs/start_states/pre_place_1_osc.npz",
+   "variants": "",
+   "reset_seed": null
+  }
+ ],
+ "repeats": 2,
+ "max_episode_s": 25.0,
+ "resets": "suite",
+ "port": 7857,
+ "order": "start",
+ "demo_actions": null,
+ "early_stop": "4,14,12",
+ "cloud_noise": "off",
+ "scene": "assets/round_belt_task/round_belt_scene_wr_pin640b1.yaml",
+ "stage2_max_episode_s": 30.0,
+ "stage2_early_stop": "4,20,12",
+ "final_hold_s": 3.0,
+ "chain": "--outcome-pulley both --post-mpc stage2_release --stage2-chain --stage2-deploy $9 --stage2-waypoints ${10} --stage2-mppi-config ${11} --stage2-max-episode-s 30 --stage2-early-stop 4,20,12 --franka-width-max 20 --stage2-mppi-max-duration-s 3",
+ "eval_extra": "--end-snapshot --ur-exit-final-settle-s 3 --log-plan-age --franka-grip-n 30"
+}

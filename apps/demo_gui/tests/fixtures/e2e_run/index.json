@@ -1,0 +1,1476 @@
+{
+ "args": {
+  "mode": "learned",
+  "params": null,
+  "magna_root": "/home/hienbui/git/magna-deploy-learned-lcs",
+  "deploy": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63j/deploy_v39j/deploy.npz",
+  "demo_goals": "none",
+  "start_states": "data/lcs/start_states/pre_place_1_osc.npz",
+  "variants": null,
+  "repeats": 2,
+  "seed": null,
+  "lcm_url": "udpm://239.255.78.57:7857?ttl=0",
+  "osc_binary": null,
+  "osc_timeout_s": 5.0,
+  "out": "data/lcs/realfirst/cmp/v12_152/e2e_V63j/V63j_tol50b_nominal",
+  "label": "V12-152_e2e_g30_V63j_tol50b_V63j_tol50b_nominal",
+  "max_episode_s": 25.0,
+  "pace": 1.0,
+  "settle_s": 0.5,
+  "early_stop": "4,14,12",
+  "record": true,
+  "no_pcd": false,
+  "thresholds": [],
+  "dry_run": false,
+  "action_definition": "cmd_delta",
+  "belt_seg": true,
+  "controller": "mppi",
+  "mppi_config": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V63j_stage1.yaml",
+  "mppi_goal": "waypoints",
+  "mppi_stages": "all",
+  "mppi_max_duration_s": 30.0,
+  "mppi_debug": true,
+  "mppi_clearance": true,
+  "mppi_clearance_ur_min_mm": 3.0,
+  "mppi_waypoints": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V63j_tol50b_s1_latent_waypoints.npz",
+  "mppi_demo_offset_frames": 20,
+  "end_snapshot": true,
+  "outcome_pulley": "both",
+  "post_mpc": "stage2_release",
+  "franka_width_max": 20.0,
+  "stage2_chain": true,
+  "stage2_deploy": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63j_s2/deploy_v39j/deploy.npz",
+  "stage2_waypoints": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V63j_tol50b_s2_latent_waypoints.npz",
+  "stage2_mppi_config": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V63j_ch_stage2.yaml",
+  "ur_exit_final_settle_s": 3.0,
+  "log_plan_age": true,
+  "franka_grip_n": 30.0
+ },
+ "git": {
+  "commit": "7177c1db96251c1f0b8a96144c5f57b37d2b1c37",
+  "dirty": true
+ },
+ "mode": "learned",
+ "start_states": {
+  "path": "data/lcs/start_states/pre_place_1_osc.npz",
+  "kind": "snapshot",
+  "sha256": "d622f65ac249ba128df6195664bbca19fe9fd4dd727f24045ce6637407674008"
+ },
+ "controller": {
+  "mode": "mppi",
+  "node": "/home/hienbui/git/magna_belt_simulation-main/scripts/lcs/mppi_controller_node.py",
+  "config": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V63j_stage1.yaml",
+  "config_sha256": "0c336659c3a72f40f328c2355f7dbef7c69d8ac25f1b5383715017a6d8f09646",
+  "mppi_params": {
+   "K": 1024,
+   "H": 7,
+   "n_iter": 6,
+   "ess_frac": 0.05,
+   "temperature": 1.0,
+   "sigma_frac": 0.5,
+   "w_q": 1.0,
+   "w_T": 5.0,
+   "w_r": 0.3,
+   "w_s": 0.3,
+   "safety_penalty": 10000.0,
+   "pgd_iters": 25,
+   "fused_rollout": true,
+   "cuda_graph": true,
+   "seed": 20261006,
+   "u_lb": null,
+   "u_ub": null,
+   "u_box_outer": {
+    "trans_m": 0.006,
+    "rot_deg": 2.0
+   },
+   "z_min_franka": 0.039922147673859716,
+   "z_min_ur": 0.0273043177107419,
+   "z_max_franka": Infinity,
+   "z_max_ur": Infinity,
+   "z_ceiling_above_start_m": 0.06,
+   "rot_envelope_deg": {
+    "franka": 20.0,
+    "ur": 30.0
+   },
+   "action_noise_frac": 0.0,
+   "u_translations_only": false,
+   "stage_goal_tols": [
+    3.8061324598408435,
+    -1.0
+   ],
+   "stage_max_durations_s": [
+    10.0,
+    30.0
+   ],
+   "stage_reach_streak": 3,
+   "clearance": {
+    "model": "data/lcs/realfirst/v1_1/clearance/model_pp1.npz",
+    "ur_min_m": 0.003,
+    "franka_min_m": 0.002
+   },
+   "prior_alpha": 0.0,
+   "prior_weight": 0.0,
+   "support_box": {
+    "lo": [
+     0.3408092188526438,
+     -0.06792131663641235,
+     0.023095952848415487,
+     0.4843429944744376,
+     -0.06157843470317769,
+     0.014742175864921834
+    ],
+    "hi": [
+     0.4156362633894347,
+     0.0948324671839026,
+     0.12381159777028387,
+     0.5500342746260163,
+     0.0054731858008773195,
+     0.14676221399620504
+    ],
+    "weight": 0.5,
+    "hard_margin_m": null
+   },
+   "stage_start": "progress"
+  },
+  "goal": "waypoints:/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V63j_tol50b_s1_latent_waypoints.npz",
+  "stages": "all",
+  "max_duration_s": 30.0,
+  "debug_channel": "LEARNED_MPC_DEBUG",
+  "transport": {
+   "waypoints": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V63j_tol50b_s1_latent_waypoints.npz",
+   "waypoints_sha256": "65be573afeabe76742df2352a4f2af50ed4ded15950e3fa0bea93936dc9a8f1c",
+   "goal_mode": "stage",
+   "demo_actions": null,
+   "demo_actions_sha256": null,
+   "demo_offset_frames": 20
+  },
+  "clearance": {
+   "path": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_152/e2e_V63j/V63j_tol50b_nominal/clearance_model.npz",
+   "sha256": "cb642883b2262c9f862848ba034304fbc47af92107d2fcf7987aca51884ef2ed",
+   "ur_min_m": 0.003,
+   "franka_min_m": 0.002,
+   "n_points": {
+    "ur": 4053,
+    "franka": 732
+   }
+  },
+  "binary": "/home/hienbui/git/magna_belt_simulation-main/.venv/bin/python3",
+  "binary_resolved": "/usr/bin/python3.12",
+  "binary_sha256": "e50d468e8b0adfb05733f5b87b3cff34829c4a8c1aea50c865aa8bdfe4bb150f",
+  "argv": [
+   "/home/hienbui/git/magna_belt_simulation-main/.venv/bin/python3",
+   "/home/hienbui/git/magna_belt_simulation-main/scripts/lcs/mppi_controller_node.py",
+   "--lcm-url",
+   "udpm://239.255.78.57:7857?ttl=0",
+   "--deploy",
+   "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63j/deploy_v39j/deploy.npz",
+   "--config",
+   "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V63j_stage1.yaml",
+   "--goal",
+   "waypoints:/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V63j_tol50b_s1_latent_waypoints.npz",
+   "--stages",
+   "all",
+   "--max-duration-s",
+   "30",
+   "--log",
+   "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_152/e2e_V63j/V63j_tol50b_nominal/controller/episode_pre_place_1_osc_0.solves.jsonl",
+   "--debug-channel",
+   "LEARNED_MPC_DEBUG",
+   "--clearance-model",
+   "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_152/e2e_V63j/V63j_tol50b_nominal/clearance_model.npz",
+   "--goal-mode",
+   "stage",
+   "--demo-offset-frames",
+   "20"
+  ],
+  "cwd": "/home/hienbui/git/magna_belt_simulation-main",
+  "lcm_url": "udpm://239.255.78.57:7857?ttl=0",
+  "pid": 3928373,
+  "log": "data/lcs/realfirst/cmp/v12_152/e2e_V63j/V63j_tol50b_nominal/controller/episode_pre_place_1_osc_0.log",
+  "node_sha256": "b9adbf0381aa8979e3b54d2d0c5330d4f4a5bebad3eb8e91b1c9de5d540f9a23",
+  "deploy": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63j/deploy_v39j/deploy.npz",
+  "deploy_sha256": "8acfb11fbe8ebca8b106c32f655977c58a4773a833c605c269e2b1e355376eaf"
+ },
+ "deploy": {
+  "path": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63j/deploy_v39j/deploy.npz",
+  "sha256": "8acfb11fbe8ebca8b106c32f655977c58a4773a833c605c269e2b1e355376eaf",
+  "goal_source": "belt_seg:/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/tiers/eps/s1/v12_147_demo__episode_gv_02_0.npz#13,48",
+  "n_stage_goals": 2
+ },
+ "demo_goals": null,
+ "sample_period_s": 0.075,
+ "sample_steps": 15,
+ "action_definition": "cmd_delta",
+ "belt_sampling": "material",
+ "thresholds": {
+  "neighbour_radial_mm": 12.0,
+  "neighbour_inner_mm": 10.0,
+  "in_groove_axial_mm": 4.0,
+  "in_groove_radial_mm": 5.0,
+  "engaged_arc_deg": 60.0,
+  "partial_arc_deg": 15.0,
+  "over_under_h_mm": 5.0,
+  "slant_spread_mm": 8.0,
+  "outside_min_bodies": 2
+ },
+ "labels": [
+  "engaged",
+  "over",
+  "under",
+  "slanted",
+  "outside",
+  "other"
+ ],
+ "phase_labels": [
+  "mpc:stage0",
+  "mpc:stage1",
+  "mpc:stage2",
+  "mpc:stage3",
+  "mpc:stage4",
+  "mpc:stage5",
+  "done",
+  "ur:open",
+  "ur:lift",
+  "ur:park",
+  "ur:settle",
+  "s2:stage0",
+  "s2:stage1",
+  "s2:stage2",
+  "s2:stage3",
+  "s2:stage4",
+  "s2:stage5",
+  "s2:stage6",
+  "s2:stage7",
+  "s2:stage8",
+  "s2:stage9",
+  "s2:stage10",
+  "s2:stage11",
+  "s2:stage12",
+  "s2:stage13",
+  "s2:stage14",
+  "s2:stage15",
+  "s2:stage16",
+  "s2:stage17",
+  "s2:stage18",
+  "s2:done",
+  "post:release",
+  "post:out",
+  "post:lift",
+  "post:settle"
+ ],
+ "belt_tangent": [
+  0.9984562081748513,
+  0.0555445799074789,
+  0.0
+ ],
+ "episodes": [
+  {
+   "file": "episode_pre_place_1_osc_0.npz",
+   "start_state": {
+    "id": "pre_place_1_osc",
+    "file": "data/lcs/start_states/pre_place_1_osc.npz",
+    "commanded": null,
+    "measured": null,
+    "held": null
+   },
+   "repeat": 0,
+   "mode": "learned",
+   "outcome": "engaged",
+   "status": "ok",
+   "reason": "early stop: engaged held 9.4 s at 12.0 s",
+   "duration_s": 34.35,
+   "steps": 6870,
+   "frames": 459,
+   "controller_events": {
+    "stage_0_reached": 0.8249999999999997,
+    "stage_0_dist": 1.8622,
+    "stage_1_reached": 1.5749999999999997,
+    "stage_1_dist": 1.5005,
+    "stage_2_reached": 2.2500000000000004,
+    "stage_2_dist": 1.4176,
+    "stage_3_reached": 2.775,
+    "stage_3_dist": 1.9649,
+    "stage_4_reached": 3.0000000000000004,
+    "stage_4_dist": 1.4843,
+    "no_pre_mpc": 0.004999999999999893
+   },
+   "stage_times": {
+    "0": 0.8249999999999997,
+    "1": 1.5749999999999997,
+    "2": 2.2500000000000004,
+    "3": 2.775,
+    "4": 3.0000000000000004
+   },
+   "stage_ends": [
+    "reached",
+    "reached",
+    "reached",
+    "reached",
+    "reached"
+   ],
+   "latent": {
+    "pred_err_rms_whitened": 0.29692033733603307,
+    "goal_dist_first": [
+     10.027157215356219,
+     8.408799853784991
+    ],
+    "goal_dist_final": [
+     5.844150545582305,
+     4.536784714925007
+    ],
+    "goal_dist_min": [
+     1.1289032827020333,
+     0.9724434117454954
+    ],
+    "goal_source": "deploy stage goals"
+   },
+   "alignment": null,
+   "tracking_rms_mm": [
+    4.729670201977513,
+    3.0892988555235696
+   ],
+   "tracking_max_mm": [
+    16.989743926259347,
+    14.48563014043288
+   ],
+   "final_wrap_deg": 216.67864185231292,
+   "final_h_median_mm": -0.008957178662631092,
+   "outcome_large": "engaged",
+   "outcome_small": "engaged",
+   "success_both": true,
+   "final_wrap_small_deg": 143.421239999557,
+   "final_h_small_mm": 0.24029361428207419,
+   "final_slant_deg": 0.30047009697934435,
+   "final_slant_axis_deg": -125.57399665014029,
+   "final_slant_dir": "level",
+   "min_board_clearance_mm": 8.421886411575802,
+   "board_contact": false,
+   "min_franka_tip_clearance_mm": 20.584014795214742,
+   "grasp_ok_final": [
+    false,
+    false
+   ],
+   "cmd_source_counts": {
+    "0": 244,
+    "1": 19,
+    "8": 127,
+    "6": 69
+   },
+   "controller_gripper_commands": [],
+   "timing_s": {
+    "restore": 0.0027418259996920824,
+    "settle": 0.40407840604893863,
+    "controller_start": 1.9637310279067606,
+    "ur_exit_detail": {
+     "render": 0.8785121352411807,
+     "encode": 0.5467620173003525
+    },
+    "ur_exit": 12.569276561029255,
+    "stage2_controller_start": 1.9626894269604236,
+    "stage2": {
+     "render": 0.6169056699145585,
+     "encode": 0.38433144171722233,
+     "ik": 0.24553604912944138,
+     "step": 13.0681848754175,
+     "pace_sleep": 0.0069224171899259146,
+     "loop": 15.16014712699689,
+     "lcm_wait": 4.061804382363334
+    },
+    "post_detail": {
+     "render": 0.4363362961448729,
+     "encode": 0.32689311634749174
+    },
+    "post_mpc": 8.119000714970753,
+    "render": 1.3188009748701006,
+    "encode": 0.6881075126584619,
+    "ik": 0.5379656122531742,
+    "step": 19.49775569420308,
+    "pace_sleep": 0.12792805750854438,
+    "loop": 23.350141391856596,
+    "lcm_wait": 7.524085907265544,
+    "write": 0.7316385740414262,
+    "total": 65.65240483102389
+   },
+   "osc_stats": {
+    "replies": 2565,
+    "stale_replies": 0,
+    "republished": 0,
+    "wait_s": 4.302589436993003,
+    "wait_mean_ms": 1.6774227824534125,
+    "wait_max_ms": 50.20612012594938,
+    "franka_trajs": 291,
+    "ur_lines": 291,
+    "hand_commands": 0,
+    "robotiq_commands": 0,
+    "latents_sent": 102,
+    "pair_mismatch": 0,
+    "learned_mpc_debug": 89,
+    "undecodable": 0,
+    "empty_trajs": 0,
+    "traj_after_latent_ms": {
+     "n": 101,
+     "mean": 47.93344376295215,
+     "max": 238.00761601887643
+    }
+   },
+   "controller_log": "controller/episode_pre_place_1_osc_0.log",
+   "controller_exit": 0,
+   "recording": "recordings/episode_pre_place_1_osc_0",
+   "size_bytes": 11411484,
+   "end_state": "end_states/episode_pre_place_1_osc_0.npz",
+   "mppi": {
+    "solve_log": "controller/episode_pre_place_1_osc_0.solves.jsonl",
+    "solves": 155,
+    "solve_ms": {
+     "p50": 11.574574979022145,
+     "p95": 25.392378889955577,
+     "max": 31.685570953413844,
+     "mean": 13.642211614416972
+    },
+    "solve_failed": 0,
+    "fallbacks": 0,
+    "plans_violating": 0,
+    "clear_min_mm": {
+     "ur": 5.469548515975475,
+     "franka": 32.69946202635765
+    },
+    "clear_violating_plans": 0
+   },
+   "post_mpc": {
+    "kind": "stage2_release",
+    "hand_mm": 40.0,
+    "start_pose": [
+     0.4692299074683822,
+     0.19027888736077797,
+     0.032785984581076066,
+     0.6817511962974906,
+     -0.03243248133942372,
+     -0.23910709991523274,
+     0.6906455207059808
+    ],
+    "targets": {
+     "out": [
+      0.47392618674609543,
+      0.1985401126059651,
+      0.032822821322302305,
+      0.6817511962974906,
+      -0.03243248133942372,
+      -0.23910709991523274,
+      0.6906455207059808
+     ],
+     "lift": [
+      0.4737562675381998,
+      0.19850649528989206,
+      0.06202486904245615,
+      0.6817511962974906,
+      -0.03243248133942372,
+      -0.23910709991523274,
+      0.6906455207059808
+     ]
+    },
+    "speeds_mps": {
+     "release": 0.05,
+     "out": 0.02,
+     "lift": 0.05,
+     "settle": 0.05
+    },
+    "holds_s": {
+     "release": 1.0,
+     "out": 0.3,
+     "lift": 0.3,
+     "settle": 1.5
+    },
+    "phases": [
+     {
+      "phase": "release",
+      "duration_s": 1.05,
+      "abort": null,
+      "abort_kind": null,
+      "tip_min_mm": 21.40953432523871,
+      "min_clearance_mm": 76.07730374940883
+     },
+     {
+      "phase": "out",
+      "duration_s": 1.35,
+      "abort": null,
+      "abort_kind": null,
+      "tip_min_mm": 21.40762763591656,
+      "min_clearance_mm": 76.07730374940883
+     },
+     {
+      "phase": "lift",
+      "duration_s": 1.35,
+      "abort": null,
+      "abort_kind": null,
+      "tip_min_mm": 21.48053590465951,
+      "min_clearance_mm": 76.07730374940883
+     },
+     {
+      "phase": "settle",
+      "duration_s": 1.5,
+      "abort": null,
+      "abort_kind": null,
+      "tip_min_mm": 50.79428309448261,
+      "min_clearance_mm": 76.07730374940883
+     }
+    ],
+    "ok": true,
+    "frames": 69,
+    "from_frame": 390,
+    "mpc_end": {
+     "label": "slanted",
+     "large": "engaged",
+     "small": "slanted",
+     "both": false,
+     "large_wrap_deg": 216.61898338318088,
+     "small_wrap_deg": 44.72742244849161,
+     "large_h_mm": -0.015740041153539747,
+     "small_h_mm": 2.229880524519819,
+     "held": false,
+     "time": 32.699999999999996
+    },
+    "final": {
+     "label": "engaged",
+     "large": "engaged",
+     "small": "engaged",
+     "both": true,
+     "large_wrap_deg": 216.67864185231292,
+     "small_wrap_deg": 143.421239999557,
+     "large_h_mm": -0.008957178662631092,
+     "small_h_mm": 0.24029361428207419,
+     "held": false,
+     "time": 37.875
+    },
+    "mpc_duration_s": 29.175
+   },
+   "chain": {
+    "stage1": {
+     "status": "ok",
+     "reason": "early stop: engaged held 9.4 s at 12.0 s",
+     "duration_s": 12.0,
+     "large_label_end": "engaged",
+     "wrap_deg_end": 115.74755072146507,
+     "failed": false,
+     "osc_stats": {
+      "replies": 2400,
+      "stale_replies": 0,
+      "republished": 0,
+      "wait_s": 7.524085907265544,
+      "wait_mean_ms": 3.1350357946939766,
+      "wait_max_ms": 49.639769131317735,
+      "franka_trajs": 484,
+      "ur_lines": 484,
+      "hand_commands": 0,
+      "robotiq_commands": 0,
+      "latents_sent": 160,
+      "pair_mismatch": 0,
+      "learned_mpc_debug": 155,
+      "undecodable": 0,
+      "empty_trajs": 0,
+      "traj_after_latent_ms": {
+       "n": 160,
+       "mean": 23.221640224801376,
+       "max": 208.9253030717373
+      }
+     }
+    },
+    "ur_exit": {
+     "ok": true,
+     "abort": null,
+     "large_label_end": "engaged",
+     "wrap_deg_end": 101.88085395336256,
+     "held_franka": true,
+     "byte": 191,
+     "release_label_end": "engaged",
+     "release_wrap_min": 115.50984518686114,
+     "duration_s": 9.6,
+     "frames": 127,
+     "failed": false
+    },
+    "stage2": {
+     "status": "aborted",
+     "reason": "grasp lost at step 1515 (hand width 0.5 mm, belt->finger_tip 19.7 mm, robotiq byte 191 (status 191), belt->2f85 tip 95.2 mm, pads 146.0/153.2 mm, belt min z 0.0310)",
+     "duration_s": 7.575,
+     "controller_exit": 0,
+     "controller_log": "controller/episode_pre_place_1_osc_0_s2.log",
+     "label_end": "slanted",
+     "latent": {
+      "pred_err_rms_whitened": 0.6402443377369302,
+      "goal_dist_first": [
+       8.138987537585372,
+       9.058227873766192
+      ],
+      "goal_dist_final": [
+       4.602611690704378,
+       4.800099480078684
+      ],
+      "goal_dist_min": [
+       0.6802536461161952,
+       2.759817583881424
+      ],
+      "goal_source": "deploy stage goals"
+     }
+    },
+    "success_both": true
+   },
+   "mppi_stage2": {
+    "solve_log": "controller/episode_pre_place_1_osc_0_s2.solves.jsonl",
+    "solves": 89,
+    "solve_ms": {
+     "p50": 19.25943698734045,
+     "p95": 34.99771947972476,
+     "max": 36.584482062608004,
+     "mean": 20.20565560872384
+    },
+    "solve_failed": 0,
+    "fallbacks": 0,
+    "plans_violating": 0,
+    "clear_min_mm": {
+     "ur": 76.63334161043167,
+     "franka": 0.5985916941426694
+    },
+    "clear_violating_plans": 0,
+    "tilt_max_deg": {
+     "now_franka": 27.55784108387861,
+     "plan_franka": 27.489542607273066
+    },
+    "tilt_frac_penalised_mean": 0.09973007373595505,
+    "feasible_first": {
+     "frac_feasible_mean": 0.810546875,
+     "plans_infeasible": 0,
+     "viol_plan_max": 0.0
+    },
+    "guard": {
+     "plans": 0,
+     "first_knot": 0,
+     "z_cut_mm_max": 0.0,
+     "rot_cut_deg_max": 0.0
+    }
+   },
+   "events_stage2": {
+    "controller_events": {
+     "stage_0_reached": 0.8999999999999986,
+     "stage_0_dist": 0.8619,
+     "stage_1_reached": 1.125,
+     "stage_1_dist": 0.6611,
+     "stage_2_reached": 1.875,
+     "stage_2_dist": 1.2153,
+     "stage_3_reached": 2.3249999999999993,
+     "stage_3_dist": 1.0427,
+     "stage_4_reached": 3.0749999999999993,
+     "stage_4_dist": 1.1605,
+     "stage_5_reached": 3.6000000000000014,
+     "stage_5_dist": 0.9741,
+     "stage_6_reached": 4.050000000000001,
+     "stage_6_dist": 0.739,
+     "stage_7_reached": 4.274999999999999,
+     "stage_7_dist": 0.8127,
+     "stage_8_reached": 4.574999999999999,
+     "stage_8_dist": 0.9202,
+     "stage_9_reached": 5.25,
+     "stage_9_dist": 1.8554,
+     "stage_10_reached": 5.475000000000001,
+     "stage_10_dist": 1.1596,
+     "stage_11_reached": 5.850000000000001,
+     "stage_11_dist": 1.286,
+     "no_pre_mpc": 0.004999999999999005
+    },
+    "stage_ends": [
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached"
+    ],
+    "stage_times": {
+     "0": 0.8999999999999986,
+     "1": 1.125,
+     "2": 1.875,
+     "3": 2.3249999999999993,
+     "4": 3.0749999999999993,
+     "5": 3.6000000000000014,
+     "6": 4.050000000000001,
+     "7": 4.274999999999999,
+     "8": 4.574999999999999,
+     "9": 5.25,
+     "10": 5.475000000000001,
+     "11": 5.850000000000001
+    }
+   }
+  },
+  {
+   "file": "episode_pre_place_1_osc_1.npz",
+   "start_state": {
+    "id": "pre_place_1_osc",
+    "file": "data/lcs/start_states/pre_place_1_osc.npz",
+    "commanded": null,
+    "measured": null,
+    "held": null
+   },
+   "repeat": 1,
+   "mode": "learned",
+   "outcome": "engaged",
+   "status": "ok",
+   "reason": "early stop: engaged held 9.4 s at 12.0 s",
+   "duration_s": 34.2,
+   "steps": 6840,
+   "frames": 457,
+   "controller_events": {
+    "stage_0_reached": 0.8250000000000028,
+    "stage_0_dist": 1.8059,
+    "stage_1_reached": 1.5750000000000028,
+    "stage_1_dist": 1.4935,
+    "stage_2_reached": 2.25,
+    "stage_2_dist": 1.389,
+    "stage_3_reached": 2.7749999999999986,
+    "stage_3_dist": 1.9307,
+    "stage_4_reached": 3.0,
+    "stage_4_dist": 1.5412,
+    "no_pre_mpc": 0.005000000000002558
+   },
+   "stage_times": {
+    "0": 0.8250000000000028,
+    "1": 1.5750000000000028,
+    "2": 2.25,
+    "3": 2.7749999999999986,
+    "4": 3.0
+   },
+   "stage_ends": [
+    "reached",
+    "reached",
+    "reached",
+    "reached",
+    "reached"
+   ],
+   "latent": {
+    "pred_err_rms_whitened": 0.2947114512053151,
+    "goal_dist_first": [
+     10.024149908134062,
+     8.411985236712773
+    ],
+    "goal_dist_final": [
+     5.780459124164079,
+     4.509583921626492
+    ],
+    "goal_dist_min": [
+     1.1779108425964684,
+     0.9727475373742267
+    ],
+    "goal_source": "deploy stage goals"
+   },
+   "alignment": null,
+   "tracking_rms_mm": [
+    4.646457294464496,
+    3.1019033601316903
+   ],
+   "tracking_max_mm": [
+    17.113041923886048,
+    14.489818560662986
+   ],
+   "final_wrap_deg": 217.33689334992872,
+   "final_h_median_mm": -0.008795439150488145,
+   "outcome_large": "engaged",
+   "outcome_small": "engaged",
+   "success_both": true,
+   "final_wrap_small_deg": 143.37127452242012,
+   "final_h_small_mm": 2.1569517964881513,
+   "final_slant_deg": 0.15714256637403282,
+   "final_slant_axis_deg": 167.74553597147786,
+   "final_slant_dir": "level",
+   "min_board_clearance_mm": 8.482791516682331,
+   "board_contact": false,
+   "min_franka_tip_clearance_mm": 19.19401157304904,
+   "grasp_ok_final": [
+    false,
+    false
+   ],
+   "cmd_source_counts": {
+    "0": 242,
+    "1": 19,
+    "8": 127,
+    "6": 69
+   },
+   "controller_gripper_commands": [],
+   "timing_s": {
+    "restore": 0.0023954249918460846,
+    "settle": 0.4033229202032089,
+    "controller_start": 1.9608577049802989,
+    "ur_exit_detail": {
+     "render": 0.925361443310976,
+     "encode": 0.5419615025166422
+    },
+    "ur_exit": 12.492716753855348,
+    "stage2_controller_start": 1.987935340963304,
+    "stage2": {
+     "render": 0.6217319928109646,
+     "encode": 0.48263321933336556,
+     "ik": 0.2487752155866474,
+     "step": 12.787574338261038,
+     "pace_sleep": 0.008498571207746879,
+     "loop": 14.993035992840305,
+     "lcm_wait": 3.9053942633327097
+    },
+    "post_detail": {
+     "render": 0.4344292557798326,
+     "encode": 0.2929163121152669
+    },
+    "post_mpc": 8.06754031102173,
+    "render": 1.1752742431126535,
+    "encode": 0.6760909873992205,
+    "ik": 0.5626174225471914,
+    "step": 19.261543988250196,
+    "pace_sleep": 0.12757967027835698,
+    "loop": 23.029299980960786,
+    "lcm_wait": 7.29466762742959,
+    "write": 0.7161719331052154,
+    "total": 65.13907952490263
+   },
+   "osc_stats": {
+    "replies": 2535,
+    "stale_replies": 0,
+    "republished": 0,
+    "wait_s": 4.137197295203805,
+    "wait_mean_ms": 1.6320304912046568,
+    "wait_max_ms": 50.50736409612,
+    "franka_trajs": 287,
+    "ur_lines": 287,
+    "hand_commands": 0,
+    "robotiq_commands": 0,
+    "latents_sent": 100,
+    "pair_mismatch": 0,
+    "learned_mpc_debug": 87,
+    "undecodable": 0,
+    "empty_trajs": 0,
+    "traj_after_latent_ms": {
+     "n": 99,
+     "mean": 45.353351127958355,
+     "max": 192.54288403317332
+    }
+   },
+   "controller_log": "controller/episode_pre_place_1_osc_1.log",
+   "controller_exit": 0,
+   "recording": "recordings/episode_pre_place_1_osc_1",
+   "size_bytes": 11337171,
+   "end_state": "end_states/episode_pre_place_1_osc_1.npz",
+   "mppi": {
+    "solve_log": "controller/episode_pre_place_1_osc_1.solves.jsonl",
+    "solves": 155,
+    "solve_ms": {
+     "p50": 11.594465002417564,
+     "p95": 23.646155232563615,
+     "max": 33.53677596896887,
+     "mean": 12.853287973050628
+    },
+    "solve_failed": 0,
+    "fallbacks": 0,
+    "plans_violating": 0,
+    "clear_min_mm": {
+     "ur": 5.435450002551079,
+     "franka": 32.815657556056976
+    },
+    "clear_violating_plans": 0
+   },
+   "post_mpc": {
+    "kind": "stage2_release",
+    "hand_mm": 40.0,
+    "start_pose": [
+     0.4672539355471681,
+     0.19012289203799182,
+     0.03337287689177193,
+     0.6913632831929865,
+     -0.028482788773600557,
+     -0.24208600640969857,
+     0.6801469744819103
+    ],
+    "targets": {
+     "out": [
+      0.47203614509405273,
+      0.19955329560484264,
+      0.03341155959397233,
+      0.6913632831929865,
+      -0.028482788773600557,
+      -0.24208600640969857,
+      0.6801469744819103
+     ],
+     "lift": [
+      0.47186970868602746,
+      0.19952036733614398,
+      0.06201505880820414,
+      0.6913632831929865,
+      -0.028482788773600557,
+      -0.24208600640969857,
+      0.6801469744819103
+     ]
+    },
+    "speeds_mps": {
+     "release": 0.05,
+     "out": 0.02,
+     "lift": 0.05,
+     "settle": 0.05
+    },
+    "holds_s": {
+     "release": 1.0,
+     "out": 0.3,
+     "lift": 0.3,
+     "settle": 1.5
+    },
+    "phases": [
+     {
+      "phase": "release",
+      "duration_s": 1.05,
+      "abort": null,
+      "abort_kind": null,
+      "tip_min_mm": 22.181466989640384,
+      "min_clearance_mm": 76.13567755732966
+     },
+     {
+      "phase": "out",
+      "duration_s": 1.35,
+      "abort": null,
+      "abort_kind": null,
+      "tip_min_mm": 22.001783355415668,
+      "min_clearance_mm": 76.13567755732966
+     },
+     {
+      "phase": "lift",
+      "duration_s": 1.35,
+      "abort": null,
+      "abort_kind": null,
+      "tip_min_mm": 22.045398936833912,
+      "min_clearance_mm": 76.13567755732966
+     },
+     {
+      "phase": "settle",
+      "duration_s": 1.5,
+      "abort": null,
+      "abort_kind": null,
+      "tip_min_mm": 50.78003765886438,
+      "min_clearance_mm": 76.13567755732966
+     }
+    ],
+    "ok": true,
+    "frames": 69,
+    "from_frame": 388,
+    "mpc_end": {
+     "label": "slanted",
+     "large": "engaged",
+     "small": "slanted",
+     "both": false,
+     "large_wrap_deg": 217.45168519994087,
+     "small_wrap_deg": 42.52062574850504,
+     "large_h_mm": -0.00015829727865545584,
+     "small_h_mm": 1.1846027531323735,
+     "held": false,
+     "time": 67.48
+    },
+    "final": {
+     "label": "engaged",
+     "large": "engaged",
+     "small": "engaged",
+     "both": true,
+     "large_wrap_deg": 217.33689334992872,
+     "small_wrap_deg": 143.37127452242012,
+     "large_h_mm": -0.008795439150488145,
+     "small_h_mm": 2.1569517964881513,
+     "held": false,
+     "time": 72.655
+    },
+    "mpc_duration_s": 29.025000000000002
+   },
+   "chain": {
+    "stage1": {
+     "status": "ok",
+     "reason": "early stop: engaged held 9.4 s at 12.0 s",
+     "duration_s": 12.0,
+     "large_label_end": "engaged",
+     "wrap_deg_end": 115.9068633487266,
+     "failed": false,
+     "osc_stats": {
+      "replies": 2400,
+      "stale_replies": 0,
+      "republished": 0,
+      "wait_s": 7.29466762742959,
+      "wait_mean_ms": 3.039444844762329,
+      "wait_max_ms": 49.954507034271955,
+      "franka_trajs": 474,
+      "ur_lines": 474,
+      "hand_commands": 0,
+      "robotiq_commands": 0,
+      "latents_sent": 160,
+      "pair_mismatch": 0,
+      "learned_mpc_debug": 155,
+      "undecodable": 0,
+      "empty_trajs": 0,
+      "traj_after_latent_ms": {
+       "n": 160,
+       "mean": 23.0238941629068,
+       "max": 225.58548604138196
+      }
+     }
+    },
+    "ur_exit": {
+     "ok": true,
+     "abort": null,
+     "large_label_end": "engaged",
+     "wrap_deg_end": 101.46483680824596,
+     "held_franka": true,
+     "byte": 191,
+     "release_label_end": "engaged",
+     "release_wrap_min": 115.53435039750012,
+     "duration_s": 9.6,
+     "frames": 127,
+     "failed": false
+    },
+    "stage2": {
+     "status": "aborted",
+     "reason": "grasp lost at step 1485 (hand width 0.3 mm, belt->finger_tip 18.0 mm, robotiq byte 191 (status 191), belt->2f85 tip 95.2 mm, pads 146.1/153.3 mm, belt min z 0.0299)",
+     "duration_s": 7.425,
+     "controller_exit": 0,
+     "controller_log": "controller/episode_pre_place_1_osc_1_s2.log",
+     "label_end": "slanted",
+     "latent": {
+      "pred_err_rms_whitened": 0.49947655116473766,
+      "goal_dist_first": [
+       8.157518648911125,
+       9.07344365046226
+      ],
+      "goal_dist_final": [
+       4.659517115424686,
+       4.942810949272658
+      ],
+      "goal_dist_min": [
+       0.676186763162789,
+       3.9685951214826622
+      ],
+      "goal_source": "deploy stage goals"
+     }
+    },
+    "success_both": true
+   },
+   "mppi_stage2": {
+    "solve_log": "controller/episode_pre_place_1_osc_1_s2.solves.jsonl",
+    "solves": 87,
+    "solve_ms": {
+     "p50": 19.33960895985365,
+     "p95": 30.44677237048745,
+     "max": 35.57537496089935,
+     "mean": 19.927936782739287
+    },
+    "solve_failed": 0,
+    "fallbacks": 0,
+    "plans_violating": 0,
+    "clear_min_mm": {
+     "ur": 76.69329643249512,
+     "franka": 0.8019490051083267
+    },
+    "clear_violating_plans": 0,
+    "tilt_max_deg": {
+     "now_franka": 27.96296350921416,
+     "plan_franka": 27.725011671361962
+    },
+    "tilt_frac_penalised_mean": 0.10991379310344827,
+    "feasible_first": {
+     "frac_feasible_mean": 0.8031384698275862,
+     "plans_infeasible": 0,
+     "viol_plan_max": 0.0
+    },
+    "guard": {
+     "plans": 0,
+     "first_knot": 0,
+     "z_cut_mm_max": 0.0,
+     "rot_cut_deg_max": 0.0
+    }
+   },
+   "events_stage2": {
+    "controller_events": {
+     "stage_0_reached": 0.8999999999999986,
+     "stage_0_dist": 0.8758,
+     "stage_1_reached": 1.125,
+     "stage_1_dist": 0.6559,
+     "stage_2_reached": 1.7999999999999972,
+     "stage_2_dist": 1.4313,
+     "stage_3_reached": 2.25,
+     "stage_3_dist": 1.2138,
+     "stage_4_reached": 3.0,
+     "stage_4_dist": 1.1287,
+     "stage_5_reached": 3.5249999999999986,
+     "stage_5_dist": 0.9293,
+     "stage_6_reached": 3.8999999999999986,
+     "stage_6_dist": 0.7844,
+     "stage_7_reached": 4.125000000000007,
+     "stage_7_dist": 0.8338,
+     "stage_8_reached": 4.425000000000004,
+     "stage_8_dist": 0.9783,
+     "stage_9_reached": 5.100000000000001,
+     "stage_9_dist": 1.9321,
+     "stage_10_reached": 5.324999999999996,
+     "stage_10_dist": 1.2295,
+     "stage_11_reached": 5.699999999999996,
+     "stage_11_dist": 1.3096,
+     "no_pre_mpc": 0.0049999999999954525
+    },
+    "stage_ends": [
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached",
+     "reached"
+    ],
+    "stage_times": {
+     "0": 0.8999999999999986,
+     "1": 1.125,
+     "2": 1.7999999999999972,
+     "3": 2.25,
+     "4": 3.0,
+     "5": 3.5249999999999986,
+     "6": 3.8999999999999986,
+     "7": 4.125000000000007,
+     "8": 4.425000000000004,
+     "9": 5.100000000000001,
+     "10": 5.324999999999996,
+     "11": 5.699999999999996
+    }
+   }
+  }
+ ],
+ "outcome_pulley": "both",
+ "small_thresholds": {
+  "neighbour_radial_mm": 12.0,
+  "neighbour_inner_mm": 10.0,
+  "in_groove_axial_mm": 4.0,
+  "in_groove_radial_mm": 5.0,
+  "engaged_arc_deg": 60.0,
+  "partial_arc_deg": 15.0,
+  "over_under_h_mm": 5.0,
+  "slant_spread_mm": 8.0,
+  "outside_min_bodies": 2
+ },
+ "post_mpc": {
+  "kind": "stage2_release",
+  "phases": [
+   "release",
+   "out",
+   "lift",
+   "settle"
+  ],
+  "cmd_source": 6,
+  "rule": "label after the release = the episode outcome; MPC-end label in post_mpc.mpc_end"
+ },
+ "chain": {
+  "flags": {
+   "stage2_chain": true,
+   "stage2_deploy": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63j_s2/deploy_v39j/deploy.npz",
+   "stage2_waypoints": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V63j_tol50b_s2_latent_waypoints.npz",
+   "stage2_mppi_config": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V63j_ch_stage2.yaml",
+   "stage2_max_episode_s": 30.0,
+   "stage2_early_stop": "4,20,12",
+   "stage2_mppi_max_duration_s": 3.0,
+   "ur_exit_byte": 191,
+   "ur_exit_settle_s": 2.0,
+   "ur_exit_lift_mm": 40.0,
+   "ur_exit_speed_mps": 0.05,
+   "ur_exit_final_settle_s": 3.0
+  },
+  "scene": "/home/hienbui/git/magna_belt_simulation-main/assets/round_belt_task/round_belt_scene_wr_pin640b1.yaml",
+  "stage2": {
+   "mode": "mppi",
+   "node": "/home/hienbui/git/magna_belt_simulation-main/scripts/lcs/mppi_controller_node.py",
+   "config": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V63j_ch_stage2.yaml",
+   "config_sha256": "fb24b909277526a6c0434a756ef32616bbd1af66b591f0bdc33e86e0b4171ccb",
+   "mppi_params": {
+    "K": 1024,
+    "H": 7,
+    "n_iter": 6,
+    "ess_frac": 0.05,
+    "temperature": 1.0,
+    "sigma_frac": 0.5,
+    "w_q": 1.0,
+    "w_T": 5.0,
+    "w_r": 0.3,
+    "w_s": 1.0,
+    "safety_penalty": 10000.0,
+    "pgd_iters": 25,
+    "fused_rollout": true,
+    "cuda_graph": true,
+    "seed": 20261006,
+    "u_lb": null,
+    "u_ub": null,
+    "u_box_outer": {
+     "trans_m": 0.007,
+     "rot_deg": 8.0,
+     "rot_deg_xyz": [
+      3.0,
+      3.0,
+      8.0
+     ]
+    },
+    "z_min_franka": 0.02503823802456168,
+    "z_min_ur": 0.0273043177107419,
+    "z_max_franka": Infinity,
+    "z_max_ur": Infinity,
+    "z_ceiling_above_start_m": 0.06,
+    "rot_envelope_deg": {
+     "franka": 121.0,
+     "ur": 1.0
+    },
+    "action_noise_frac": 0.0,
+    "u_translations_only": false,
+    "stage_goal_tols": [
+     2.2726494861574693,
+     -1.0
+    ],
+    "stage_max_durations_s": [
+     10.0,
+     30.0
+    ],
+    "stage_reach_streak": 3,
+    "clearance": {
+     "model": "data/lcs/realfirst/cmp/encoder_study/sim95_V49/clearance/model_V45c_nominal_0.npz",
+     "ur_min_m": 0.003,
+     "franka_min_m": 0.0
+    },
+    "prior_alpha": 0.0,
+    "prior_weight": 0.0,
+    "support_box": {
+     "lo": [
+      0.3577122922430689,
+      0.03050438413554586,
+      0.01357675157465755,
+      0.4982008863051517,
+      -0.15235895900223054,
+      0.10329082564011703
+     ],
+     "hi": [
+      0.5089999324338831,
+      0.1903334532097914,
+      0.09486187014301427,
+      0.5182039506148941,
+      -0.1323283982748066,
+      0.12330133649448842
+     ],
+     "weight": 0.5,
+     "hard_margin_m": null
+    },
+    "stage_start": "progress",
+    "u_franka_only": true,
+    "tilt_max_deg": {
+     "franka": 29.5,
+     "ur": null
+    },
+    "constraint_mode": "feasible_first",
+    "exec_guard": {
+     "knots": 6,
+     "margin_deg": 0.0,
+     "margin_mm": 0.0
+    },
+    "du_max": {
+     "trans_mm": 2.0,
+     "rot_deg": 2.0
+    },
+    "knot0_chain": {
+     "mode": "shift",
+     "cap_mm": 15.0,
+     "cap_deg": 5.0
+    }
+   },
+   "goal": "waypoints:/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V63j_tol50b_s2_latent_waypoints.npz",
+   "stages": "all",
+   "max_duration_s": 3.0,
+   "debug_channel": "LEARNED_MPC_DEBUG",
+   "transport": {
+    "waypoints": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V63j_tol50b_s2_latent_waypoints.npz",
+    "waypoints_sha256": "b53ce63b79ba777bf48437ac9c8a9fa1ce7686c2c483fc632bbe629fceafad38",
+    "goal_mode": "stage",
+    "demo_actions": null,
+    "demo_actions_sha256": null,
+    "demo_offset_frames": 20
+   },
+   "deploy": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63j_s2/deploy_v39j/deploy.npz",
+   "deploy_sha256": "bbd080dba1359ccbdd1d30f15793a849f54013f7c78c3f85c335a5489c2db783",
+   "stage_labels": [
+    "stage0",
+    "stage1",
+    "stage2",
+    "stage3",
+    "stage4",
+    "stage5",
+    "stage6",
+    "stage7",
+    "stage8",
+    "stage9",
+    "stage10",
+    "stage11",
+    "stage12",
+    "stage13",
+    "stage14",
+    "stage15",
+    "stage16",
+    "stage17",
+    "stage18"
+   ],
+   "demo_offset_frames": 0
+  },
+  "ur_exit": {
+   "phases": [
+    "ur:open",
+    "ur:lift",
+    "ur:park",
+    "ur:settle"
+   ],
+   "cmd_source": 8,
+   "method": "stage2_starts.ur_exit: open, settle, straight up, place_9 (Franka holds), settle"
+  },
+  "rule": "stage 1 large not engaged -> no exit; exit failed (abort / Franka not holding / large not engaged) -> no stage 2, no release; outcome = the large label then, else the label after the release"
+ },
+ "osc": {
+  "binary": "/home/hienbui/git/magna/bazel-bin/systems/controllers/franka_cartesian_osc_controller",
+  "binary_resolved": "/home/hienbui/.cache/bazel/_bazel_hienbui/7bcf06040bc569003729d1c963f0078c/execroot/_main/bazel-out/k8-opt/bin/systems/controllers/franka_cartesian_osc_controller",
+  "binary_sha256": "e72c1e74a2fcc342897f5489ec0475f6c10c97b86ffb8749363ef7283818e911",
+  "argv": [
+   "/home/hienbui/git/magna/bazel-bin/systems/controllers/franka_cartesian_osc_controller",
+   "--lcm_url=udpm://239.255.78.57:7857?ttl=0",
+   "--input_mode=1",
+   "--osc_debug_level=warn"
+  ],
+  "cwd": "/home/hienbui/git/magna",
+  "lcm_url": "udpm://239.255.78.57:7857?ttl=0",
+  "pid": 3928315,
+  "log": "data/lcs/realfirst/cmp/v12_152/e2e_V63j/V63j_tol50b_nominal/osc.log",
+  "params_yaml": "/home/hienbui/git/magna/systems/parameters/franka_cartesian_osc_controller_params.yaml",
+  "params_sha256": "842451dfd3bea1e17f6bc3f64e071a2474cff7a438623f2f8a22367098a92d48",
+  "warm_up_s": 0.10209354292601347,
+  "timeout_s": 5.0
+ },
+ "cloud_noise_spec": {
+  "depth_sigma_mm": 0.0,
+  "depth_sigma_per_m": 0.0,
+  "dropout_p": 0.0,
+  "boundary_mm": 0.0,
+  "boundary_dropout_p": 0.0,
+  "boundary_flip_p": 0.0,
+  "outlier_p": 0.0,
+  "rgb_jitter": 0,
+  "seed": 0
+ },
+ "summary": {
+  "overall": {
+   "episodes": 2,
+   "classified": 2,
+   "skipped": 0,
+   "aborted": 0,
+   "timeouts": 0,
+   "engaged": 2,
+   "engaged_rate": 1.0,
+   "engaged_ci95": [
+    0.34237195288961925,
+    1.0
+   ],
+   "outcomes": {
+    "engaged": 2
+   },
+   "duration_s_mean": 34.275000000000006,
+   "alignment_final": {
+    "belt_rmse_mm": {
+     "n": 0,
+     "median": null,
+     "mean": null
+    },
+    "belt_chamfer_mm": {
+     "n": 0,
+     "median": null,
+     "mean": null
+    },
+    "belt_best_shift_rmse_mm": {
+     "n": 0,
+     "median": null,
+     "mean": null
+    }
+   },
+   "goal_dist_final": {
+    "mean": [
+     5.812304834873192,
+     4.523184318275749
+    ],
+    "median": [
+     5.812304834873192,
+     4.523184318275749
+    ]
+   },
+   "stage_ends": {
+    "stage0_reached": 2,
+    "stage1_reached": 2,
+    "stage2_reached": 2,
+    "stage3_reached": 2,
+    "stage4_reached": 2
+   }
+  },
+  "per_start_state": {
+   "pre_place_1_osc": {
+    "episodes": 2,
+    "classified": 2,
+    "skipped": 0,
+    "aborted": 0,
+    "timeouts": 0,
+    "engaged": 2,
+    "engaged_rate": 1.0,
+    "engaged_ci95": [
+     0.34237195288961925,
+     1.0
+    ],
+    "outcomes": {
+     "engaged": 2
+    },
+    "duration_s_mean": 34.275000000000006,
+    "alignment_final": {
+     "belt_rmse_mm": {
+      "n": 0,
+      "median": null,
+      "mean": null
+     },
+     "belt_chamfer_mm": {
+      "n": 0,
+      "median": null,
+      "mean": null
+     },
+     "belt_best_shift_rmse_mm": {
+      "n": 0,
+      "median": null,
+      "mean": null
+     }
+    },
+    "goal_dist_final": {
+     "mean": [
+      5.812304834873192,
+      4.523184318275749
+     ],
+     "median": [
+      5.812304834873192,
+      4.523184318275749
+     ]
+    },
+    "stage_ends": {
+     "stage0_reached": 2,
+     "stage1_reached": 2,
+     "stage2_reached": 2,
+     "stage3_reached": 2,
+     "stage4_reached": 2
+    }
+   }
+  },
+  "wall_s": 133.870142766973
+ }
+}

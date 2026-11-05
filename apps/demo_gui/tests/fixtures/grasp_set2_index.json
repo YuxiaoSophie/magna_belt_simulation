@@ -1,0 +1,1152 @@
+{
+  "set": "set2",
+  "created": "2026-09-24T17:03:42-0400",
+  "seed": 1,
+  "count": 12,
+  "box": {
+    "franka_slide_mm": [
+      -20.0,
+      20.0
+    ],
+    "franka_roll_deg": [
+      -15.0,
+      15.0
+    ],
+    "ur_slide_mm": [
+      -20.0,
+      20.0
+    ],
+    "ur_roll_deg": [
+      -15.0,
+      15.0
+    ]
+  },
+  "box_source": "--box",
+  "params": "/home/hienbui/git/magna/systems/parameters/round_belt_controller_params_sim.yaml",
+  "params_sha256": "8a9d620b60b0a9c544d77ddb6e580da1de155c4df3c49da7d6445680138f125a",
+  "nominal_start": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/start_states/pre_place_1_osc.npz",
+  "nominal_start_sha256": "d622f65ac249ba128df6195664bbca19fe9fd4dd727f24045ce6637407674008",
+  "roll_metric": "twist about the belt tangent (body z) of the gripper rotation in the nearest belt body frame, minus the reference",
+  "ur_grasp_point": "UrTracking origin (== the 2F-85 tip point of grasp_state)",
+  "variants": [
+    {
+      "id": "gv_00",
+      "commanded": {
+        "franka_slide_mm": 0.0,
+        "franka_roll_deg": 0.0,
+        "ur_slide_mm": 0.0,
+        "ur_roll_deg": 0.0
+      },
+      "held": true,
+      "reason": null,
+      "measured": {
+        "offsets": {
+          "franka": {
+            "body_offset": 0,
+            "slide_mm": 0.056990765194939286,
+            "roll_deg": 0.6125323043310333
+          },
+          "ur": {
+            "body_offset": 0,
+            "slide_mm": 0.027360435966329533,
+            "roll_deg": -1.7812280233690918
+          }
+        },
+        "absolute": {
+          "belt_min_z": 0.059958383440971375,
+          "belt_max_z": 0.11272360384464264,
+          "franka": {
+            "nearest_body": 23,
+            "material_s": 23.38012803843644,
+            "arc_mm": 315.6148717389083,
+            "gripper_in_body": [
+              [
+                0.04108177590439223,
+                0.9656245090967627,
+                0.2566741029402425
+              ],
+              [
+                -0.11135048800636844,
+                0.2597154036437102,
+                -0.9592439616338112
+              ],
+              [
+                -0.9929316978066945,
+                0.010826658848488862,
+                0.11819233033024375
+              ]
+            ]
+          },
+          "ur": {
+            "nearest_body": 47,
+            "material_s": 47.066073962119916,
+            "arc_mm": 636.0461581477956,
+            "gripper_in_body": [
+              [
+                -0.9581994410862629,
+                -0.023455502274933034,
+                0.28513798504408916
+              ],
+              [
+                -0.2860820197123149,
+                0.09005672051372188,
+                -0.9539637650810618
+              ],
+              [
+                -0.0033028925648987233,
+                -0.995660397175334,
+                -0.09300249672648984
+              ]
+            ]
+          }
+        },
+        "grasp": "hand width 6.7 mm, belt->finger_tip 7.2 mm, robotiq byte 255 (status 250), belt->2f85 tip 3.5 mm, pads 66.1/66.2 mm, belt min z 0.0600",
+        "franka_width_mm": 6.7167868837714195,
+        "franka_tip_gap_mm": 7.17294170116083,
+        "ur_status": 250,
+        "ur_tip_gap_mm": 3.5290638399310947,
+        "ur_pad_gaps_mm": [
+          66.14502165350284,
+          66.23658206222633
+        ],
+        "belt_min_z": 0.059958383440971375,
+        "belt_max_z": 0.11272360384464264
+      },
+      "file": "gv_00_osc.npz",
+      "notes": "grasp variant gv_00 commanded {\"franka_slide_mm\": 0.0, \"franka_roll_deg\": 0.0, \"ur_slide_mm\": 0.0, \"ur_roll_deg\": 0.0}; pre_place_1 settled 2 s under magna OSC hold; utime offset -42550000; measured {\"franka\": {\"body_offset\": 0, \"slide_mm\": 0.056990765194939286, \"roll_deg\": 0.6125323043310333}, \"ur\": {\"body_offset\": 0, \"slide_mm\": 0.027360435966329533, \"roll_deg\": -1.7812280233690918}}; hand width 6.7 mm, belt->finger_tip 7.2 mm, robotiq byte 255 (status 250), belt->2f85 tip 3.5 mm, pads 66.1/66.2 mm, belt min z 0.0600"
+    },
+    {
+      "id": "gv_01",
+      "commanded": {
+        "franka_slide_mm": -6.73,
+        "franka_roll_deg": 3.36,
+        "ur_slide_mm": 0.31,
+        "ur_roll_deg": -10.31
+      },
+      "held": true,
+      "reason": null,
+      "measured": {
+        "offsets": {
+          "franka": {
+            "body_offset": 0,
+            "slide_mm": -5.3982918980535715,
+            "roll_deg": 4.356196865049849
+          },
+          "ur": {
+            "body_offset": 0,
+            "slide_mm": -0.4047943649100034,
+            "roll_deg": -7.017123271231689
+          }
+        },
+        "absolute": {
+          "belt_min_z": 0.06171385571360588,
+          "belt_max_z": 0.11114414036273956,
+          "franka": {
+            "nearest_body": 23,
+            "material_s": 23.03374527826875,
+            "arc_mm": 310.15958907565977,
+            "gripper_in_body": [
+              [
+                0.03245537847163329,
+                0.9467008854885595,
+                0.320474775643015
+              ],
+              [
+                -0.08294319091081245,
+                0.3220888402585596,
+                -0.9430690356821333
+              ],
+              [
+                -0.9960256399760979,
+                0.004026461979683595,
+                0.08897590749259367
+              ]
+            ]
+          },
+          "ur": {
+            "nearest_body": 47,
+            "material_s": 47.038634325718355,
+            "arc_mm": 635.6140033469193,
+            "gripper_in_body": [
+              [
+                -0.9803356543728385,
+                -0.010232937244546604,
+                0.19707179341733916
+              ],
+              [
+                -0.19728774073183408,
+                0.07319966736953888,
+                -0.9776089995769868
+              ],
+              [
+                -0.004421778183692009,
+                -0.9972648072063599,
+                -0.07377907688061863
+              ]
+            ]
+          }
+        },
+        "grasp": "hand width 6.7 mm, belt->finger_tip 4.1 mm, robotiq byte 255 (status 250), belt->2f85 tip 3.8 mm, pads 66.5/66.6 mm, belt min z 0.0617",
+        "franka_width_mm": 6.715873721987009,
+        "franka_tip_gap_mm": 4.055866093382124,
+        "ur_status": 250,
+        "ur_tip_gap_mm": 3.8025650582985238,
+        "ur_pad_gaps_mm": [
+          66.51620887902845,
+          66.60762944329534
+        ],
+        "belt_min_z": 0.06171385571360588,
+        "belt_max_z": 0.11114414036273956
+      },
+      "file": "gv_01_osc.npz",
+      "notes": "grasp variant gv_01 commanded {\"franka_slide_mm\": -6.73, \"franka_roll_deg\": 3.36, \"ur_slide_mm\": 0.31, \"ur_roll_deg\": -10.31}; pre_place_1 settled 2 s under magna OSC hold; utime offset -40795000; measured {\"franka\": {\"body_offset\": 0, \"slide_mm\": -5.3982918980535715, \"roll_deg\": 4.356196865049849}, \"ur\": {\"body_offset\": 0, \"slide_mm\": -0.4047943649100034, \"roll_deg\": -7.017123271231689}}; hand width 6.7 mm, belt->finger_tip 4.1 mm, robotiq byte 255 (status 250), belt->2f85 tip 3.8 mm, pads 66.5/66.6 mm, belt min z 0.0617"
+    },
+    {
+      "id": "gv_02",
+      "commanded": {
+        "franka_slide_mm": -2.06,
+        "franka_roll_deg": -2.07,
+        "ur_slide_mm": -3.2,
+        "ur_roll_deg": -6.69
+      },
+      "held": true,
+      "reason": null,
+      "measured": {
+        "offsets": {
+          "franka": {
+            "body_offset": 0,
+            "slide_mm": -1.8221735373130628,
+            "roll_deg": 0.9608748553817471
+          },
+          "ur": {
+            "body_offset": 0,
+            "slide_mm": -3.152130021143762,
+            "roll_deg": -6.787200328949119
+          }
+        },
+        "absolute": {
+          "belt_min_z": 0.06365147978067398,
+          "belt_max_z": 0.11099423468112946,
+          "franka": {
+            "nearest_body": 23,
+            "material_s": 23.26081064315344,
+            "arc_mm": 313.7357074364003,
+            "gripper_in_body": [
+              [
+                0.01751508150233405,
+                0.9641755564019222,
+                0.2646860751097582
+              ],
+              [
+                -0.057186579112856614,
+                0.2652593695861993,
+                -0.9624796943396263
+              ],
+              [
+                -0.998209856237322,
+                0.0017214191163642245,
+                0.059783941212421955
+              ]
+            ]
+          },
+          "ur": {
+            "nearest_body": 47,
+            "material_s": 46.86361387582258,
+            "arc_mm": 632.8666676906855,
+            "gripper_in_body": [
+              [
+                -0.979557995385582,
+                -0.018239149576139674,
+                0.20033338987527488
+              ],
+              [
+                -0.2011596586220318,
+                0.0840520534323609,
+                -0.9759457177819224
+              ],
+              [
+                0.0009619871347346308,
+                -0.9962944272335078,
+                -0.08600284207053756
+              ]
+            ]
+          }
+        },
+        "grasp": "hand width 6.7 mm, belt->finger_tip 5.4 mm, robotiq byte 255 (status 250), belt->2f85 tip 4.4 mm, pads 66.8/66.9 mm, belt min z 0.0637",
+        "franka_width_mm": 6.734102964401245,
+        "franka_tip_gap_mm": 5.41589931360953,
+        "ur_status": 250,
+        "ur_tip_gap_mm": 4.410761850597048,
+        "ur_pad_gaps_mm": [
+          66.84607915637137,
+          66.94818149513158
+        ],
+        "belt_min_z": 0.06365147978067398,
+        "belt_max_z": 0.11099423468112946
+      },
+      "file": "gv_02_osc.npz",
+      "notes": "grasp variant gv_02 commanded {\"franka_slide_mm\": -2.06, \"franka_roll_deg\": -2.07, \"ur_slide_mm\": -3.2, \"ur_roll_deg\": -6.69}; pre_place_1 settled 2 s under magna OSC hold; utime offset -38625000; measured {\"franka\": {\"body_offset\": 0, \"slide_mm\": -1.8221735373130628, \"roll_deg\": 0.9608748553817471}, \"ur\": {\"body_offset\": 0, \"slide_mm\": -3.152130021143762, \"roll_deg\": -6.787200328949119}}; hand width 6.7 mm, belt->finger_tip 5.4 mm, robotiq byte 255 (status 250), belt->2f85 tip 4.4 mm, pads 66.8/66.9 mm, belt min z 0.0637"
+    },
+    {
+      "id": "gv_03",
+      "commanded": {
+        "franka_slide_mm": -19.44,
+        "franka_roll_deg": -10.9,
+        "ur_slide_mm": -1.76,
+        "ur_roll_deg": 12.36
+      },
+      "held": true,
+      "reason": null,
+      "measured": {
+        "offsets": {
+          "franka": {
+            "body_offset": -1,
+            "slide_mm": -18.150575708572205,
+            "roll_deg": 2.721707586168707
+          },
+          "ur": {
+            "body_offset": 0,
+            "slide_mm": -3.811914270428474,
+            "roll_deg": 10.046173347476197
+          }
+        },
+        "absolute": {
+          "belt_min_z": 0.06520867347717285,
+          "belt_max_z": 0.1127655953168869,
+          "franka": {
+            "nearest_body": 22,
+            "material_s": 22.220734163710677,
+            "arc_mm": 297.40730526514113,
+            "gripper_in_body": [
+              [
+                0.019312420292962797,
+                0.9555619328040783,
+                0.2941571399748156
+              ],
+              [
+                -0.056545981454676944,
+                0.29478499594570295,
+                -0.9538890701473728
+              ],
+              [
+                -0.9982131948655838,
+                0.0017885024537728958,
+                0.05972619906889704
+              ]
+            ]
+          },
+          "ur": {
+            "nearest_body": 47,
+            "material_s": 46.82154244849073,
+            "arc_mm": 632.2068834414008,
+            "gripper_in_body": [
+              [
+                -0.8788764518484043,
+                -0.03504990838537151,
+                0.47576011424722864
+              ],
+              [
+                -0.4770471051251254,
+                0.06770289856808581,
+                -0.876266156494256
+              ],
+              [
+                -0.001497290251295879,
+                -0.9970896757301503,
+                -0.07622294060351409
+              ]
+            ]
+          }
+        },
+        "grasp": "hand width 6.7 mm, belt->finger_tip 3.9 mm, robotiq byte 255 (status 249), belt->2f85 tip 3.0 mm, pads 62.7/62.8 mm, belt min z 0.0652",
+        "franka_width_mm": 6.7334529012441635,
+        "franka_tip_gap_mm": 3.928870592416791,
+        "ur_status": 249,
+        "ur_tip_gap_mm": 2.9742391801585915,
+        "ur_pad_gaps_mm": [
+          62.74607285216818,
+          62.82927435077579
+        ],
+        "belt_min_z": 0.06520867347717285,
+        "belt_max_z": 0.1127655953168869
+      },
+      "file": "gv_03_osc.npz",
+      "notes": "grasp variant gv_03 commanded {\"franka_slide_mm\": -19.44, \"franka_roll_deg\": -10.9, \"ur_slide_mm\": -1.76, \"ur_roll_deg\": 12.36}; pre_place_1 settled 2 s under magna OSC hold; utime offset -36410000; measured {\"franka\": {\"body_offset\": -1, \"slide_mm\": -18.150575708572205, \"roll_deg\": 2.721707586168707}, \"ur\": {\"body_offset\": 0, \"slide_mm\": -3.811914270428474, \"roll_deg\": 10.046173347476197}}; hand width 6.7 mm, belt->finger_tip 3.9 mm, robotiq byte 255 (status 249), belt->2f85 tip 3.0 mm, pads 62.7/62.8 mm, belt min z 0.0652"
+    },
+    {
+      "id": "gv_04",
+      "commanded": {
+        "franka_slide_mm": -4.21,
+        "franka_roll_deg": 10.51,
+        "ur_slide_mm": 16.89,
+        "ur_roll_deg": 0.61
+      },
+      "held": true,
+      "reason": null,
+      "measured": {
+        "offsets": {
+          "franka": {
+            "body_offset": 0,
+            "slide_mm": -3.1553402754131525,
+            "roll_deg": 15.408507519636366
+          },
+          "ur": {
+            "body_offset": 1,
+            "slide_mm": 16.702245612557135,
+            "roll_deg": -4.494195083702371
+          }
+        },
+        "absolute": {
+          "belt_min_z": 0.05886094272136688,
+          "belt_max_z": 0.11021056026220322,
+          "franka": {
+            "nearest_body": 23,
+            "material_s": 23.176161321933506,
+            "arc_mm": 312.4025406983002,
+            "gripper_in_body": [
+              [
+                0.08613570675825719,
+                0.8658866208526833,
+                0.49276870826948516
+              ],
+              [
+                -0.14505436783847078,
+                0.5002360944809104,
+                -0.8536527866465776
+              ],
+              [
+                -0.985667220918012,
+                0.0020517326353487685,
+                0.16868882595167914
+              ]
+            ]
+          },
+          "ur": {
+            "nearest_body": 0,
+            "material_s": 0.12537640994471322,
+            "arc_mm": 1.966212837536809,
+            "gripper_in_body": [
+              [
+                -0.970654461933572,
+                -0.012165056679486122,
+                0.24017062044395063
+              ],
+              [
+                -0.2404365659858789,
+                0.06774710065105818,
+                -0.9682977786250947
+              ],
+              [
+                -0.004491465837048568,
+                -0.9976283585330562,
+                -0.06868394998305181
+              ]
+            ]
+          }
+        },
+        "grasp": "hand width 6.7 mm, belt->finger_tip 5.2 mm, robotiq byte 255 (status 250), belt->2f85 tip 3.8 mm, pads 65.9/66.0 mm, belt min z 0.0589",
+        "franka_width_mm": 6.721870042383671,
+        "franka_tip_gap_mm": 5.228970039421832,
+        "ur_status": 250,
+        "ur_tip_gap_mm": 3.7793710708729606,
+        "ur_pad_gaps_mm": [
+          65.9073426036123,
+          66.01315174153382
+        ],
+        "belt_min_z": 0.05886094272136688,
+        "belt_max_z": 0.11021056026220322
+      },
+      "file": "gv_04_osc.npz",
+      "notes": "grasp variant gv_04 commanded {\"franka_slide_mm\": -4.21, \"franka_roll_deg\": 10.51, \"ur_slide_mm\": 16.89, \"ur_roll_deg\": 0.61}; pre_place_1 settled 2 s under magna OSC hold; utime offset -34860000; measured {\"franka\": {\"body_offset\": 0, \"slide_mm\": -3.1553402754131525, \"roll_deg\": 15.408507519636366}, \"ur\": {\"body_offset\": 1, \"slide_mm\": 16.702245612557135, \"roll_deg\": -4.494195083702371}}; hand width 6.7 mm, belt->finger_tip 5.2 mm, robotiq byte 255 (status 250), belt->2f85 tip 3.8 mm, pads 65.9/66.0 mm, belt min z 0.0589"
+    },
+    {
+      "id": "gv_05",
+      "commanded": {
+        "franka_slide_mm": -4.59,
+        "franka_roll_deg": 12.54,
+        "ur_slide_mm": 14.78,
+        "ur_roll_deg": -3.42
+      },
+      "held": true,
+      "reason": null,
+      "measured": {
+        "offsets": {
+          "franka": {
+            "body_offset": 0,
+            "slide_mm": -3.591772644162859,
+            "roll_deg": 16.716855896306704
+          },
+          "ur": {
+            "body_offset": 1,
+            "slide_mm": 14.736032775020362,
+            "roll_deg": -5.210417367886694
+          }
+        },
+        "absolute": {
+          "belt_min_z": 0.0607311837375164,
+          "belt_max_z": 0.10767091065645218,
+          "franka": {
+            "nearest_body": 23,
+            "material_s": 23.1484500816833,
+            "arc_mm": 311.9661083295505,
+            "gripper_in_body": [
+              [
+                0.08420930209178312,
+                0.8539285531591482,
+                0.5135317123028905
+              ],
+              [
+                -0.13447662319156864,
+                0.5203865960761942,
+                -0.8432756538874014
+              ],
+              [
+                -0.9873321787808841,
+                0.0019536437125733455,
+                0.15865482034919912
+              ]
+            ]
+          },
+          "ur": {
+            "nearest_body": 0,
+            "material_s": 0.0,
+            "arc_mm": 0.0,
+            "gripper_in_body": [
+              [
+                -0.9735937064485867,
+                -0.0060407268607979795,
+                0.2282078096444025
+              ],
+              [
+                -0.22827229774380614,
+                0.03738967822426111,
+                -0.9728791137880644
+              ],
+              [
+                -0.0026557195758989587,
+                -0.9992825033899472,
+                -0.03778128600583546
+              ]
+            ]
+          }
+        },
+        "grasp": "hand width 6.7 mm, belt->finger_tip 5.3 mm, robotiq byte 255 (status 250), belt->2f85 tip 3.4 mm, pads 66.2/66.3 mm, belt min z 0.0607",
+        "franka_width_mm": 6.719857454299927,
+        "franka_tip_gap_mm": 5.299328312104912,
+        "ur_status": 250,
+        "ur_tip_gap_mm": 3.363057491390103,
+        "ur_pad_gaps_mm": [
+          66.22072860912753,
+          66.31274847374172
+        ],
+        "belt_min_z": 0.0607311837375164,
+        "belt_max_z": 0.10767091065645218
+      },
+      "file": "gv_05_osc.npz",
+      "notes": "grasp variant gv_05 commanded {\"franka_slide_mm\": -4.59, \"franka_roll_deg\": 12.54, \"ur_slide_mm\": 14.78, \"ur_roll_deg\": -3.42}; pre_place_1 settled 2 s under magna OSC hold; utime offset -32895000; measured {\"franka\": {\"body_offset\": 0, \"slide_mm\": -3.591772644162859, \"roll_deg\": 16.716855896306704}, \"ur\": {\"body_offset\": 1, \"slide_mm\": 14.736032775020362, \"roll_deg\": -5.210417367886694}}; hand width 6.7 mm, belt->finger_tip 5.3 mm, robotiq byte 255 (status 250), belt->2f85 tip 3.4 mm, pads 66.2/66.3 mm, belt min z 0.0607"
+    },
+    {
+      "id": "gv_06",
+      "commanded": {
+        "franka_slide_mm": -14.23,
+        "franka_roll_deg": 12.44,
+        "ur_slide_mm": 12.27,
+        "ur_roll_deg": 11.73
+      },
+      "held": true,
+      "reason": null,
+      "measured": {
+        "offsets": {
+          "franka": {
+            "body_offset": 0,
+            "slide_mm": -13.370603782788123,
+            "roll_deg": 16.62223649641031
+          },
+          "ur": {
+            "body_offset": 1,
+            "slide_mm": 11.709058227391552,
+            "roll_deg": 27.660471755206828
+          }
+        },
+        "absolute": {
+          "belt_min_z": 0.055331550538539886,
+          "belt_max_z": 0.10846996307373047,
+          "franka": {
+            "nearest_body": 23,
+            "material_s": 22.525531135966283,
+            "arc_mm": 302.1872771909252,
+            "gripper_in_body": [
+              [
+                0.04382668203024589,
+                0.8550764183767305,
+                0.5166464368194581
+              ],
+              [
+                -0.06788813597349161,
+                0.5184969695202765,
+                -0.8523802517611105
+              ],
+              [
+                -0.9967298645752842,
+                0.0022828347097757673,
+                0.08077354597529704
+              ]
+            ]
+          },
+          "ur": {
+            "nearest_body": 0,
+            "material_s": 47.807802480001904,
+            "arc_mm": 647.7278559392208,
+            "gripper_in_body": [
+              [
+                -0.6831872200923813,
+                -0.07412045405932617,
+                0.7264718718522301
+              ],
+              [
+                -0.7302385608549524,
+                0.07291364305730436,
+                -0.6792902508476032
+              ],
+              [
+                -0.002620408924507625,
+                -0.9945801923154067,
+                -0.1039392828093258
+              ]
+            ]
+          }
+        },
+        "grasp": "hand width 6.8 mm, belt->finger_tip 9.1 mm, robotiq byte 255 (status 250), belt->2f85 tip 3.9 mm, pads 65.3/65.4 mm, belt min z 0.0553",
+        "franka_width_mm": 6.777006201446056,
+        "franka_tip_gap_mm": 9.1225508191823,
+        "ur_status": 250,
+        "ur_tip_gap_mm": 3.913343915648475,
+        "ur_pad_gaps_mm": [
+          65.33118427154233,
+          65.41205315372889
+        ],
+        "belt_min_z": 0.055331550538539886,
+        "belt_max_z": 0.10846996307373047
+      },
+      "file": "gv_06_osc.npz",
+      "notes": "grasp variant gv_06 commanded {\"franka_slide_mm\": -14.23, \"franka_roll_deg\": 12.44, \"ur_slide_mm\": 12.27, \"ur_roll_deg\": 11.73}; pre_place_1 settled 2 s under magna OSC hold; utime offset -30625000; measured {\"franka\": {\"body_offset\": 0, \"slide_mm\": -13.370603782788123, \"roll_deg\": 16.62223649641031}, \"ur\": {\"body_offset\": 1, \"slide_mm\": 11.709058227391552, \"roll_deg\": 27.660471755206828}}; hand width 6.8 mm, belt->finger_tip 9.1 mm, robotiq byte 255 (status 250), belt->2f85 tip 3.9 mm, pads 65.3/65.4 mm, belt min z 0.0553"
+    },
+    {
+      "id": "gv_07",
+      "commanded": {
+        "franka_slide_mm": -5.61,
+        "franka_roll_deg": 3.5,
+        "ur_slide_mm": 5.79,
+        "ur_roll_deg": -4.7
+      },
+      "held": true,
+      "reason": null,
+      "measured": {
+        "offsets": {
+          "franka": {
+            "body_offset": 0,
+            "slide_mm": -4.174695210668631,
+            "roll_deg": 6.505088780624379
+          },
+          "ur": {
+            "body_offset": 0,
+            "slide_mm": 5.2907529242710325,
+            "roll_deg": -3.7465815528969206
+          }
+        },
+        "absolute": {
+          "belt_min_z": 0.0596688836812973,
+          "belt_max_z": 0.11250415444374084,
+          "franka": {
+            "nearest_body": 23,
+            "material_s": 23.11143745740435,
+            "arc_mm": 311.3831857630447,
+            "gripper_in_body": [
+              [
+                0.03537724679452174,
+                0.9338882432528891,
+                0.355810623117512
+              ],
+              [
+                -0.08885186785344665,
+                0.35756275776769636,
+                -0.9296527415312199
+              ],
+              [
+                -0.9954163932687632,
+                0.0012741160042638912,
+                0.09562730070547083
+              ]
+            ]
+          },
+          "ur": {
+            "nearest_body": 47,
+            "material_s": 47.40027267014052,
+            "arc_mm": 641.3095506361003,
+            "gripper_in_body": [
+              [
+                -0.9674271593233599,
+                -0.015347370169480816,
+                0.25268389270472946
+              ],
+              [
+                -0.2530691203802775,
+                0.08379071929577404,
+                -0.9638128115302522
+              ],
+              [
+                -0.006380573131542915,
+                -0.9963651808392231,
+                -0.08494536301491269
+              ]
+            ]
+          }
+        },
+        "grasp": "hand width 6.7 mm, belt->finger_tip 4.3 mm, robotiq byte 255 (status 250), belt->2f85 tip 7.3 mm, pads 66.1/66.2 mm, belt min z 0.0597",
+        "franka_width_mm": 6.721975281834602,
+        "franka_tip_gap_mm": 4.276628462164357,
+        "ur_status": 250,
+        "ur_tip_gap_mm": 7.27178240088249,
+        "ur_pad_gaps_mm": [
+          66.08291853929147,
+          66.17839851695605
+        ],
+        "belt_min_z": 0.0596688836812973,
+        "belt_max_z": 0.11250415444374084
+      },
+      "file": "gv_07_osc.npz",
+      "notes": "grasp variant gv_07 commanded {\"franka_slide_mm\": -5.61, \"franka_roll_deg\": 3.5, \"ur_slide_mm\": 5.79, \"ur_roll_deg\": -4.7}; pre_place_1 settled 2 s under magna OSC hold; utime offset -28745000; measured {\"franka\": {\"body_offset\": 0, \"slide_mm\": -4.174695210668631, \"roll_deg\": 6.505088780624379}, \"ur\": {\"body_offset\": 0, \"slide_mm\": 5.2907529242710325, \"roll_deg\": -3.7465815528969206}}; hand width 6.7 mm, belt->finger_tip 4.3 mm, robotiq byte 255 (status 250), belt->2f85 tip 7.3 mm, pads 66.1/66.2 mm, belt min z 0.0597"
+    },
+    {
+      "id": "gv_08",
+      "commanded": {
+        "franka_slide_mm": 1.53,
+        "franka_roll_deg": 13.03,
+        "ur_slide_mm": 7.15,
+        "ur_roll_deg": -3.84
+      },
+      "held": true,
+      "reason": null,
+      "measured": {
+        "offsets": {
+          "franka": {
+            "body_offset": 0,
+            "slide_mm": 1.9095568163115217,
+            "roll_deg": 9.829243032513395
+          },
+          "ur": {
+            "body_offset": 1,
+            "slide_mm": 7.337162673572834,
+            "roll_deg": -1.305593819829914
+          }
+        },
+        "absolute": {
+          "belt_min_z": 0.059015948325395584,
+          "belt_max_z": 0.11165421456098557,
+          "franka": {
+            "nearest_body": 23,
+            "material_s": 23.49775657975873,
+            "arc_mm": 317.46743779002486,
+            "gripper_in_body": [
+              [
+                0.06442204636686129,
+                0.9112316328943233,
+                0.4068251604247821
+              ],
+              [
+                -0.11624435825818084,
+                0.41174906799919686,
+                -0.9038528387823628
+              ],
+              [
+                -0.9911291788233504,
+                0.010936919791996083,
+                0.13245125394051155
+              ]
+            ]
+          },
+          "ur": {
+            "nearest_body": 0,
+            "material_s": 47.53020930242038,
+            "arc_mm": 643.3559603854021,
+            "gripper_in_body": [
+              [
+                -0.9558118993022647,
+                -0.03165062742488272,
+                0.29227016771440695
+              ],
+              [
+                -0.29397336994523704,
+                0.10901981404330564,
+                -0.949575872644731
+              ],
+              [
+                -0.001808567177893836,
+                -0.9935355645016305,
+                -0.11350687712728577
+              ]
+            ]
+          }
+        },
+        "grasp": "hand width 6.7 mm, belt->finger_tip 10.0 mm, robotiq byte 255 (status 250), belt->2f85 tip 8.2 mm, pads 66.5/66.6 mm, belt min z 0.0590",
+        "franka_width_mm": 6.740866228938103,
+        "franka_tip_gap_mm": 9.952693699255533,
+        "ur_status": 250,
+        "ur_tip_gap_mm": 8.193141768832634,
+        "ur_pad_gaps_mm": [
+          66.53818843939216,
+          66.61629297191871
+        ],
+        "belt_min_z": 0.059015948325395584,
+        "belt_max_z": 0.11165421456098557
+      },
+      "file": "gv_08_osc.npz",
+      "notes": "grasp variant gv_08 commanded {\"franka_slide_mm\": 1.53, \"franka_roll_deg\": 13.03, \"ur_slide_mm\": 7.15, \"ur_roll_deg\": -3.84}; pre_place_1 settled 2 s under magna OSC hold; utime offset -26710000; measured {\"franka\": {\"body_offset\": 0, \"slide_mm\": 1.9095568163115217, \"roll_deg\": 9.829243032513395}, \"ur\": {\"body_offset\": 1, \"slide_mm\": 7.337162673572834, \"roll_deg\": -1.305593819829914}}; hand width 6.7 mm, belt->finger_tip 10.0 mm, robotiq byte 255 (status 250), belt->2f85 tip 8.2 mm, pads 66.5/66.6 mm, belt min z 0.0590"
+    },
+    {
+      "id": "gv_09",
+      "commanded": {
+        "franka_slide_mm": 7.19,
+        "franka_roll_deg": 0.16,
+        "ur_slide_mm": -5.26,
+        "ur_roll_deg": -2.11
+      },
+      "held": true,
+      "reason": null,
+      "measured": {
+        "offsets": {
+          "franka": {
+            "body_offset": 1,
+            "slide_mm": 8.167194189300346,
+            "roll_deg": 1.543214919769019
+          },
+          "ur": {
+            "body_offset": 0,
+            "slide_mm": -5.0403135090613205,
+            "roll_deg": -4.956990179348917
+          }
+        },
+        "absolute": {
+          "belt_min_z": 0.05919431522488594,
+          "belt_max_z": 0.11270992457866669,
+          "franka": {
+            "nearest_body": 24,
+            "material_s": 23.895084791546317,
+            "arc_mm": 323.7250751630137,
+            "gripper_in_body": [
+              [
+                0.00463567122464585,
+                0.9614908555250319,
+                0.2747978262178212
+              ],
+              [
+                -0.012771638898787695,
+                0.27483529186869027,
+                -0.9614064944565806
+              ],
+              [
+                -0.9999076936358359,
+                0.0009471458149141234,
+                0.013553860065284995
+              ]
+            ]
+          },
+          "ur": {
+            "nearest_body": 47,
+            "material_s": 46.74321304102355,
+            "arc_mm": 630.978484202768,
+            "gripper_in_body": [
+              [
+                -0.9726201104314783,
+                -0.026060366347522502,
+                0.23093500836835323
+              ],
+              [
+                -0.23237910469429923,
+                0.1226251235392878,
+                -0.9648642551045459
+              ],
+              [
+                -0.003173717967062036,
+                -0.9921108488383782,
+                -0.12532354579829869
+              ]
+            ]
+          }
+        },
+        "grasp": "hand width 6.7 mm, belt->finger_tip 4.1 mm, robotiq byte 255 (status 250), belt->2f85 tip 5.3 mm, pads 66.2/66.5 mm, belt min z 0.0592",
+        "franka_width_mm": 6.711688823997974,
+        "franka_tip_gap_mm": 4.053653214158619,
+        "ur_status": 250,
+        "ur_tip_gap_mm": 5.335323309970257,
+        "ur_pad_gaps_mm": [
+          66.18349932329373,
+          66.46355228264167
+        ],
+        "belt_min_z": 0.05919431522488594,
+        "belt_max_z": 0.11270992457866669
+      },
+      "file": "gv_09_osc.npz",
+      "notes": "grasp variant gv_09 commanded {\"franka_slide_mm\": 7.19, \"franka_roll_deg\": 0.16, \"ur_slide_mm\": -5.26, \"ur_roll_deg\": -2.11}; pre_place_1 settled 2 s under magna OSC hold; utime offset -24440000; measured {\"franka\": {\"body_offset\": 1, \"slide_mm\": 8.167194189300346, \"roll_deg\": 1.543214919769019}, \"ur\": {\"body_offset\": 0, \"slide_mm\": -5.0403135090613205, \"roll_deg\": -4.956990179348917}}; hand width 6.7 mm, belt->finger_tip 4.1 mm, robotiq byte 255 (status 250), belt->2f85 tip 5.3 mm, pads 66.2/66.5 mm, belt min z 0.0592"
+    },
+    {
+      "id": "gv_10",
+      "commanded": {
+        "franka_slide_mm": 11.84,
+        "franka_roll_deg": -9.48,
+        "ur_slide_mm": -6.59,
+        "ur_roll_deg": -4.14
+      },
+      "held": true,
+      "reason": null,
+      "measured": {
+        "offsets": {
+          "franka": {
+            "body_offset": 1,
+            "slide_mm": 12.598019482729228,
+            "roll_deg": 1.3755543551102623
+          },
+          "ur": {
+            "body_offset": 0,
+            "slide_mm": -2.3007846367149796,
+            "roll_deg": -6.653167087837313
+          }
+        },
+        "absolute": {
+          "belt_min_z": 0.0458279587328434,
+          "belt_max_z": 0.11720040440559387,
+          "franka": {
+            "nearest_body": 24,
+            "material_s": 24.177171308437316,
+            "arc_mm": 328.15590045644257,
+            "gripper_in_body": [
+              [
+                0.06995172666918632,
+                0.9618450118872582,
+                0.26450128363317893
+              ],
+              [
+                -0.22875352536084417,
+                0.273551960470914,
+                -0.9342596799378132
+              ],
+              [
+                -0.9709678576405014,
+                0.004847476675493218,
+                0.2391608692886349
+              ]
+            ]
+          },
+          "ur": {
+            "nearest_body": 47,
+            "material_s": 46.91790028158952,
+            "arc_mm": 633.7180130751143,
+            "gripper_in_body": [
+              [
+                -0.9790791204841567,
+                -0.02489160002565736,
+                0.20195168749018366
+              ],
+              [
+                -0.20344652746883488,
+                0.10177206620156436,
+                -0.9737822944590526
+              ],
+              [
+                0.0036859588769728533,
+                -0.9944962819383629,
+                -0.10470701465484598
+              ]
+            ]
+          }
+        },
+        "grasp": "hand width 6.7 mm, belt->finger_tip 2.8 mm, robotiq byte 255 (status 251), belt->2f85 tip 3.6 mm, pads 66.2/66.3 mm, belt min z 0.0458",
+        "franka_width_mm": 6.698945537209511,
+        "franka_tip_gap_mm": 2.7616086427554682,
+        "ur_status": 251,
+        "ur_tip_gap_mm": 3.6042655098419663,
+        "ur_pad_gaps_mm": [
+          66.19387407782754,
+          66.28195929178962
+        ],
+        "belt_min_z": 0.0458279587328434,
+        "belt_max_z": 0.11720040440559387
+      },
+      "file": "gv_10_osc.npz",
+      "notes": "grasp variant gv_10 commanded {\"franka_slide_mm\": 11.84, \"franka_roll_deg\": -9.48, \"ur_slide_mm\": -6.59, \"ur_roll_deg\": -4.14}; pre_place_1 settled 2 s under magna OSC hold; utime offset -22440000; measured {\"franka\": {\"body_offset\": 1, \"slide_mm\": 12.598019482729228, \"roll_deg\": 1.3755543551102623}, \"ur\": {\"body_offset\": 0, \"slide_mm\": -2.3007846367149796, \"roll_deg\": -6.653167087837313}}; hand width 6.7 mm, belt->finger_tip 2.8 mm, robotiq byte 255 (status 251), belt->2f85 tip 3.6 mm, pads 66.2/66.3 mm, belt min z 0.0458"
+    },
+    {
+      "id": "gv_11",
+      "commanded": {
+        "franka_slide_mm": -17.73,
+        "franka_roll_deg": 0.01,
+        "ur_slide_mm": 8.48,
+        "ur_roll_deg": 4.32
+      },
+      "held": true,
+      "reason": null,
+      "measured": {
+        "offsets": {
+          "franka": {
+            "body_offset": -1,
+            "slide_mm": -16.595641611758992,
+            "roll_deg": 7.268739655173134
+          },
+          "ur": {
+            "body_offset": 0,
+            "slide_mm": 5.833269927296783,
+            "roll_deg": 4.31639476014552
+          }
+        },
+        "absolute": {
+          "belt_min_z": 0.06780071556568146,
+          "belt_max_z": 0.10682746767997742,
+          "franka": {
+            "nearest_body": 22,
+            "material_s": 22.319885207299276,
+            "arc_mm": 298.96223936195435,
+            "gripper_in_body": [
+              [
+                0.10005217455320595,
+                0.9270424773436047,
+                0.3613610487695211
+              ],
+              [
+                -0.06330688834391103,
+                0.36837880650112387,
+                -0.9275178126640047
+              ],
+              [
+                -0.9929661626940703,
+                0.06992353052757616,
+                0.09554527525300596
+              ]
+            ]
+          },
+          "ur": {
+            "nearest_body": 47,
+            "material_s": 47.43471974622183,
+            "arc_mm": 641.8520676391261,
+            "gripper_in_body": [
+              [
+                -0.9219509231965268,
+                0.02054947313975764,
+                0.38676118519152036
+              ],
+              [
+                -0.38719193834401455,
+                -0.024592118388100413,
+                -0.9216711076054137
+              ],
+              [
+                -0.009428578815276333,
+                -0.9994863415109104,
+                0.030629316588198383
+              ]
+            ]
+          }
+        },
+        "grasp": "hand width 7.2 mm, belt->finger_tip 5.9 mm, robotiq byte 255 (status 250), belt->2f85 tip 7.4 mm, pads 65.6/65.7 mm, belt min z 0.0678",
+        "franka_width_mm": 7.184412330389023,
+        "franka_tip_gap_mm": 5.9040822280452785,
+        "ur_status": 250,
+        "ur_tip_gap_mm": 7.352132352943376,
+        "ur_pad_gaps_mm": [
+          65.57040604642538,
+          65.664932304224
+        ],
+        "belt_min_z": 0.06780071556568146,
+        "belt_max_z": 0.10682746767997742
+      },
+      "file": "gv_11_osc.npz",
+      "notes": "grasp variant gv_11 commanded {\"franka_slide_mm\": -17.73, \"franka_roll_deg\": 0.01, \"ur_slide_mm\": 8.48, \"ur_roll_deg\": 4.32}; pre_place_1 settled 2 s under magna OSC hold; utime offset -20675000; measured {\"franka\": {\"body_offset\": -1, \"slide_mm\": -16.595641611758992, \"roll_deg\": 7.268739655173134}, \"ur\": {\"body_offset\": 0, \"slide_mm\": 5.833269927296783, \"roll_deg\": 4.31639476014552}}; hand width 7.2 mm, belt->finger_tip 5.9 mm, robotiq byte 255 (status 250), belt->2f85 tip 7.4 mm, pads 65.6/65.7 mm, belt min z 0.0678"
+    },
+    {
+      "id": "gv_12",
+      "commanded": {
+        "franka_slide_mm": 6.87,
+        "franka_roll_deg": -0.35,
+        "ur_slide_mm": -18.55,
+        "ur_roll_deg": -8.56
+      },
+      "held": true,
+      "reason": null,
+      "measured": {
+        "offsets": {
+          "franka": {
+            "body_offset": 1,
+            "slide_mm": 7.984726358809553,
+            "roll_deg": 2.2602933870404383
+          },
+          "ur": {
+            "body_offset": -1,
+            "slide_mm": -18.18872911152937,
+            "roll_deg": -17.808757073311526
+          }
+        },
+        "absolute": {
+          "belt_min_z": 0.05893848091363907,
+          "belt_max_z": 0.11495018750429153,
+          "franka": {
+            "nearest_body": 24,
+            "material_s": 23.883499010447746,
+            "arc_mm": 323.5426073325229,
+            "gripper_in_body": [
+              [
+                -0.0003439270072386969,
+                0.9579644902781501,
+                0.2868865927162452
+              ],
+              [
+                -0.00027095341407843223,
+                0.28688650988155623,
+                -0.9579645385045454
+              ],
+              [
+                -0.9999999041492256,
+                -0.00040720277851859633,
+                0.00016089573044637898
+              ]
+            ]
+          },
+          "ur": {
+            "nearest_body": 46,
+            "material_s": 45.90358414520749,
+            "arc_mm": 617.8300686002999,
+            "gripper_in_body": [
+              [
+                -0.9999790612933064,
+                -0.0014145509854434385,
+                0.006314746270972983
+              ],
+              [
+                -0.006450402620971497,
+                0.13963200153597521,
+                -0.9901824561428485
+              ],
+              [
+                0.0005189229080979302,
+                -0.9902024556587239,
+                -0.13963820224583412
+              ]
+            ]
+          }
+        },
+        "grasp": "hand width 6.7 mm, belt->finger_tip 4.1 mm, robotiq byte 255 (status 250), belt->2f85 tip 3.2 mm, pads 65.8/66.0 mm, belt min z 0.0589",
+        "franka_width_mm": 6.708179600536823,
+        "franka_tip_gap_mm": 4.110782395067463,
+        "ur_status": 250,
+        "ur_tip_gap_mm": 3.2034907400660404,
+        "ur_pad_gaps_mm": [
+          65.84964110000328,
+          65.95723710712988
+        ],
+        "belt_min_z": 0.05893848091363907,
+        "belt_max_z": 0.11495018750429153
+      },
+      "file": "gv_12_osc.npz",
+      "notes": "grasp variant gv_12 commanded {\"franka_slide_mm\": 6.87, \"franka_roll_deg\": -0.35, \"ur_slide_mm\": -18.55, \"ur_roll_deg\": -8.56}; pre_place_1 settled 2 s under magna OSC hold; utime offset -18355000; measured {\"franka\": {\"body_offset\": 1, \"slide_mm\": 7.984726358809553, \"roll_deg\": 2.2602933870404383}, \"ur\": {\"body_offset\": -1, \"slide_mm\": -18.18872911152937, \"roll_deg\": -17.808757073311526}}; hand width 6.7 mm, belt->finger_tip 4.1 mm, robotiq byte 255 (status 250), belt->2f85 tip 3.2 mm, pads 65.8/66.0 mm, belt min z 0.0589"
+    }
+  ],
+  "probe": null
+}

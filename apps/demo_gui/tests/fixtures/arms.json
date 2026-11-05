@@ -1,0 +1,236 @@
+{
+ "V61t_tol70": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t_s2/deploy_v39t",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t/deploy_v39t/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t/latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V61t_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t_s2/deploy_v39t/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V61t_tol70_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V61t_ch_stage2.yaml"
+ },
+ "V61t_tol50": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t_s2/deploy_v39t",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t/deploy_v39t/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t/latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V61t_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t_s2/deploy_v39t/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V61t_tol50_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V61t_ch_stage2.yaml"
+ },
+ "V61t_tol10": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t_s2/deploy_v39t",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t/deploy_v39t/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t/latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V61t_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t_s2/deploy_v39t/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V61t_tol10_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V61t_ch_stage2.yaml"
+ },
+ "V61t_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t_s2/deploy_v39t",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t/deploy_v39t/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V61t_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V61t_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61t_s2/deploy_v39t/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V61t_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V61t_ch_stage2.yaml"
+ },
+ "V61q_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61q_s2/deploy_v39q",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61q/deploy_v39q/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V61q_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V61q_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V61q_s2/deploy_v39q/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V61q_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V61q_ch_stage2.yaml"
+ },
+ "V62j_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62j_s2/deploy_v39j",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62j/deploy_v39j/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62j_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62j_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62j_s2/deploy_v39j/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62j_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62j_ch_stage2.yaml"
+ },
+ "V62a_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62a_s2/deploy_v31a",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62a/deploy_v39a/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62a_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62a_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62a_s2/deploy_v31a/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62a_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62a_ch_stage2.yaml"
+ },
+ "V62k_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62k_s2/deploy_v39k",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62k/deploy_v39k/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62k_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62k_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62k_s2/deploy_v39k/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62k_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62k_ch_stage2.yaml"
+ },
+ "V62m_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62m_s2/deploy_v39m",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62m/deploy_v39m/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62m_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62m_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62m_s2/deploy_v39m/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62m_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62m_ch_stage2.yaml"
+ },
+ "V62p_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p/deploy_v39p/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62p_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62p_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62p_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62p_ch_stage2.yaml"
+ },
+ "V62s_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62s_s2/deploy_v39s",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62s/deploy_v39s/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62s_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62s_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62s_s2/deploy_v39s/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62s_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62s_ch_stage2.yaml"
+ },
+ "V62p1_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p/deploy_v39p/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62p_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62p_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62p_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_152/configs/V62p1_ch_stage2.yaml"
+ },
+ "V62p2_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p/deploy_v39p/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62p_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62p_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62p_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_152/configs/V62p2_ch_stage2.yaml"
+ },
+ "V62p3_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p/deploy_v39p/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62p_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62p_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62p_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_152/configs/V62p3_ch_stage2.yaml"
+ },
+ "V62p4_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p/deploy_v39p/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62p_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62p_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62p_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_152/configs/V62p4_ch_stage2.yaml"
+ },
+ "V62p5_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p/deploy_v39p/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62p_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62p_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62p_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_152/configs/V62p5_ch_stage2.yaml"
+ },
+ "V62w_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62w_s2/deploy_v39w",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62w/deploy_v39w/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62w_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62w_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62w_s2/deploy_v39w/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62w_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62w_ch_stage2.yaml"
+ },
+ "V62p6_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p/deploy_v39p/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62p_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62p_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62p_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_152/configs/V62p6_ch_stage2.yaml"
+ },
+ "V62u_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62u_s2/deploy_v39u",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62u/deploy_v39u/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62u_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62u_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62u_s2/deploy_v39u/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62u_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62u_ch_stage2.yaml"
+ },
+ "V62y_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62y_s2/deploy_v39y",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62y/deploy_v39y/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62y_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62y_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62y_s2/deploy_v39y/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62y_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62y_ch_stage2.yaml"
+ },
+ "V62z_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62z_s2/deploy_v39z",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62z/deploy_v39z/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62z_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62z_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62z_s2/deploy_v39z/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62z_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62z_ch_stage2.yaml"
+ },
+ "V62t_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62t_s2/deploy_v39t",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62t/deploy_v39t/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62t_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62t_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62t_s2/deploy_v39t/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62t_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62t_ch_stage2.yaml"
+ },
+ "V62x_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62x_s2/deploy_v39x",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62x/deploy_v39x/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62x_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62x_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62x_s2/deploy_v39x/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62x_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62x_ch_stage2.yaml"
+ },
+ "V62v_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62v_s2/deploy_v39v",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62v/deploy_v39v/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62v_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62v_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V62v_s2/deploy_v39v/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V62v_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V62v_ch_stage2.yaml"
+ },
+ "V63h_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63h_s2/deploy_v39h",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63h/deploy_v39h/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V63h_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V63h_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63h_s2/deploy_v39h/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V63h_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V63h_ch_stage2.yaml"
+ },
+ "V63j_tol50b": {
+  "dep": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63j_s2/deploy_v39j",
+  "deploy1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63j/deploy_v39j/deploy.npz",
+  "wp1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V63j_tol50b_s1_latent_waypoints.npz",
+  "cfg1": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V63j_stage1.yaml",
+  "deploy2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/encoder_study/sim/V63j_s2/deploy_v39j/deploy.npz",
+  "wp2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_151/wp/V63j_tol50b_s2_latent_waypoints.npz",
+  "cfg2": "/home/hienbui/git/magna_belt_simulation-main/data/lcs/realfirst/cmp/v12_148/configs/V63j_ch_stage2.yaml"
+ }
+}

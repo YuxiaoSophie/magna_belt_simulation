@@ -10,7 +10,71 @@ packages `handoffs/packages/PKG-20261006-cmp-*.md`. Glossary and earlier campaig
 `V<campaign><letter>` (V12g, V13a, …; `docs/models.md`). Campaign V11 = the first two real-first
 loops (2026-10-05), V12 = this campaign (2026-10-06); V13 = the frozen-encoder models of V12-13.
 
-## 0. Status summary (updated 2026-10-16)
+## 0. Status summary (updated 2026-11-05, V12-153)
+
+**Where we are.** The task is now the full run: stage 1 (both arms seat the belt on the large
+pulley) → scripted UR open + exit → stage 2 (the Franka alone wraps the small pulley) → scripted
+release, in one continuous sim in the stiff-belt scene `wr_pin640b1` at the 30 N Franka grip,
+trained from 5 demos + MILES (V12-147) and on-policy DAgger rounds. Eval: the 8 training starts × 2
+(V12-139 on); "suite" = both pulleys engaged after the release, "strict" = belt level and both
+wraps ≥ 100° before the release (`cmp/v12_150/strict_e2e.py`).
+
+| what | model / arm | result | source |
+|---|---|---|---|
+| best single model | V62p `_tol50b` (shared seg_ctx encoder, gated per-stage heads, 7-step loss incl. from_z 0.1, warm) | 12/16 suite, strict 11/16; rerun 12/16, strict 6/16 | `cmp/v12_152/strict_V62p.md`, `strict_V62p_r2.md` |
+| grasp angles, goals from one demo | V62p, goals from set2_gv_09 (done relabelled at frame 48) / from set3_gv_02 | 15/16 (strict 12/16) / 0/16 | `cmp/v12_152/grasp2/strict.md`, `grasp1/strict.md` |
+| per-stage models | V61t `_tol50b` (own encoder per stage, 1 DAgger round) | 12/16, strict 4/16 | `cmp/v12_151/strict_c.md` |
+| belt anchor + ring decoder | V63j `_tol50b` (alpha 0.05) | 7/16, strict 4/16; seeds 6 / 7 collapse offline | `cmp/v12_152/strict_V63j.md`, `logs/bme_seeds_e2e.log` |
+| two-model chain, default grip | V45c → V58c_ch | 15/20 (10 starts × 2) | `cmp/v12_127/e2e_V58c_ch/summarize.out` |
+| two-model chains, 30 N | X62 (V45c → V62a), H61j (V61h → V61j) | 12/20, 11/16 | `cmp/v12_137/e2e_X62/`, `cmp/v12_145/e2e_H61j/summarize.out` |
+| scripted reference | V45c → scripted walk (default grip) / base30 (30 N) | 17/20 / 1/20 | `cmp/v12_123/base/`, `cmp/v12_146/base30/summarize.out` |
+
+Open:
+- Strict success is not stable: V62p 11/16 then 6/16 on a rerun; the V62p1-p6 controller variants
+  (slow, smooth, wrist box, min dwell, belt-length limit) did not raise it (`cmp/v12_152/strict_V62p*.md`).
+- up+20 / up+30 do not seat in stage 1 for the W148 / W150all models (0/4 for V62p).
+- The held-out starts set2_gv_06 / ur_z+15 have not been used since V12-139.
+- Seed variance: V63j's seeds 6 and 7 collapse offline (stage-2 xyzgt 9.50 / 11.91 vs 3.77 mm).
+
+**Tried since V12-90, by theme** (details in the run index; models in `docs/models.md` §2):
+
+| theme | runs | what was tried | outcome |
+|---|---|---|---|
+| full-run feasibility | V12-90/91/93 | release probe, scripted drive, stage-2 collector and starts | release keeps the large wrap 40/40; scripted D10L walk 13/20 in the soft stage-2 scene |
+| stage-2 LCS, soft scene | V12-94..105 | V49 / V50 / V51, tilt limit, feasible-first MPPI, goal count, smoothing | best V50b ws1_du 18/40 (two seeds) |
+| one LCS for the whole run, soft belts | V12-106..118 | scene scan (S = wr625b15), V52-V56, split-scene protocol | whole-run models 0 both; split-scene base chain 12/20 |
+| belt physics | V12-117/121/122 | one-scene scan, stretch stiffness, stretch pin | `wr_pin640b1`: V45c stage 1 10/10, scripted stage 2 8/10 |
+| teleop | V12-120 | SpaceMouse stage-2 teleop harness | tooling |
+| one LCS, stiff belt | V12-123..126 | V57 family, stage-2 MILES, knot1_minus_measured actions | 0/20 both: no on-policy stage-2 skill |
+| stage-2-only LCS | V12-127 | V58, knot0_chain, DAgger rounds 2-4 | V58c_ch 16/24; e2e V45c → V58c_ch 15/20 |
+| one LCS, latent size / heads | V12-128/129 | V59 (L16 / L24 + DAgger), V60 design A (joint heads) / B (frozen encoder) | best e2e 4/20; V60a stage-2 head 20/24 |
+| gripper-aware encoders, 30 N | V12-130..137 | bimanual stage 2, V61a-g (ctx latents, scene_rv), 30 N grip, V62a (V12-137) | single models ≤ 6/20; chain X62 12/20 |
+| mode-gated LCS | V12-138..145 | V61h-n, per-stage tests, DAgger, cross-model chains | stage-2 head V61j 8/12; chain H61j 11/16; single models ≤ 3/16 |
+| few demos + MILES | V12-146..151 | 30 N recollection (stopped), 5 strict demos + MILES, V61q-u, DAgger, tolerance scaling, strict scorer | V61t `_tol50b` 12/16 (strict 4/16) |
+| one shared-encoder model | V12-152 | V62 (7-step losses, anchored / free deltas, warm vs scratch), V63 (belt anchor, ring decoder), grasp tests | V62p `_tol50b` 12/16, strict 11/16 (rerun 6/16) |
+| tooling | V12-153 | harness profiling, body-pose publish A/B | 1/6 vs 2/6 (not a model run) |
+
+**What we learned (V12-90..153).**
+1. The belt model decides feasibility: the soft belt suits stage 1, the stiff one stage 2, until the
+   stretch pin (`wr_pin640b1`, V12-122) gave one scene for both. Soft-belt models and data
+   (V49-V56) do not transfer (V50b 0/10 there).
+2. Without its own stage-2 data a model's plans look good in the model and do nothing in the sim
+   (V12-127: predicted latent progress p50 0.92, realised 0.02); stage-2 DAgger fixes it (V58a_ch
+   3/12 → V58c_ch 16/24).
+3. Handoff matters: a stage-2 head that works from V45c's stage-1 end states fails from its own
+   model's (V60aX 14/20 vs V60e 4/20; X62 12/20 vs G62 1/20).
+4. Robot / scene context latents (V61a-g) did not help; the grasp-gated seg_ctx latent with per-stage
+   heads and a few demos + MILES + DAgger did (V61t 9/16, V62p 12/16).
+5. Tighter waypoint tolerances help up to a point: × 0.5 on both stages 9 → 12/16 (V61t), × 0.1 0/16.
+6. A 7-step loss through the encoder at 0.1 from a warm start gives the best single model (V62p); from
+   scratch with the delta L2 the stage delta collapses (V62w 0/16).
+7. Reruns move strict counts by several episodes (V62p 11 → 6/16): compare arms on repeated runs.
+
+Constraints added since 2026-10-16 (user): whole runs are one continuous sim; the UR exit stays
+scripted and its frames are not training data; data = a few demos + MILES, plan confirmed before
+collecting.
+
+## 0a. Status summary of 2026-10-16 (V12-89, kept as written)
 
 **Where we are.** Without any demo action prior, **V45c + MPPI (H 7) with a per-arm total-rotation
 envelope (UR 30°, Franka 20°) seats 20/20 on the hard suite** (V12-87, 10 starts × 2, noise 0). That is the
@@ -190,6 +254,70 @@ refit, several iterations); **sim** = fixed-model closed-loop check in the simul
 | V12-87 | sim | V45c with a wider total-rotation envelope (`rot_envelope_deg`: rotation from the start pose, 1e4 penalty per violating knot; the per-step box stays 2° / 6 mm). Diagnosis (sim GT, diagnostics only): at up-20 the Franka sweep overshoots to y ≈ 92 mm (V36b 68) and the belt never wraps the small pulley; the UR then drifts up and out for 11 s while the model predicts the goal distance falls each step (pred −1.77 vs actual +0.32: small per-step error, one sign, which MPPI exploits). (a) both arms 30°, up-20; (b) both arms 30°, full suite; (c) UR 30° / Franka 20°, full suite. Training data rotation from the nominal start (T1ga_f_tr): Franka p99 18.5° / max 24.1°, UR p99 31.5° / max 33.3° | V45c_rot30, V45c_ur30 | `cmp/v12_87/` (`chain.sh`, `full.sh`, `ur30.sh`), sims `encoder_study/sim87_V45c_rot30{,_full}`, `sim87_V45c_ur30` (config `configs/V45c_ur30_H7.yaml`) | done 2026-10-15 22:46: (a) **2/2**; (b) **10/20** (the Franka rotates to 27-30° everywhere; 5 starts break); (c) **20/20, the first model to seat every start**. In (c) the UR exceeds 20° only at up-20 (24.8°) and up+30 (25.3°); the Franka stays ≤ 19.4°. Caveat: the envelope was picked on this suite; a data-derived per-arm envelope (p99) and a held-out start are not yet tested |
 | V12-88 | offline + sim | V48 (user): V45's data and recipe (T1ga_f_tr, N 544, Chamfer, latent 16, lr 1e-3, batch 154, 300 epochs, aux 0) with no current-state recon (`--recon-weight 0`, no AE warm-up) and no one-step decoded next state (`--no-decoded-next-state-loss`); instead the decoded LCS rollout recon at steps 1..7 (`--belt-ms-horizon 7 --belt-ms-recon-steps 1..7 --belt-ms-recon-weight 1 --belt-ms-weight 0`, γ 0.9, recorded actions); violation gradient into the encoder on. V45c had no multi-step loss, so V48 changes three things at once. Seeds 4, 6, 5 one at a time (~17 GB GPU each); decoders refit to convergence; hard suite with V45c's UR 30 / Franka 20 envelope | V48a (s4), V48b (s6), V48c (s5) | `cmp/v12_88/` (`chain.sh`), `encoder_study/sim/prep_v48.py`, sims `encoder_study/sim88_V48_*` | trained 2026-10-15 23:46 to 2026-10-16 03:11. Held-out one-step / h7 / h24 / recon mm: V48a 2.95 / 3.62 / 6.3 / 2.86, V48b 2.77 / 3.12 / **506** (long rollout diverges) / 2.74, V48c 2.74 / **3.49** / 6.9 / 2.68 (V45c 2.53 / 4.36 / - / 2.45): better H7, slightly worse one-step and recon. V48c uses 1 contact mode on held-out data (V45c 7). Evaluation restarted twice: the V48c decoder fit ran out of GPU memory beside seed 4's training (00:55), then the machine rebooted (09:22). Decoders refit to 2.62 / 2.48 / 2.36 mm. **Hard suite 2026-10-16 17:34-18:15 (UR 30 / Franka 20): V48a 18/20 (up-20 0/2, slanted), V48b 20/20, V48c 11/20** (slanted 9: gv_00, ur_z-30, up-20, nominal 0/2, ur_z+15 1/2) vs V45c 20/20 under the same envelope. Seed spread 18 / 20 / 11 vs V45's 16 / 6 / 18 (V45a/b under the 20° envelope only, so not a matched comparison). Held-out H7 does not rank the seeds: V48c has the middle H7 and the worst suite |
 | V12-89 | offline + sim | V45c with C3+ (user: tune C3+ for the highest performance): magna's C++ learned MPC (deploy worktree, params by `c3plus_params.py`), N 7, no prior, no EE targets. CPU checks: loads n_x 16; offline solve p95 36-44 ms on ~640 task states; the 7-step plan is 2.1 whitened off the model's own prediction (admm_iter 3 barely helps); the exact LCP with the full F (‖J − Jᵀ‖ / ‖F_pgd‖ 0.48) matches PGD-25 on F_pgd to ~1e-4 (`lcp_f/`). Screen A (6 starts × 1): goal variant wp2 / pp2 / seat / track, wp2 + box_z, wp2 + admm 3; screen B: 7 w_q:w_r on A's best; full suite for the top 2 | track_q1_r0p03_a2, track_q1_r1_a2 | `cmp/v12_89/` (`chain.sh`, `make_params.py`, `select*.md`, `full/vs_mppi/hard_suite.md`, viewer folders `full/view/`) | done 2026-10-16 03:47 (its gate opened on V12-88's FAIL line, not 'chain done'). Screen A 0/6 for every variant; screen B best 1/6. **Full suite 1/20 (track, w_q 1 / w_r 0.03) and 0/18 (w_r 1)** vs MPPI 20/20. Failures over / slanted / outside the support box; the Franka barely sweeps (F y max 18-27 mm vs 86); solve p95 56-98 ms in the loop. C3+ cannot express the total-rotation envelope, the support box's x/y faces, the clearance or the 7-stage schedule. Verdict: not viable for this model as is |
+| V12-90 | offline + sim | Stage 0 full-run feasibility (scripted, sim GT numbers only): phase-1 suite with end snapshots, UR release probe (byte 191 / 0), scripted place_9 → place_10 → 3 MPC targets drive for the small pulley; phase-2 plumbing (`--end-snapshot`, `--grasp-arms`, `--outcome-pulley`, mark params) | V45c, V48b | `cmp/v12_90/` (`report.md`, `suite/`, `probe/`) | done 2026-10-16: suite V45c 20/20, V48b 20/20; release keeps ≥ 60° 40/40 for both bytes; drive both engaged 0/40 (byte 191; grasp_lost 20 on the 10 mm hand-width limit), small wrap median 0 |
+| V12-91 | data (sim) | stage-2 start snapshots + scripted walk on them (no driver script; intent read from the outputs) | - | `cmp/v12_91/` (`stage2_starts.log`, `demo_all40/summary.json`, `scene_check/`) | 2026-10-19: 40 stage-2 starts kept, 0 rejected (`data/lcs/start_states/stage2`); D10L walk run on all 40; no summary table |
+| V12-92 | - | no folder, no log found | - | - | unclear |
+| V12-93 | data (sim) | stage-2 collector `stage2_collect.py` (scripted D10L walk, parameter draws, DART, loops, trips) → tier S2a | - | `cmp/v12_93/` (`prod1/report.md`, `diag_*`) | done 2026-10-19: same start × 3 → 2/3 both (sim not repeatable); `prod1` 80 episodes, both per start in `prod1/report.md` (the 63 successful walks are V12-94's) |
+| V12-94 | offline | first stage-2 (Franka-only) LCS V49: V45c recipe on S2a, seeds 4/6/5; stage-2 deploy prep (`prep_v49.py`: goal frames 61/173, 18 waypoints, UR pinned) | V49a/b/c | `cmp/v12_94/` (`chain.status`), `encoder_study/sim/prep_v49.py` | done 2026-10-19: held-out one-step / h7 / recon V49a 1.59 / 2.17 / 1.55, V49b 1.57 / 2.82 / 1.53, V49c 1.43 / 1.87 / 1.39 mm |
+| V12-95 | sim | stage-2 hard suite (`--suite stage2`, 10 keys × 2, scripted release `--post-mpc stage2_release`) | V49a/b/c | `encoder_study/sim95_V49/hard_suite.md` | done 2026-10-19: both after the release V49a 0/20, V49b 2/20, V49c 0/20; scripted 13/20; belt leaves the Franka fingers mid-walk |
+| V12-96 | sim | Franka tilt limit 32° (`tilt_max_deg`) + per-axis rotation box | V49a/b/c | `cmp/v12_96/tilt_limits.json`, `encoder_study/sim96_V49/hard_suite.md` | done 2026-10-19: V49a 3/20, V49b 4/20, V49c 0/20 (V49c breaks the limit in 13/20: goal-cost blow-up); failures move to "small over" |
+| V12-97 | sim | stage-2 MPPI safety / smoothness / stage criteria: feasible_first + exec guard + planning tilt 29.5° (ffg29), smoothing, tighter stage tols | V49a/b, V50a/b/d | `encoder_study/sim97_V49/final_report.md` | done 2026-10-20: V49a ffg29 3/20, V49b ffg 6/20, V50a ffg29 8/20, V50b ffg29 11/20, V50d ffg29 0/20; scripted 13/20; GPU shared with V12-98 |
+| V12-98 | offline | tier S2b (S2a + cut V12-95/96 MPC episodes, train-only) → V50a-c; V50d-f = + 40-epoch multi-step fine-tune | V50a-f | `cmp/v12_98/` (`acc_*.json`, `v50_models.json`) | done 2026-10-20: MPC-test decoded h7 median V49 4.44-5.03, S2B 3.01-3.16, S2BMAFT 2.61-2.68 mm (no-change 3.72) |
+| V12-99 | data (sim) | stage-2 on-policy collection: MPC + excursions + DART 0.2 + trips (`stage2_onpolicy.py`) | V49b, V50a (collectors) | `cmp/v12_99/` (`tiers/onpolicy`, `tiers/S2c`) | done 2026-10-20: 64 episodes, both V49b 5/24, V50a 18/40; tier 60 rows / 15 347 frames; 10 episodes excluded (resume bug, fixed) |
+| V12-100 | offline | on-policy iteration 2: V51 on S2c_train | V51a/b/c | `cmp/v12_100/` (`acc_v51.json`) | done 2026-10-20: MPC leave-starts-out h7 V51 3.04 / 3.10 / 3.18 vs V50 3.16 / 3.18 / 3.29 mm; no suite |
+| V12-101 | sim | V50b ffg29, single seated goal (30 s) | V50b | `encoder_study/sim101_V50b/hard_suite.md` | done 2026-10-20: 2/20 (grasp lost 12) |
+| V12-102 | sim | V50b ffg29, 3 goals (hover f61, pre-wrap f79, seated f173) | V50b | `encoder_study/sim102_V50b/hard_suite.md` | done 2026-10-20: 0/20 (the pre-wrap stage always timed out) |
+| V12-103 | sim | V50b smoothing: w_s 1 / w_s 3 / ess_frac 0.15 | V50b | `encoder_study/sim103_V50b/hard_suite.md` | done 2026-10-20: ws1 11/20, ess15 10/20, ws3 8/20 (base 11/20) |
+| V12-104 | code + sim | AR(1) sampling noise, du_max, goal blending | V50b | `encoder_study/sim104_V50b/hard_suite.md`, `cmp/v12_104/report.md` | done 2026-10-20: blending 0/6, 1/6, 2/5; du 8/20, ws1_du 9/20, du3 9/20 |
+| V12-105 | sim | MPPI-seed repeat of ws1 / ws1_du / du3 / ws1_du3 | V50b | `encoder_study/sim105_V50b/hard_suite.md` | done 2026-10-20: 8 / 9 / 9 / 7 of 20; two seeds ws1 19/40, ws1_du 18/40 (picked: `sim104_V50b/configs/V50b_ffg29_ws1_du.yaml`) |
+| V12-106 | sim | one scene for the whole run: V45c stage 1 in the stage-2 scene, belt scan (length, bend, damping), scripted stage 2 per scene | V45c | `cmp/v12_106/` (`suite/`, `scan_*/`, `s2scripted_*.log`) | done 2026-10-21: V45c stage 1 in the stage-2 scene 3/20; wr625b1 6/6, wr640 0/6, wr625u1 0/6, wr625b15 8/10; scripted stage 2 wr625b1 1/6, wr625b15 4/6, wr625b2 5/6 → scene S = wr625b15 |
+| V12-107 | offline | tier WR (T1ga_f_tr + S2c minus test files) → whole-run LCS V52 | V52a/b/c | `cmp/v12_107/` (`acc.md`, `pick.json`) | done 2026-10-21: h7 s1_demo / mpc_test V52a 3.27 / 3.33, V52b 4.16 / 3.39, V52c 2.69 / 3.17 mm (V45c 2.26 / 15.73, V50b 21.11 / 3.18); stage 2 GO, stage 1 NO-GO |
+| V12-108 | code + sim | harness `--stage2-chain` (stage 1 → UR exit → stage-2 node → release), `--suite full`; baseline chain V45c → V50b ws1_du | V45c, V50b | `cmp/v12_108/` (`suite_wr625b{1,2}/hard_suite.md`) | done 2026-10-21: wr625b1 seated 8/10, both 0/10; wr625b2 seated 5/10, both 1/10 |
+| V12-109 | data (sim) | in-scene data in S: full chain V45c → V50b ws1_du with DART 0.2 (A) + scripted stage 2 (B) → tier WR2 | V45c, V50b | `cmp/v12_109/` (`suiteA/hard_suite.md`, `B1/`, `B2/`) | done 2026-10-21: A seated 21/30, both 2/30; B1 20/40, B2 4/8; WR2 1097 rows |
+| V12-110 | sim | V52 deploys (stage 1 + 2) + full suite in S | V52a, V52c | `cmp/v12_110/suite/summarize.out` | done 2026-10-21: base seated 8/9, both 0/9; V52a seated 1/10, V52c 0/10, both 0/10 |
+| V12-111 | offline + sim | V53 = V52c fine-tunes on WR2; V54 = stage-1-weighted fine-tunes from V52c / V45c | V53a/b, V54a/b | `cmp/v12_111/` (`chain.status`, `s1_S/`, `s1_scene1/`) | done 2026-10-21: V53 decfits killed (stage-1 latent no better than V52); stage 1 in S V54a 2/9, V54b 1/10; V54b stage-1 scene 3/20 |
+| V12-112 | data (sim) | second in-scene round in S: V45c stage 1 DART 0.1 + scripted stage 2 → tier WR3 | V45c | `cmp/v12_112/` (`suiteA/`, `B1/`, `B2_d*/`) | done 2026-10-21: stage 1 seated 20/30; scripted stage 2 both 2/40 from S-native starts; WR3 1155 rows |
+| V12-113 | offline + sim | V55 = fresh whole-run LCS at latent 32 / 24 (L28_s5 and L24_s4 also trained, no ID) | V55a/b | `cmp/v12_113/` (`s1_scene1/`, `e2e_S/`) | done 2026-10-21: stage 1 (stage-1 scene) V55a 2/10, V55b 8/10; V55b full in S seated 6/10, both 0/10 |
+| V12-114 | sim | split-scene whole run: stage 1 in the stage-1 scene → stage-2 starts → stage 2 in the stage-2 scene | V45c → V50b ws1_du; V52c | `cmp/v12_114/summary.md` | done 2026-10-21: base whole 12/20; V52c whole 3/20 (stage 1 8/20) |
+| V12-115 | offline | stage-1 latent separability, slanted vs engaged | V45c, V52c, V54b | `cmp/v12_115/sep.md` | done 2026-10-21: AUC 0.94-0.99 for every latent; separability does not single out V45c |
+| V12-116 | data (sim) | V55b DART split-scene collection → WR4 → V56 | V55b | `cmp/v12_116/` | stopped 2026-10-21 at the first stage-2 run (user: single-scene end to end); no tier or training |
+| V12-117 | sim | one-scene feasibility scan (friction, density, bend, twist, length) + native vs restored stage-2 start diagnosis | V45c | `cmp/v12_117/` (`scan.md`, `diag.md`) | done 2026-10-21: no variant reaches ≥ 5/6 stage 1 and ≥ 4/6 scripted stage 2; best l640 5/6 / 1/5; blocker = the stage-1 end hold meeting the scripted transit |
+| V12-118 | data + offline + sim | V55b DART whole-run chains in S → WR5 → V56 fine-tune | V56, V55b | `cmp/v12_118/` (`collect/`, `eval/summarize.out`) | done 2026-10-21: collection seated 16/30, both 0/30; eval seated V56 5/20, V55b 13/20, both 0/20 for both |
+| V12-119 | - | no folder, no log found | - | - | unclear |
+| V12-120 | code + sim | SpaceMouse teleop of the Franka for stage 2 in one continuous sim (`--stage2-teleop`, `docs/teleop-stage2.md`) | V45c (stage 1) | `cmp/v12_120/` | done 2026-10-21: fake-publisher smoke + checks pass, real-time factor 0.58× with the live viewer; `session_*` folders have no summary |
+| V12-121 | sim | belt stretch-stiffness scan (625 / 640 mm, × 1 / 3 / 10) | V45c | `cmp/v12_121/scan.md` | done 2026-10-21: no winner; stretch_stiffness is inert (legacy AVBD never reaches it) |
+| V12-122 | code + sim | opt-in belt stretch pin (`pin_stiffness`), MBT6-640 calibration, one-scene feasibility → scene `wr_pin640b1` | V45c, V50b | `cmp/v12_122/` (`scan_table.md`, `full_pin640b1/summarize.out`) | done 2026-10-21: V45c stage 1 10/10, scripted stage 2 both 8/10; chain V45c → V50b both 0/10 (grasp_lost) |
+| V12-123 | data + offline + sim | one whole-run LCS in wr_pin640b1: reference chain V45c → scripted walk, DART arms, MILES, tier WP → V57; on-policy FT V57b | V57, V57s, V57t, V57b | `cmp/v12_123/` (`base/`, `collect/`, `eval_V57{t,b}/summarize.out`) | done 2026-10-22: reference chain both 17/20; V57t and V57b seated 20/20, both 0/20 |
+| V12-124 | offline | V57 reconstruction error by phase, belt region and noise floor | V57 | `cmp/v12_124/recon.md` | done 2026-10-22: recon at the ~1.7 mm voxel floor; on V57t's own stage-2 states 8.9 mm (engaged); cause = off-distribution stage-2 coverage |
+| V12-125 | data + offline + sim | stage-2 demos with grasp spread + stage-2 MILES (`miles_stage2.py`) → WPc → V57c | V57c | `cmp/v12_125/` (`eval_V57c/summarize.out`, `recon_cmp.md`) | done 2026-10-22 (paused 13:05-17:10 by the user for the bike chain): seated 20/20, both 0/20 |
+| V12-126 | offline + sim | V57d = V57c with actions knot1_minus_measured | V57d | `cmp/v12_126/chain.status` | done 2026-10-23: stage 1 0/10 seated (UR never descends); stage-2-only V57d 0/12, V57c 0/12 |
+| V12-127 | data + offline + sim | stage-2-only LCS V58, knot0_chain (`_ch`), DAgger rounds 2-4, then end to end | V58a/b/c/e/f | `cmp/v12_127/` (`chain.status`, `acc_rounds.md`, `e2e_V58c_ch/summarize.out`) | done 2026-10-23: s2-12x2 V58c_ch 16/24 (V58e 13/24, V58f 16/24); **e2e V45c → V58c_ch 15/20** (scripted 17/20) |
+| V12-128 | data + offline + sim | one whole-run LCS at latent 16 / 24 with 2 stage-2 DAgger rounds, no UR-exit frames | V59a-f | `cmp/v12_128/` (`chain.status`, `e2e_final_V59{e,f}/`) | done 2026-10-24: e2e V59f 2/20 (seated 16/20), V59e 0/20 (seated 0/20); s2-12x2 L16 4 → 5 → 10/24, L24 1 → 0 → 2/24 |
+| V12-129 | code + data + sim | per-stage LCS heads on one shared encoder: design B (frozen V59e encoder, lcs_only heads) vs design A (joint `--n-dyn-heads 2`) | V60a-g | `cmp/v12_129/` (`chain.status`, `e2e_*/summarize.out`) | done 2026-10-26: s2-12x2 V60a_ch 20/24; best e2e V60e 4/20; V45c → V60a (V60aX) 14/20 |
+| V12-130 | code + sim | bimanual stage 2 (UR keeps its grasp: hold / feed), scripted feasibility | - | `cmp/v12_130/` | stopped 2026-10-27 at the feasibility check: hold 0/2, feed 0/2, Franka grasp lost in the transit (`summarize.out` prints 2/2 with final labels None in this mode: not a valid count) |
+| V12-131 | code + offline + sim | V61a: encoder sees the grippers (z_belt 24 + z_ctx 8: scene cloud, EE pose / twist, grip), grip-gated LCS input | V61a, V61p (pilot) | `cmp/v12_131/` (`acc131.md`, `e2e_V61a/summarize.out`) | done 2026-10-28: e2e 4/20 (seated 18/20); z_belt prediction slightly worse than V59f |
+| V12-132 | code + sim | Franka grip force 30 N (`--franka-grip-n`); V61a end to end at 30 N | V61a | `cmp/v12_132/` (`static.json`, `e2e_V61a_g30/summarize.out`) | done 2026-10-28: 6/20 (default 4/20); scripted base30 killed unfinished |
+| V12-133 | code + offline + sim | V61b-e: z_ctx as raw numbers (34 / 22), z_belt only, DP3-style scene_rv; no decfit; e2e at 30 N | V61b/c/d/e | `cmp/v12_133/` (`chain.status`, `e2e_V61{c,d,e}_r0/`) | done 2026-10-28: V61b dropped (r0 0/4 partial); V61c 0/20 (seated 6/20), V61d 0/20 (7/20), V61e 0/20 (0/20) |
+| V12-134 | sim | V45c stage 1 at 30 N | V45c | `cmp/v12_134/s1_V45c_g30/summarize.out` | done 2026-10-28: 19/20 |
+| V12-135 | offline + sim | V61f (scene_rv with the belt_seg point branch), V61g (V61f on stage-1 rows only) | V61f, V61g | `cmp/v12_135/` | done 2026-10-29: V61f e2e 0/20 (seated 6/20); V61g stage 1 3/20 |
+| V12-136 | sim | at 30 N: V60c (V45c encoder + stage-2 head) and the two-model V45c → V58c_ch (V58X); handoff stats | V60c, V58c | `cmp/v12_136/` (`e2e_*/summarize.out`, `handoff.md`) | done 2026-10-29: V60c 0/20, V58X 10/20 |
+| V12-137 | offline + sim | V62a (V12-137) = design-B stage-2 head refit on H2X; chains at 30 N | V62a (V12-137), V60e, V60a | `cmp/v12_137/` (`e2e_*/summarize.out`, `handoff.md`) | done 2026-10-29: X62 (V45c → V62a) 12/20, V60aX 8/20, G62 1/20, V60e 1/20; A58c failed at start (stage goals differ) |
+| V12-138 | offline + sim | V61h = V61a recipe, round 1 only, z_ctx 16, decfit; e2e at 30 N | V61h | `cmp/v12_138/` | done 2026-10-29: 0/20 (seated 20/20); default-grip rerun (V12-138g) stopped by the user after 2 episodes |
+| V12-139 | offline + sim | V61i = V61h + mode-gated LCS (head 1 + delta on all matrices); e2e on the 8 training starts | V61i | `cmp/v12_139/` | done 2026-10-29: 2/16 (seated 12/16) |
+| V12-140 | sim | V61h stage 2 from V45c handoff snapshots × 2, control V62a | V61h | `cmp/v12_140/s2/run.status` | killed by the user 2026-10-29: training-key snapshots 2/12, ur_z+15 0/4; V62a not run |
+| V12-141 | offline + sim | V61j = V61i with the delta on A, B, d (like_base init) | V61j | `cmp/v12_141/` | done 2026-10-29: 1/16 (seated 4/16) |
+| V12-142 | offline + sim | V61k = V61i with like_base delta init on all matrices | V61k | `cmp/v12_142/` | done 2026-10-29: 3/16 (seated 8/16) |
+| V12-143 | sim | per-stage tests at 30 N: stage 1 on the 8 training starts × 2, stage 2 from the 6 training-key V45c snapshots × 2 | V61i-n | `cmp/v12_143/` (`s1_V61*/summarize.out`, `chain.status`) | done 2026-10-30: stage 1 / stage 2 V61i 8/16 / 0/12, V61j 5/16 / 8/12, V61k 6/16 / 3/12, V61l 8/16 / 2/12, V61m 3/16 / 4/12, V61n 16/16 / 0/12 (stage 2 summed from the per-start lines) |
+| V12-144 | data + offline + sim | V61j DAgger round 1 on its own 30 N e2e chains (stage-2 DAgger dropped by the user) → V61l | V61l | `cmp/v12_144/` | done 2026-10-29: collection V61jd seated 2/14, both 0/14; V61l 0/16 (seated 7/16) |
+| V12-145 | data + offline + sim | overnight at 30 N: cross-model chains, on-policy round (tier W2), FT V61m (gated) and V61n (single) | V61m, V61n | `cmp/v12_145/` (`e2e_*/summarize.out`) | done 2026-10-30: H61j (V61h → V61j) 11/16, N61j 10/16, X62d 8/16, H61jd 6/16; V61m 0/14, V61n 1/16; X61j blocked (stage goals differ) |
+| V12-146 | data + offline + sim | recollect W1's recipe at 30 N (scripted base30 + DART d0-d6, stage-1 / stage-2 MILES) → W30 → V61o / V61p from scratch | V61o, V61p (V12-146) | `cmp/v12_146/` | stopped by the user 2026-10-30 during O61p (bulk chain collection contradicts the few-demos + MILES design): scripted base30 1/20; V61o 1/16, V61p 0/16 |
+| V12-147 | data (sim) | few strict demos at 30 N (sampling demonstrator, `strict_ok.py`) + stage-1 / continuous stage-2 MILES with a walk-fidelity gate (user-approved plan) | - | `cmp/v12_147/` (`run*.sh`, `miles.status`) | 2026-10-31 to 11-02: 5 demos (set3_gv_07, set1_gv_08, set2_gv_04, set2_gv_09, set3_gv_02; `v12_148/make_tier148.py`) + MILES; no summary table |
+| V12-148 | offline + sim | from scratch on W148 (5 demos + MILES, weight 1): V61q (gated A,B,d), V61r (2 independent heads), V61s (per-stage models) | V61q/r/s | `cmp/v12_148/` | done 2026-11-02: V61q 0/16, V61r 0/16, V61s 1/16 |
+| V12-149 | data + offline + sim | DAgger round 1 on V61s (DART 0.15 on 5 near-demo non-eval starts × 2) → V61t | V61t | `cmp/v12_149/` | done 2026-11-02: 9/16 (seated 10/16); strict 2/16 (scored in V12-151) |
+| V12-150 | data + offline + sim | DAgger round 2 on V61t (+ up+10 / up-10) → V61u; strict e2e scorer | V61u | `cmp/v12_150/` (`strict_e2e.py`, `strict.md`) | done 2026-11-02: 7/16, strict 1/16 |
+| V12-151 | sim | waypoint tolerance scaling, eval only: `_tol70`, `_tol50`, `_tol10`, `_tol50b` | V61t, V61q | `cmp/v12_151/` (`strict*.md`, `e2e_*/summarize.out`) | done 2026-11-02: V61t_tol50b 12/16 (strict 4/16), _tol50 10/16 (5/16), _tol70 6/16 (4/16), _tol10 0/16; V61q_tol50b 0/16 |
+| V12-152 | offline + sim | single shared-encoder model with per-stage LCS heads on W150all: 7-step losses, anchored / free deltas, joint warm vs scratch (V62); belt anchor + ring decoder (V63); V62p controller variants; one-demo-goal grasp tests | V62a-z, V63a-n | `cmp/v12_152/` (`chain.status`, `strict_*.md`, `logs/bme_*.log`, `grasp{1,2}/strict.md`) | done 2026-11-04: **V62p_tol50b 12/16, strict 11/16** (rerun 12/16, strict 6/16); V62p1-p6 0/16 to 11/16 (p3 9/14); V63j 7/16 (strict 4/16); V62p one-demo goals set2_gv_09 15/16 (strict 12/16), set3_gv_02 0/16 |
+| V12-153 | sim (tooling) | harness real-time profiling (`prof/`) and a body-pose-publish A/B on V63j_tol50b, 3 starts × 2 | V63j | `cmp/v12_153/` (`ab_bodyposes/{pub,nopub}/hard_suite.md`) | 2026-11-04/05: both engaged pub 1/6, nopub 2/6; not a model run; profiling has no summary table |
 
 ## 1. Goal
 

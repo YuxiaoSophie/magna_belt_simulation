@@ -87,6 +87,41 @@ token list (§6).
 Other controller differences (reference mode, `w_r`, stage tolerances, head off) go in the
 note column.
 
+**From V49 on (V12-94 to V12-152: stage 2 and the full run).**
+
+- Checkpoints: lcs_learning `outputs/sim_belt_v12_20261006/v12_<NN>/<tag>/`. Exports:
+  `data/lcs/realfirst/cmp/encoder_study/sim/<ID>/` (stage-1 deploy) and `<ID>_s2/` (stage-2 deploy,
+  UR pinned). Stage-2-only models (V58) have only `<ID>_s2`; per-stage models put a different LCS
+  head or checkpoint in each. `deploy_v<NN><l>` is a prep prefix, not the model ID (V49 uses v17,
+  V61q to V63 use v39).
+- IDs used twice: **V61p** (V12-131 pilot, `deploy_v29p`; V12-146 model, `deploy_v38p`) and **V62a**
+  (V12-137 stage-2 head, `deploy_v31a`; V12-152 Q152_q, `deploy_v39a`, whose prep overwrote the older
+  `V62a_s2` jsons). Tables write `V61p (V12-131)` etc. Letters with no model: V58d and V61b1
+  (planned, not trained), V62n / V62o (trainings killed), V63c / V63d (stopped); no record of
+  V62d-i, V62q, V62r.
+- Arm suffixes (same model, different eval or controller): `_ch` = stage-2 knot0_chain shift (cap
+  15 mm / 5°), `_ch10` = cap 10 mm, `_chR` = repeat, `_dart` = DART 0.15 in the eval; `ffg` /
+  `ffg29` = feasible_first + exec guard (+ planning tilt 29.5°), `ws1` / `ws3` = smoothness w_s,
+  `du` / `du3` = du_max 2 / 3 mm per step, `ess15`, `blend`, `nb` (V12-97..105); `_g30` = 30 N grip;
+  `_r2` = rerun; `_tol70` / `_tol50` / `_tol10` = stage-2 waypoint tolerances × 0.7 / 0.5 / 0.1
+  (floor 0.5), `_tol50b` = both stages × 0.5 (V12-151; every V12-152 e2e arm); `V62p1`..`V62p6` =
+  V62p with a changed stage-2 MPPI config (slow lead box, smoothing, wrist box, min dwell,
+  belt-length latent limit 660 / 666 mm), not new models; `V62p_g1` / `_g2` = goals from one demo.
+- Two-model chain arms (stage-1 model → scripted UR exit → stage-2 model, one sim): `V58X` = V45c →
+  V58c_ch, `V60aX` = V45c → V60a, `X62` = V45c → V62a (V12-137), `G62` = V60g → V62a, `A58c` = V61a →
+  V58c_ch, `H61j` = V61h → V61j, `N61j` = V61n → V61j, `X61j` = V45c → V61j; `X62d` / `H61jd` /
+  `V61jd` = the same with DART 0.15 (collection). A58c and X61j never ran (stage goals differ).
+- Suites (count = both pulleys engaged after the scripted release unless "strict"): `stage2` =
+  stage-2-only from `data/lcs/start_states/stage2`, 10 keys × 2 (V12-95..105); `s2-12x2` =
+  stage-2-only from the 12 V12-127 snapshots (6 training keys + 6 held-out) × 2; e2e 10×2 = the 10
+  hard-suite starts × 2 in one continuous sim (V12-108 on); 8×2 = the 8 training starts
+  (set2_gv_06 and ur_z+15 dropped, V12-139 on); strict = large belt level (span ≤ 1.5 mm) and
+  large and small wrap ≥ 100° at the last frame before the release or the first stage-2 grasp
+  loss (`cmp/v12_150/strict_e2e.py`, V12-150 on).
+- Scenes: soft stage-2 scene (625 mm, bend 0.45; V12-90..105), S = `wr625b15` (V12-106..118),
+  `wr_pin640b1` (stretch-pinned 640 mm; V12-122 on). Franka grip: default, or 30 N
+  (`--franka-grip-n 30`) from V12-132 on.
+
 **Future runs.**
 
 - New training campaign: `outputs/sim_belt_v<N>_<date>/` with N the next number (V11 next; V9
@@ -463,6 +498,127 @@ T1ga_f = T1ga + 42 more operator attempts (39 failed). Details: `docs/realfirst-
 V21c with the EE data-support MPPI cost (weights 1 / 10): 12/22 each (V12-59b, eval tags
 `V21c_n0_ees1/10`, no new model).
 
+### Stage-2, whole-run and per-stage models (V12-94 to V12-152, not made by a loop)
+
+Trained with `train_joint_pointnet_lcs.py` / `refit_from_buffer.py` (checkpoint column relative to
+lcs_learning `outputs/sim_belt_v12_20261006/`; `(s1)` / `(s2)` = the run behind each stage's
+deploy). Encoder: the belt_seg PointNet (N 544, Chamfer) of V45c unless the recipe says otherwise;
+from V61h on, seg_ctx = [z_belt 16 (belt cloud, board frame), z_ctx 16 (scene cloud, EE pose,
+grip)] with the LCS input gated by the grasp bits and the cost on z_belt only. Tiers: S2a = V12-93
+scripted walks; S2b / S2c = + MPC / on-policy stage-2 episodes; WR* = T1ga_f_tr + stage-2 rows
+(V12-107..118); WP / WPc = stiff-belt chains + MILES (V12-123/125); S2P* = stage-2 frames only
+(V12-127); W1-W3 = whole-run rows without UR-exit frames (V12-128); W148 = V12-147's 5 demos +
+MILES; W150all = W150_s1 + W150_s2 = W148 + the V61s / V61t DAgger rows, both stages (1234 rows).
+Results: see the suites in §1; sources are under `data/lcs/realfirst/` (a bare file name is in the
+run folder of the path before it). Offline numbers (refit_report.json) are in `docs/models.yaml`.
+
+| ID | run (checkpoint) | recipe | tier | seed | result (source) | run |
+|---|---|---|---|---|---|---|
+| V49a | `v12_94/s2a544/S2A544_s4` | first stage-2 (Franka-only) LCS: V45c recipe (joint recon + decoded-next + LCS, latent 16, N 544 Chamfer, 300 ep) on scripted D10L walks | S2a (V12-93 prod1, 80 scripted walks) | 4 | V12-95 0/20, V12-96 tilt limit 3/20, V12-97 ffg29 3/20; scripted 13/20 (`cmp/encoder_study/sim95_V49/hard_suite.md, sim96_V49/hard_suite.md, sim97_V49/final_report.md`) | V12-94..97 |
+| V49b | `v12_94/s2a544/S2A544_s6` | first stage-2 (Franka-only) LCS: V45c recipe (joint recon + decoded-next + LCS, latent 16, N 544 Chamfer, 300 ep) on scripted D10L walks | S2a (V12-93 prod1, 80 scripted walks) | 6 | V12-95 2/20, V12-96 4/20, V12-97 ffg 6/20; scripted 13/20 (`cmp/encoder_study/sim95_V49/hard_suite.md, sim96_V49/hard_suite.md, sim97_V49/final_report.md`) | V12-94..97 |
+| V49c | `v12_94/s2a544/S2A544_s5` | first stage-2 (Franka-only) LCS: V45c recipe (joint recon + decoded-next + LCS, latent 16, N 544 Chamfer, 300 ep) on scripted D10L walks | S2a (V12-93 prod1, 80 scripted walks) | 5 | V12-95 0/20, V12-96 0/20 (breaks the tilt limit in 13/20); scripted 13/20 (`cmp/encoder_study/sim95_V49/hard_suite.md, sim96_V49/hard_suite.md, sim97_V49/final_report.md`) | V12-94..97 |
+| V50a | `v12_98/S2B_s4` | V49 recipe from scratch on S2b (S2a + cut V12-95/96 MPC episodes, MPC rows train-only) | S2b | 4 | V12-97 ffg29 8/20; V12-99 on-policy source (b03-b05 18/40) (`cmp/encoder_study/sim97_V49/final_report.md`) | V12-98 |
+| V50b | `v12_98/S2B_s6` | V49 recipe from scratch on S2b (S2a + cut V12-95/96 MPC episodes, MPC rows train-only) | S2b | 6 | V12-97 ffg29 11/20; V12-103 ws1 11/20; V12-104/105 ws1_du 9/20 + 9/20 = 18/40 (picked); split-scene chain after V45c 12/20 (V12-114); stiff belt 0/10 (V12-122) (`cmp/encoder_study/sim97_V49/final_report.md, sim103_V50b, sim104_V50b, sim105_V50b/hard_suite.md, cmp/v12_114/summary.md`) | V12-98 |
+| V50c | `v12_98/S2B_s5` | V49 recipe from scratch on S2b (S2a + cut V12-95/96 MPC episodes, MPC rows train-only) | S2b | 5 | not run in closed loop; MPC-test h7 3.16-3.29 mm (V50a-c) (`cmp/v12_100/acc_v50.json`) | V12-98 |
+| V50d | `v12_98/S2BMAFT_s4` | V50a-c + 40-epoch warm fine-tune with the decoded LCS rollout recon k 1..7 (belt_ms K 7) | S2b | 4 | V50d ffg29 0/20 (V12-97); V50e/f not run in closed loop (`cmp/encoder_study/sim97_V49/final_report.md, cmp/v12_98/acc_final.json`) | V12-98 |
+| V50e | `v12_98/S2BMAFT_s6` | V50a-c + 40-epoch warm fine-tune with the decoded LCS rollout recon k 1..7 (belt_ms K 7) | S2b | 6 | not run in closed loop (MPC-test h7 2.61-2.68 mm with its own decoder) (`cmp/encoder_study/sim97_V49/final_report.md, cmp/v12_98/acc_final.json`) | V12-98 |
+| V50f | `v12_98/S2BMAFT_s5` | V50a-c + 40-epoch warm fine-tune with the decoded LCS rollout recon k 1..7 (belt_ms K 7) | S2b | 5 | not run in closed loop (MPC-test h7 2.61-2.68 mm with its own decoder) (`cmp/encoder_study/sim97_V49/final_report.md, cmp/v12_98/acc_final.json`) | V12-98 |
+| V51a | `v12_100/S2CT_s4` | V50a-c recipe on S2c_train (S2b + V12-99 on-policy b01/b02) | S2c_train | 4 | MPC leave-starts-out h7 3.04 / 3.10 / 3.18 mm (V51a/b/c) vs V50 3.16 / 3.18 / 3.29; no suite (`cmp/v12_100/acc_v51.json, handoffs/archive/RUN-STATE-2026-10-16-stage2.md`) | V12-100 |
+| V51b | `v12_100/S2CT_s6` | V50a-c recipe on S2c_train (S2b + V12-99 on-policy b01/b02) | S2c_train | 6 | MPC leave-starts-out h7 3.04 / 3.10 / 3.18 mm (V51a/b/c) vs V50 3.16 / 3.18 / 3.29; no suite (`cmp/v12_100/acc_v51.json, handoffs/archive/RUN-STATE-2026-10-16-stage2.md`) | V12-100 |
+| V51c | `v12_100/S2CT_s5` | V50a-c recipe on S2c_train (S2b + V12-99 on-policy b01/b02) | S2c_train | 5 | MPC leave-starts-out h7 3.04 / 3.10 / 3.18 mm (V51a/b/c) vs V50 3.16 / 3.18 / 3.29; no suite (`cmp/v12_100/acc_v51.json, handoffs/archive/RUN-STATE-2026-10-16-stage2.md`) | V12-100 |
+| V52a | `v12_107/WR_s5` | whole-run LCS (stage 1 + stage 2) with the V50b recipe (S2B) | WR (T1ga_f_tr + S2c minus test files) | 5 | full suite in S (wr625b15): seated 1/10, both 0/10 (V12-110) (`cmp/v12_110/suite/summarize.out`) | V12-107 |
+| V52b | `v12_107/WR_s4` | as V52a | WR | 4 | decfit only; not prepped (pick was V52c, V52a) (`cmp/v12_107/pick.json`) | V12-107 |
+| V52c | `v12_107/WRW_s5` | as V52a, stage-1 rows weight 2 | WR_w | 5 | full suite in S: seated 0/10 (V12-110); split-scene whole 3/20 (stage 1 8/20; V12-114) (`cmp/v12_110/suite/summarize.out, cmp/v12_114/summary.md`) | V12-107 |
+| V53a | `v12_111/WR2WFT_s5` | V52c warm fine-tune, 60 ep lr 3e-4, in-scene rows weight 3 | WR2_w | 5 | decfit killed: stage-1 latent no better than V52; not deployed (`cmp/v12_111/chain.status`) | V12-111 |
+| V53b | `v12_111/WR2FT_s5` | V52c warm fine-tune, 60 ep lr 3e-4 | WR2 | 5 | decfit killed (as V53a); not deployed (`cmp/v12_111/chain.status`) | V12-111 |
+| V54a | `v12_111/S1WFT_s5` | V52c warm fine-tune, 80 ep lr 3e-4, stage-1 + in-scene rows weight 3 | WR2_s1w | 5 | stage 1 in S 2/9 (`cmp/v12_111/s1_S/hard_suite.md`) | V12-111 |
+| V54b | `v12_111/S1WV45_s5` | V45c warm fine-tune, 80 ep lr 3e-4, stage-1 + in-scene rows weight 3 | WR2_s1w | 5 | stage 1 in S 1/10, in the stage-1 scene 3/20 (`cmp/v12_111/s1_S/hard_suite.md, s1_scene1/hard_suite.md`) | V12-111 |
+| V55a | `v12_113/L32_s5` | whole-run LCS, latent 32, V52 recipe, 300 ep fresh | WR_s1w (stage-1 rows weight 3) | 5 | stage 1 (stage-1 scene) 2/10 (`cmp/v12_113/s1_scene1/hard_suite.md`) | V12-113 |
+| V55b | `v12_113/L24_s5` | as V55a, latent 24 | WR_s1w | 5 | stage 1 (stage-1 scene) 8/10; full in S seated 6/10, both 0/10; V12-118 seated 13/20, both 0/20 (`cmp/v12_113/s1_scene1/hard_suite.md, e2e_S/summarize.out, cmp/v12_118/eval/summarize.out`) | V12-113 |
+| V56 | `v12_118/WR5FT_s5` | V55b warm fine-tune, 60 ep lr 3e-4, on V55b DART whole-run chains in S | WR5_w | 5 | full in S seated 5/20, both 0/20 (V55b 13/20, 0/20) (`cmp/v12_118/eval/summarize.out`) | V12-118 |
+| V57 | `v12_123/WP_L24_s5` | whole-run LCS, fresh latent 24 (V55b recipe); stage-1 deploy from the in-scene demos | WP (wr_pin640b1 chains + MILES + scripted stage-1 demos) | 5 | deploy variant for the waypoint-source check only (V57t picked) (`cmp/v12_123/wp_check.json`) | V12-123 |
+| V57s | `v12_123/WP_L24_s5` | V57 checkpoint, stage-1 deploy from the successful in-scene demos only | WP | 5 | deploy variant (waypoint-source check) (`cmp/v12_123/wp_check.json`) | V12-123 |
+| V57t | `v12_123/WP_L24_s5` | V57 checkpoint, stage-1 deploy on T1ga_f_tr (T1 rules) | WP | 5 | full 20: seated 20/20, both 0/20 (stage 2 large off under x14); scripted ref 17/20 (`cmp/v12_123/eval_V57t/summarize.out`) | V12-123 |
+| V57b | `v12_123/WPb_FT_s5` | V57 warm fine-tune, 100 ep lr 3e-4, + scripted chains d3-d6 + V57t DART runs | WPb | 5 | full 20: seated 20/20, exit 19/20, both 0/20 (`cmp/v12_123/eval_V57b/summarize.out`) | V12-123 |
+| V57c | `v12_125/WPc_L24_s5` | V57 recipe fresh + stage-2 demo chains + stage-2 MILES around 3 grasp-spread demos | WPc | 5 | full 20: seated 20/20, both 0/20; stage-2-only 0/12 (V12-126); + knot0_chain 1/24 (V12-128) (`cmp/v12_125/eval_V57c/summarize.out, cmp/v12_128/chain.status`) | V12-125 |
+| V57d | `v12_126/WPc_L24_s5` | V57c with actions knot1_minus_measured (both arms) | WPc (rewritten actions) | 5 | stage 1 0/10 seated (UR never descends); stage-2-only 0/12 (`cmp/v12_126/chain.status, handoffs/RUN-STATE-20261104-pre-demo-gui.md`) | V12-126 |
+| V58a | `v12_127/S2P_L16_s6` | stage-2-only LCS, fresh latent 16 (S2B recipe, 200 ep), cmd_delta | S2P (stage-2 frames: walks, MILES2, on-policy V57x/V50b; failures cut at onset) | 6 | s2-12: V58a 0/9, V58a_ch (knot0_chain 15 mm / 5 deg) 3/12, V58a_ch10 3/12 (`cmp/v12_127/chain.status`) | V12-127 |
+| V58b | `v12_127/S2Pk_L16_s6` | V58a with actions knot1_minus_measured | S2Pk | 6 | s2-12: 1/6, V58b_ch 0/6 (dropped after 6 starts) (`cmp/v12_127/chain.status`) | V12-127 |
+| V58c | `v12_127/S2P2_ft_a` | DAgger round 2: V58a fine-tune 100 ep lr 3e-4 + own on-policy rows (weight 3) | S2P2 | 6 | s2-12x2: V58c_ch 16/24 (held-out 6/12); e2e after V45c 15/20 (default grip); 10/20 at 30 N (V58X, V12-136) (`cmp/v12_127/chain.status, e2e_V58c_ch/summarize.out, cmp/v12_136/e2e_V58X/summarize.out`) | V12-127 |
+| V58e | `v12_127/S2P3_ft_c` | DAgger round 3 (V58c_ch + DART rows) | S2P3 | 6 | s2-12x2: 13/24 (`cmp/v12_127/chain.status`) | V12-127 |
+| V58f | `v12_127/S2P4_ft` | DAgger round 4 (+ 6 negative-slide / yaw grasps) | S2P4 | 6 | s2-12x2: 16/24 (= V58c; set2_gv_06 0/6) (`cmp/v12_127/chain.status`) | V12-127 |
+| V59a | `v12_128/W1_L16_s5` | whole-run LCS latent 16 (V57 recipe, 200 ep), no UR-exit frames | W1 | 5 | s2-12x2 V59a_ch 4/24; e2e seat check seated 0/10 (`cmp/v12_128/chain.status, e2e_r0_V59a/summarize.out`) | V12-128 |
+| V59b | `v12_128/W1_L24_s5` | as V59a, latent 24 | W1 | 5 | s2-12x2 1/24; e2e seat check seated 8/9, both 3/9 (`cmp/v12_128/chain.status, e2e_r0_V59b/summarize.out`) | V12-128 |
+| V59c | `v12_128/W2_ft_a` | DAgger round 1 (stage-2 DART rows weight 3), 100 ep lr 3e-4 | W2 | 5 | s2-12x2 5/24 (`cmp/v12_128/chain.status`) | V12-128 |
+| V59d | `v12_128/W2_ft_b` | DAgger round 1 | W2 | 5 | s2-12x2 0/24 (`cmp/v12_128/chain.status`) | V12-128 |
+| V59e | `v12_128/W3_ft_a` | DAgger round 2 (latent 16) | W3 | 5 | s2-12x2 10/24; e2e 0/20 (stage 1 never seats) (`cmp/v12_128/chain.status, e2e_final_V59e/summarize.out`) | V12-128 |
+| V59f | `v12_128/W3_ft_b` | DAgger round 2 (latent 24) | W3 | 5 | s2-12x2 2/24; e2e 2/20 (seated 16/20) (`cmp/v12_128/chain.status, e2e_final_V59f/summarize.out`) | V12-128 |
+| V60a | `v12_129/B1_h1` (s1) + `v12_129/B1_h2` (s2) | design B: V59e encoder/decoder frozen + stage-1 / stage-2 LCS heads (lcs_only, 100 ep) | H1 / H2 (W3 split by stage) | 5 | s2-12x2 V60a_ch 20/24 (held-out 10/12); e2e 0/20 (seated 0/20); after V45c stage 1 (V60aX) 14/20, 8/20 at 30 N (`cmp/v12_129/chain.status, e2e_r0_V60aX/summarize.out, cmp/v12_137/e2e_V60aX/summarize.out`) | V12-129 |
+| V60b | `v12_129/A3_L16_s5` | design A: one encoder/decoder + 2 LCS heads trained jointly (--n-dyn-heads 2, fresh L16, 300 ep) | A3 (W3 with stage labels) | 5 | s2-12x2 5/24; e2e 1/20 (seated 5/20) (`cmp/v12_129/e2e_r0_V60b/summarize.out`) | V12-129 |
+| V60c | `v12_129/B2_h2` (s2) | design B on V45c's encoder: stage 1 = V45c, stage-2 head lcs_only | H2 | 5 | stage-2 recon 17.1 mm (V45c latent cannot encode stage 2); e2e at 30 N 0/20 (V12-136) (`cmp/v12_136/e2e_V60c/summarize.out`) | V12-129 |
+| V60d | `v12_129/A4_ft` | design A DAgger round 1, 100 ep lr 3e-4 | A4 | 5 | s2-12x2 9/24; e2e 2/20 (seated 6/20) (`cmp/v12_129/e2e_r1_V60d/summarize.out`) | V12-129 |
+| V60e | `v12_129/B3_h1` (s1) + `v12_129/B1_h2` (s2) | design B: stage-1 head refit on its own stuck stage-1 chains; stage-2 head = V60a's | A4 stage-1 rows | 5 | e2e 4/20 (seated 20/20); 1/20 at 30 N (V12-137) (`cmp/v12_129/e2e_r1_V60e/summarize.out, cmp/v12_137/e2e_V60e/summarize.out`) | V12-129 |
+| V60f | `v12_129/A5_ft` | design A round 2 | A5 | 5 | s2-12x2 7/24; e2e 1/20 (seated 3/20; the RUN-STATE says 0/20) (`cmp/v12_129/e2e_r2_V60f/summarize.out`) | V12-129 |
+| V60g | `v12_129/B3_h1` (s1) + `v12_129/B4_h2` (s2) | design B round 2: stage-2 head refit on own e2e stage-2 rows | A5 stage-2 rows | 5 | s2-12x2 14/24; e2e 2/20 (seated 20/20) (`cmp/v12_129/e2e_r2_V60g/summarize.out`) | V12-129 |
+| V61p (V12-131) | `v12_131/H1_L32_s5` | pilot (prep shake-out): seg_ctx z_belt 24 + z_ctx 8, grip gate, W1 200 ep (ID reused by V12-146, see the V12-146 row) | W1 | 5 | prep shake-out only (deploy_v29p) (`cmp/v12_131/v61_models.json`) | V12-131 |
+| V61a | `v12_131/H3_ft` | V59f lineage (W1 200 ep -> W2 -> W3 FT) with z = [z_belt 24, z_ctx 8 (scene cloud, EE pose/twist, grip; board frame)], decoder and cost on z_belt, LCS input g*u | W1 -> W3 | 5 | e2e 4/20 (seated 18/20); 30 N grip 6/20 (V12-132) (`cmp/v12_131/e2e_V61a/summarize.out, cmp/v12_132/e2e_V61a_g30/summarize.out`) | V12-131/132 |
+| V61b | `v12_133/J1_L50_s5` | z = [z_belt 16, z_ctx 34 raw ctx numbers x 0.107], no decfit | W1 | 5 | dropped by the user: r0 e2e 0/4 partial (dyn-loss share z_ctx 93.6 %) (`cmp/v12_133/chain.status, e2e_stats_V61c.md`) | V12-133 |
+| V61c | `v12_133/L1_L38_s5` | V61b with z_ctx 22 (EE xyz + rot6d + grip, std floors), no aux head | W1 | 5 | e2e 30 N 0/20 (seated 6/20) (`cmp/v12_133/e2e_V61c_r0/summarize.out`) | V12-133 |
+| V61d | `v12_133/M1_L16_s5` | ablation: z_belt 16 only, grasp bits gate u | W1 | 5 | e2e 30 N 0/20 (seated 7/20) (`cmp/v12_133/e2e_V61d_r0/summarize.out`) | V12-133 |
+| V61e | `v12_133/N1_L32_s5` | scene_rv: DP3-style scene branch + robot vector -> one linear fusion, z 32; goals = scene part + current robot part | W1 | 5 | e2e 30 N 0/20 (seated 0/20) (`cmp/v12_133/e2e_V61e_r0/summarize.out`) | V12-133 |
+| V61f | `v12_135/F1_L32_s5` | V61e with the belt_seg cloud as the point branch (--rv-cloud belt) | W1 | 5 | e2e 30 N 0/20 (seated 6/20) (`cmp/v12_135/e2e_V61f_r0/summarize.out`) | V12-135 |
+| V61g | `v12_135/G1_L32_s5` | V61f trained on stage-1 rows only | W1s1 | 5 | stage 1 at 30 N 3/20 (V45c 19/20) (`cmp/v12_135/s1_V61g_g30/summarize.out, cmp/v12_134/s1_V45c_g30/summarize.out`) | V12-135 |
+| V62a (V12-137) | `v12_137/H2X_h2B` (s2) | design B (V59e encoder frozen) stage-2 head refit from B1_h2 on H2X (+134 non-V45c on-policy stage-2 rows); ID reused by V12-152 | H2X | 5 | after V45c stage 1 (X62) 12/20 at 30 N, best two-model chain at 30 N then; after V60g stage 1 (G62) 1/20 (`cmp/v12_137/e2e_X62/summarize.out, e2e_G62/summarize.out`) | V12-137 |
+| V61h | `v12_138/K1_L32_s5` | V61a recipe round 1 only: z = [z_belt 16, z_ctx 16 (scene cloud + EE pose + grip)], one LCS, decfit | W1 | 5 | e2e 30 N 0/20 (seated 20/20); its stage 1 + V61j stage 2 (H61j) 11/16 (`cmp/v12_138/e2e_V61h/summarize.out, cmp/v12_145/e2e_H61j/summarize.out`) | V12-138 |
+| V61i | `v12_139/M1_L32_s5` | V61h + mode-gated LCS (stage-2 head = head 1 + delta on all matrices, L2 1e-5) | W1s | 5 | e2e 8x2 2/16 (seated 12/16); stage tests s1 8/16, s2 0/12 (`cmp/v12_139/e2e_V61i/summarize.out, cmp/v12_143/s2_summary.txt`) | V12-139 |
+| V61j | `v12_141/N1_L32_s5` | V61i with the delta on A, B, d only (like_base init) | W1s | 5 | e2e 8x2 1/16 (seated 4/16); stage tests s1 5/16, s2 8/12 (best stage-2 head of the family) (`cmp/v12_141/e2e_V61j/summarize.out, cmp/v12_143/chain.status`) | V12-141 |
+| V61k | `v12_142/P1_L32_s5` | V61i with like_base delta init (all matrices) | W1s | 5 | e2e 8x2 3/16 (seated 8/16); stage tests s1 6/16, s2 3/12 (summed per start) (`cmp/v12_142/e2e_V61k/summarize.out, cmp/v12_143/chain.status`) | V12-142 |
+| V61l | `v12_144/Q1_ft` | V61j DAgger round 1 (own 30 N chains + DART, weight 3), 100 ep lr 3e-4 | W1sD | 5 | e2e 8x2 0/16 (seated 7/16); stage tests s1 8/16, s2 2/12 (`cmp/v12_144/e2e_V61l/summarize.out, cmp/v12_143/chain.status`) | V12-144 |
+| V61m | `v12_145/R1_ft` | V61j + 30 N on-policy round (H61j/X62 chains, stage-2 DART), 100 ep lr 3e-4 | W2 | 5 | e2e 8x2 0/14 (seated 1/14); stage tests s1 3/16, s2 4/12 (summed per start) (`cmp/v12_145/e2e_V61m/summarize.out, cmp/v12_143/chain.status`) | V12-145 |
+| V61n | `v12_145/S1_ft` | V61h + the same 30 N on-policy round | W2 | 5 | e2e 8x2 1/16 (seated 16/16); stage tests s1 16/16, s2 0/12; its stage 1 + V61j stage 2 (N61j) 10/16 (`cmp/v12_145/e2e_V61n/summarize.out, e2e_N61j/summarize.out, cmp/v12_143/chain.status`) | V12-145 |
+| V61o | `v12_146/O1_30` | V61h recipe from scratch on 30 N-only data | W30 (V45c + scripted-walk chains at 30 N, stage-1/2 MILES) | 5 | e2e 8x2 1/16 (seated 8/16) (`cmp/v12_146/e2e_V61o/summarize.out`) | V12-146 |
+| V61p (V12-146) | `v12_146/P1_30` | V61j recipe (gated A,B,d) from scratch on 30 N-only data (same ID as the V12-131 pilot) | W30 | 5 | e2e 8x2 0/16 (seated 7/16) (`cmp/v12_146/e2e_V61p/summarize.out`) | V12-146 |
+| V61q | `v12_148/J1_148` | V61j recipe (gated A,B,d) from scratch on 5 demos + MILES | W148 (V12-147 5 demos + stage-1 / continuous stage-2 MILES, weight 1) | 5 | e2e 8x2 0/16 (seated 8/16); _tol50b 0/16 (seated 12/16, V12-151d) (`cmp/v12_148/e2e_V61q/summarize.out, cmp/v12_151/e2e_V61q_tol50b/summarize.out`) | V12-148 |
+| V61r | `v12_148/H1_148` | shared encoder + two independent LCS heads (n_dyn_heads 2, no gating) | W148 | 5 | e2e 8x2 0/16 (seated 2/16) (`cmp/v12_148/e2e_V61r/summarize.out`) | V12-148 |
+| V61s | `v12_148/S1_148` (s1) + `v12_148/S2_148` (s2) | per-stage models (own encoder + single LCS each, V61h recipe), H61j-style split | W148_s1 / W148_s2 | 5 | e2e 8x2 1/16 (seated 9/16) (`cmp/v12_148/e2e_V61s/summarize.out`) | V12-148 |
+| V61t | `v12_149/T1_149` (s1) + `v12_149/T2_149` (s2) | V61s DAgger round 1 (V61s + DART 0.15 on 5 near-demo non-eval starts x2), FT 100 ep lr 3e-4, weight 1 | W149_s1 / _s2 | 5 | e2e 8x2 9/16, strict 2/16; _tol50 10/16 (strict 5/16); _tol50b 12/16 (strict 4/16); _tol70 6/16; _tol10 0/16 (`cmp/v12_149/e2e_V61t/summarize.out, cmp/v12_151/chain.status, strict*.md`) | V12-149/151 |
+| V61u | `v12_150/T1_150` (s1) + `v12_150/T2_150` (s2) | V61t DAgger round 2 (+ up+10 / up-10 starts, grasp loss cut at the slip onset) | W150_s1 / _s2 | 5 | e2e 8x2 7/16, strict 1/16 (`cmp/v12_150/e2e_V61u/summarize.out, strict.md`) | V12-150 |
+| V62a (V12-152) | `v12_152/Q152_q` + `v12_152/Q152_q_h1_j7` (s1) + `v12_152/Q152_q_h2_j7` (s2) | V61q recipe from scratch + per-head 7-step lcs_only refits | W150all | 5 | e2e cancelled: the ID collided with V12-137's V62a (its V62a_s2 jsons overwritten; deploy_v31a intact) (`cmp/v12_152/chain.status`) | V12-152 |
+| V62b | `v12_152/Q152_all` + `v12_152/Q152_all_h1_j7` (s1) + `v12_152/Q152_all_h2_j7` (s2) | gated on every LCS matrix, delta L2 0 (+ per-head 7-step refits) | W150all | 5 | trained (joint h7 1060 mm before the refits); prep / e2e cancelled with V62a (`cmp/v12_152/chain.status`) | V12-152 |
+| V62c | `v12_152/Q152_l48` + `v12_152/Q152_l48_h1_j7` (s1) + `v12_152/Q152_l48_h2_j7` (s2) | V61q recipe, latent 48 (belt 32 + ctx 16) (+ per-head 7-step refits) | W150all | 5 | prep / e2e cancelled with V62a (`cmp/v12_152/chain.status`) | V12-152 |
+| V62j | `v12_152/L152_qh1_j7` (s1) + `v12_152/L152_qh2_j7` (s2) | V61q's encoder frozen + 7-step lcs_only refits of both heads | W150all | 5 | _tol50b 10/16, strict 4/16 (`cmp/v12_152/e2e_V62j/summarize.out, strict_V62j.md`) | V12-152 |
+| V62k | `v12_152/L152_qh1_j7` (s1) + `v12_152/L152_anc1e-2` (s2) | stage-2 head = stage-1 refit + anchored delta (L2 1e-2, delta/init norm ratio 0.078) | W150all | 5 | _tol50b 7/16, strict 1/16 (`cmp/v12_152/e2e_V62k/summarize.out, strict_V62k.md`) | V12-152 |
+| V62l | `v12_152/L152_qh1_j7` (s1) + `v12_152/L152_anc1e-3` (s2) | as V62k, anchor L2 1e-3 (delta/init norm ratio 0.170) | W150all | 5 | prepped (json only), no e2e (`cmp/v12_152/chain.status`) | V12-152 |
+| V62m | `v12_152/J152_wnz` | joint gated model, warm (W152_init_anc), 60 ep lr 1e-4; 7-step loss on the LCS heads, encoder by recon + decoded-next | W150all | 5 | _tol50b 8/16 (strict 1/16; 2 starts under host load); rerun 6/16 (strict 1/16) (`cmp/v12_152/e2e_V62m/summarize.out, strict_V62m.md`) | V12-152 |
+| V62p | `v12_152/J152_wz01` | V62m + 7-step loss from enc(o_t) at 0.1 incl. the encoder gradient (from_z 0.1) | W150all | 5 | _tol50b 12/16, strict 11/16; rerun 12/16, strict 6/16; one-demo goals set2_gv_09 (done relabelled at frame 48) 15/16 (strict 12/16), set3_gv_02 0/16 (`cmp/v12_152/e2e_V62p/summarize.out, strict_V62p.md`) | V12-152 |
+| V62s | `v12_152/L152_qh1_j7` (s1) + `v12_152/L152_free_ABd` (s2) | stage-2 head = stage-1 refit with only A, B, d retrained (frozen V61q encoder) | W150all | 5 | _tol50b 9/16, strict 1/16 (`cmp/v12_152/e2e_V62s/summarize.out, strict_V62s.md`) | V12-152 |
+| V62t | `v12_152/J152_wabd` | joint, warm (V61q encoder + stage-1 refit + A,B,d delta), 7-step loss, 60 ep lr 1e-4 | W150all | 5 | _tol50b 10/16, strict 3/16 (`cmp/v12_152/e2e_V62t/summarize.out, strict_V62t.md`) | V12-152 |
+| V62u | `v12_152/J152_wabdz` | V62t + from_z 0.1 (V62p with A,B,d delta) | W150all | 5 | _tol50b 0/16, strict 0/16 (`cmp/v12_152/e2e_V62u/summarize.out, strict_V62u.md`) | V12-152 |
+| V62v | `v12_152/J152_fabd` | scratch, A,B,d like_base delta, ms 1.0 no from_z, 1-step 50 ep then K ramp 2->7, 250 ep | W150all | 5 | _tol50b 1/16, strict 1/16 (`cmp/v12_152/e2e_V62v/summarize.out, strict_V62v.md`) | V12-152 |
+| V62w | `v12_152/J152_fpz` | V62p recipe from scratch (all-matrix zero-init delta, delta L2 1e-5, from_z 0.1) | W150all | 5 | _tol50b 0/16, strict 0/16 (delta collapsed under the L2) (`cmp/v12_152/e2e_V62w/summarize.out, strict_V62w.md`) | V12-152 |
+| V62x | `v12_152/J152_fabdz` | scratch, A,B,d like_base delta, from_z 0.1 | W150all | 5 | _tol50b 5/16, strict 5/16 (`cmp/v12_152/e2e_V62x/summarize.out, strict_V62x.md`) | V12-152 |
+| V62y | `v12_152/J152_fabdz0` | V62x without the delta L2 | W150all | 5 | _tol50b 3/16, strict 1/16 (seated 16/16) (`cmp/v12_152/e2e_V62y/summarize.out, strict_V62y.md`) | V12-152 |
+| V62z | `v12_152/J152_fpz0` | V62w without the delta L2 (scratch, all-matrix zero-init delta, ms ramp, from_z 0.1) | W150all | 5 | _tol50b 2/16, strict 2/16 (`cmp/v12_152/e2e_V62z/summarize.out, strict_V62z.md`) | V12-152 |
+| V63a | `v12_152/J152_fpz0a` | V62z recipe + anchor (alpha 0.5): belt points [xyz, alpha x along-belt distance g from the Franka tip] in encoder, decoder and Chamfer | W150all | 5 | e2e postponed by the user (anchor must first predict small-pulley belt motion); e2e stage-2 k0 xyz 2.96 mm (`cmp/v12_152/chain.status, logs/bme_fold_scratch_e2e.log`) | V12-152 |
+| V63b | `v12_152/J152_wz01a` | V62p recipe (warm) + anchor alpha 0.5 | W150all | 5 | e2e postponed; refit one_step 5.57 / h7 12.37 / recon 3.51 mm (`cmp/v12_152/chain.status, logs/bme_fold_warm_e2e.log`) | V12-152 |
+| V63c | `v12_152/J152_fpz0r` | anchor 0.5 + ring decoder (68 ordered nodes, node 0 = anchor) | W150all | 5 | stopped: observed g took the long way round in 15-26 % of frames; restarted with the fold (V63f) (`cmp/v12_152/chain.status`) | V12-152 |
+| V63d | `v12_152/J152_wz01r` | V62p recipe + anchor 0.5 + ring 68 | W150all | 5 | stopped with V63c (restarted as V63g) (`cmp/v12_152/chain.status`) | V12-152 |
+| V63e | `v12_152/J152_fpz0af` | V63a + fold 0.645 (g > L/2 -> L - g), free points | W150all | 5 | e2e stage-2 k0 xyz 2.92 mm (V62z 2.30) (`cmp/v12_152/logs/bme_fold_scratch_e2e.log`) | V12-152 |
+| V63f | `v12_152/J152_fpz0rf` | ring 68 + fold, V62z recipe | W150all | 5 | e2e stage-2 k0 xyz 7.05 mm (`cmp/v12_152/logs/bme_fold_scratch_e2e.log`) | V12-152 |
+| V63g | `v12_152/J152_wz01rf` | ring 68 + fold, V62p recipe (warm, fresh ring layer, 30 AE-only epochs) | W150all | 5 | e2e stage-2 k0 xyz 7.05 mm; refit one_step 26.2 mm (`cmp/v12_152/logs/bme_fold_warm_e2e.log`) | V12-152 |
+| V63h | `v12_152/J152_fpz0rn` | ablation: ring 68 + fold, alpha 0.001 (g ~ invisible) | W150all | 5 | _tol50b 0/16, strict 0/16 (seated 6/16); e2e stage-2 k0 xyzgt 4.14 mm (`cmp/v12_152/e2e_V63h/summarize.out, strict_V63h.md, logs/bme_ablate_e2e.log`) | V12-152 |
+| V63i | `v12_152/J152_fpz0r1` | ablation: alpha 1.0 | W150all | 5 | e2e stage-2 k0 xyzgt 16.00 mm (`cmp/v12_152/logs/bme_ablate_e2e.log`) | V12-152 |
+| V63j | `v12_152/J152_fpz0r05` | alpha sweep: ring 68 + fold, alpha 0.05 (best offline) | W150all | 5 | _tol50b 7/16, strict 4/16 (seated 16/16); e2e stage-2 k0 xyzgt 3.77 mm (`cmp/v12_152/e2e_V63j/summarize.out, strict_V63j.md, logs/bme_sweep_e2e.log`) | V12-152 |
+| V63k | `v12_152/J152_fpz0r15` | alpha 0.15 | W150all | 5 | e2e stage-2 k0 xyzgt 4.06 mm; no e2e (`cmp/v12_152/logs/bme_sweep_e2e.log`) | V12-152 |
+| V63l | `v12_152/J152_fpz0rn6` | V63h (alpha 0.001) seed 6 | W150all | 6 | e2e stage-2 k0 xyzgt 5.27 mm; no e2e (`cmp/v12_152/logs/bme_sweep_e2e.log`) | V12-152 |
+| V63m | `v12_152/J152_fpz0r05s6` | V63j seed 6 | W150all | 6 | collapsed offline (e2e stage-2 k0 xyzgt 9.50 mm vs V63j 3.77); e2e cancelled (`cmp/v12_152/logs/bme_seeds_e2e.log`) | V12-152 |
+| V63n | `v12_152/J152_fpz0r05s7` | V63j seed 7 | W150all | 7 | collapsed offline (xyzgt 11.91 mm); e2e cancelled (`cmp/v12_152/logs/bme_seeds_e2e.log`) | V12-152 |
+
+Best so far (2026-11-05): single model **V62p** `_tol50b` 12/16, strict 11/16 (rerun 12/16, strict
+6/16; `cmp/v12_152/strict_V62p.md`, `strict_V62p_r2.md`); two-model chain V45c → V58c_ch 15/20
+(default grip, `cmp/v12_127/e2e_V58c_ch/summarize.out`). V12-113's L28_s5 and L24_s4 and V12-131's
+G1_L24_s5 (killed at the respec) were trained but never given an ID.
+
 ## 3. Closed-loop evaluation index
 
 Every closed-loop run folder under `data/lcs/mpc_eval/` plus the E3 bounds runs, the E4
@@ -642,6 +798,12 @@ Fixed 2026-09-30: the empty `mpc_eval/20260924-202837-evalv2-v2full-set3` was de
 re-run is `…-203612`); `mpc_eval/20260924-234527-flateval-learned-set1/index.json` had 0
 episodes and was rebuilt from the npz (outcomes only; original kept as `index.json.orig`). `mpc_eval/20260929-v5-infonce/t5a/yaw/urtip6_high_yawp15.crash139`
 is a set-aside crash (re-run exit 0).
+
+From V12-90 on, closed-loop runs live in `data/lcs/realfirst/cmp/v12_<NN>/` (V12-95..105 in
+`cmp/encoder_study/sim<NN>_<model>/`), one folder per eval arm with `summarize.out` /
+`hard_suite.md` (and `strict*.md` from V12-150 on). They do not fit the label format above (two
+stages, chains of two models); they are indexed per run in the Run index of
+`docs/realfirst-campaign.md` and per model in §2.
 
 ## 4. Offline-only evaluations
 

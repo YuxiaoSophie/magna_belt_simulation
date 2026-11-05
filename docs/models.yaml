@@ -2,7 +2,7 @@
 # Kept in docs/ because data/ is gitignored. Numbers are copied from existing tables only;
 # each result carries its source path. BL = the waypoint baseline controller.
 schema_version: 1
-updated: '2026-10-02'
+updated: '2026-11-05'
 doc: docs/models.md
 scheme:
   model_id: V<campaign>[letter]; campaign = lcs_learning outputs/sim_belt_v<N>_<date>/ (V1 = sim_belt_ablation_20260924)
@@ -2783,6 +2783,3115 @@ models:
       box_trans_rot_gm: 0.21 / 0.20
       source: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_57/iter1/refit/r1_joint/refit_report.json
     closed_loop: null
+# V49..V63 (V12-94..V12-152; docs/models.md section 2, 'Stage-2, whole-run and per-stage models'). offline = the
+# training run's refit_report.json (_s1 / _s2 = the run behind each stage's deploy; multi-head runs report all held-out rows);
+# closed_loop = copied text, suites as in docs/models.md section 1. V61p and V62a were used twice: ids V61p_V12_131 etc.
+- id: V49a
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_94/s2a544/S2A544_s4
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_94/s2a544/S2A544_s4/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_94/s2a544/S2A544_s4/ckpt/2026-10-19/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V49a/deploy_v17a
+  date: '2026-10-19'
+  parent: null
+  change: 'first stage-2 (Franka-only) LCS: V45c recipe (joint recon + decoded-next + LCS, latent 16, N 544 Chamfer, 300 ep) on scripted D10L walks'
+  flags:
+    epochs: '300'
+    latent_dim: '16'
+    seed: '4'
+  data: 'S2a (V12-93 prod1, 80 scripted walks)'
+  seed: 4
+  run: V12-94..97
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.59 / 2.17 / 1.55
+      rho_A: 1.0099
+      B_fro_w: 102.68
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_94/s2a544/S2A544_s4/refit_report.json'
+    closed_loop:
+      summary: 'V12-95 0/20, V12-96 tilt limit 3/20, V12-97 ffg29 3/20; scripted 13/20'
+      source: 'data/lcs/realfirst/cmp/encoder_study/sim95_V49/hard_suite.md, sim96_V49/hard_suite.md, sim97_V49/final_report.md'
+- id: V49b
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_94/s2a544/S2A544_s6
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_94/s2a544/S2A544_s6/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_94/s2a544/S2A544_s6/ckpt/2026-10-19/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V49b/deploy_v17b
+  date: '2026-10-19'
+  parent: null
+  change: 'first stage-2 (Franka-only) LCS: V45c recipe (joint recon + decoded-next + LCS, latent 16, N 544 Chamfer, 300 ep) on scripted D10L walks'
+  flags:
+    epochs: '300'
+    latent_dim: '16'
+    seed: '6'
+  data: 'S2a (V12-93 prod1, 80 scripted walks)'
+  seed: 6
+  run: V12-94..97
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.57 / 2.82 / 1.53
+      rho_A: 1.0183
+      B_fro_w: 114.73
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_94/s2a544/S2A544_s6/refit_report.json'
+    closed_loop:
+      summary: 'V12-95 2/20, V12-96 4/20, V12-97 ffg 6/20; scripted 13/20'
+      source: 'data/lcs/realfirst/cmp/encoder_study/sim95_V49/hard_suite.md, sim96_V49/hard_suite.md, sim97_V49/final_report.md'
+- id: V49c
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_94/s2a544/S2A544_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_94/s2a544/S2A544_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_94/s2a544/S2A544_s5/ckpt/2026-10-19/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V49c/deploy_v17c
+  date: '2026-10-19'
+  parent: null
+  change: 'first stage-2 (Franka-only) LCS: V45c recipe (joint recon + decoded-next + LCS, latent 16, N 544 Chamfer, 300 ep) on scripted D10L walks'
+  flags:
+    epochs: '300'
+    latent_dim: '16'
+    seed: '5'
+  data: 'S2a (V12-93 prod1, 80 scripted walks)'
+  seed: 5
+  run: V12-94..97
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.43 / 1.87 / 1.39
+      rho_A: 1.1314
+      B_fro_w: 157.36
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_94/s2a544/S2A544_s5/refit_report.json'
+    closed_loop:
+      summary: 'V12-95 0/20, V12-96 0/20 (breaks the tilt limit in 13/20); scripted 13/20'
+      source: 'data/lcs/realfirst/cmp/encoder_study/sim95_V49/hard_suite.md, sim96_V49/hard_suite.md, sim97_V49/final_report.md'
+- id: V50a
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2B_s4
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2B_s4/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2B_s4/ckpt/2026-10-20/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V50a/deploy_v18a
+  date: '2026-10-20'
+  parent: null
+  change: 'V49 recipe from scratch on S2b (S2a + cut V12-95/96 MPC episodes, MPC rows train-only)'
+  flags:
+    epochs: '300'
+    latent_dim: '16'
+    seed: '4'
+  data: 'S2b'
+  seed: 4
+  run: V12-98
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.50 / 2.36 / 1.44
+      rho_A: 1.0511
+      B_fro_w: 89.77
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2B_s4/refit_report.json'
+    closed_loop:
+      summary: 'V12-97 ffg29 8/20; V12-99 on-policy source (b03-b05 18/40)'
+      source: 'data/lcs/realfirst/cmp/encoder_study/sim97_V49/final_report.md'
+- id: V50b
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2B_s6
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2B_s6/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2B_s6/ckpt/2026-10-20/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V50b/deploy_v18b
+  date: '2026-10-20'
+  parent: null
+  change: 'V49 recipe from scratch on S2b (S2a + cut V12-95/96 MPC episodes, MPC rows train-only)'
+  flags:
+    epochs: '300'
+    latent_dim: '16'
+    seed: '6'
+  data: 'S2b'
+  seed: 6
+  run: V12-98
+  status: 'candidate'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.51 / 3.15 / 1.46
+      rho_A: 1.0164
+      B_fro_w: 105.33
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2B_s6/refit_report.json'
+    closed_loop:
+      summary: 'V12-97 ffg29 11/20; V12-103 ws1 11/20; V12-104/105 ws1_du 9/20 + 9/20 = 18/40 (picked); split-scene chain after V45c 12/20 (V12-114); stiff belt 0/10 (V12-122)'
+      source: 'data/lcs/realfirst/cmp/encoder_study/sim97_V49/final_report.md, sim103_V50b, sim104_V50b, sim105_V50b/hard_suite.md, cmp/v12_114/summary.md'
+- id: V50c
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2B_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2B_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2B_s5/ckpt/2026-10-20/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V50c/deploy_v18c
+  date: '2026-10-20'
+  parent: null
+  change: 'V49 recipe from scratch on S2b (S2a + cut V12-95/96 MPC episodes, MPC rows train-only)'
+  flags:
+    epochs: '300'
+    latent_dim: '16'
+    seed: '5'
+  data: 'S2b'
+  seed: 5
+  run: V12-98
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.41 / 1.95 / 1.37
+      rho_A: 1.0122
+      B_fro_w: 95.74
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2B_s5/refit_report.json'
+    closed_loop:
+      summary: 'not run in closed loop; MPC-test h7 3.16-3.29 mm (V50a-c)'
+      source: 'data/lcs/realfirst/cmp/v12_100/acc_v50.json'
+- id: V50d
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2BMAFT_s4
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2BMAFT_s4/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2BMAFT_s4/ckpt/2026-10-20/no_wandb/checkpoint_epoch_0040.pt
+  step: 40
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V50d/deploy_v18d
+  date: '2026-10-20'
+  parent: V50a
+  change: 'V50a-c + 40-epoch warm fine-tune with the decoded LCS rollout recon k 1..7 (belt_ms K 7)'
+  flags:
+    epochs: '40'
+    latent_dim: '16'
+    seed: '4'
+  data: 'S2b'
+  seed: 4
+  run: V12-98
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.50 / 1.91 / 1.46
+      rho_A: 1.0354
+      B_fro_w: 95.90
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2BMAFT_s4/refit_report.json'
+    closed_loop:
+      summary: 'V50d ffg29 0/20 (V12-97); V50e/f not run in closed loop'
+      source: 'data/lcs/realfirst/cmp/encoder_study/sim97_V49/final_report.md, cmp/v12_98/acc_final.json'
+- id: V50e
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2BMAFT_s6
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2BMAFT_s6/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2BMAFT_s6/ckpt/2026-10-20/no_wandb/checkpoint_epoch_0040.pt
+  step: 40
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V50e/deploy_v18e
+  date: '2026-10-20'
+  parent: V50b
+  change: 'V50a-c + 40-epoch warm fine-tune with the decoded LCS rollout recon k 1..7 (belt_ms K 7)'
+  flags:
+    epochs: '40'
+    latent_dim: '16'
+    seed: '6'
+  data: 'S2b'
+  seed: 6
+  run: V12-98
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.51 / 1.93 / 1.48
+      rho_A: 1.0288
+      B_fro_w: 110.71
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2BMAFT_s6/refit_report.json'
+    closed_loop:
+      summary: 'not run in closed loop (MPC-test h7 2.61-2.68 mm with its own decoder)'
+      source: 'data/lcs/realfirst/cmp/encoder_study/sim97_V49/final_report.md, cmp/v12_98/acc_final.json'
+- id: V50f
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2BMAFT_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2BMAFT_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2BMAFT_s5/ckpt/2026-10-20/no_wandb/checkpoint_epoch_0040.pt
+  step: 40
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V50f/deploy_v18f
+  date: '2026-10-20'
+  parent: V50c
+  change: 'V50a-c + 40-epoch warm fine-tune with the decoded LCS rollout recon k 1..7 (belt_ms K 7)'
+  flags:
+    epochs: '40'
+    latent_dim: '16'
+    seed: '5'
+  data: 'S2b'
+  seed: 5
+  run: V12-98
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.41 / 1.66 / 1.38
+      rho_A: 1.0266
+      B_fro_w: 104.01
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_98/S2BMAFT_s5/refit_report.json'
+    closed_loop:
+      summary: 'not run in closed loop (MPC-test h7 2.61-2.68 mm with its own decoder)'
+      source: 'data/lcs/realfirst/cmp/encoder_study/sim97_V49/final_report.md, cmp/v12_98/acc_final.json'
+- id: V51a
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_100/S2CT_s4
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_100/S2CT_s4/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_100/S2CT_s4/ckpt/2026-10-20/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V51a/deploy_v19a
+  date: '2026-10-20'
+  parent: null
+  change: 'V50a-c recipe on S2c_train (S2b + V12-99 on-policy b01/b02)'
+  flags:
+    epochs: '300'
+    latent_dim: '16'
+    seed: '4'
+  data: 'S2c_train'
+  seed: 4
+  run: V12-100
+  status: 'offline only'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.48 / 2.33 / 1.42
+      rho_A: 1.0411
+      B_fro_w: 96.15
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_100/S2CT_s4/refit_report.json'
+    closed_loop:
+      summary: 'MPC leave-starts-out h7 3.04 / 3.10 / 3.18 mm (V51a/b/c) vs V50 3.16 / 3.18 / 3.29; no suite'
+      source: 'data/lcs/realfirst/cmp/v12_100/acc_v51.json, handoffs/archive/RUN-STATE-2026-10-16-stage2.md'
+- id: V51b
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_100/S2CT_s6
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_100/S2CT_s6/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_100/S2CT_s6/ckpt/2026-10-20/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V51b/deploy_v19b
+  date: '2026-10-20'
+  parent: null
+  change: 'V50a-c recipe on S2c_train (S2b + V12-99 on-policy b01/b02)'
+  flags:
+    epochs: '300'
+    latent_dim: '16'
+    seed: '6'
+  data: 'S2c_train'
+  seed: 6
+  run: V12-100
+  status: 'offline only'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.50 / 2.99 / 1.46
+      rho_A: 1.0109
+      B_fro_w: 100.95
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_100/S2CT_s6/refit_report.json'
+    closed_loop:
+      summary: 'MPC leave-starts-out h7 3.04 / 3.10 / 3.18 mm (V51a/b/c) vs V50 3.16 / 3.18 / 3.29; no suite'
+      source: 'data/lcs/realfirst/cmp/v12_100/acc_v51.json, handoffs/archive/RUN-STATE-2026-10-16-stage2.md'
+- id: V51c
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_100/S2CT_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_100/S2CT_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_100/S2CT_s5/ckpt/2026-10-20/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V51c/deploy_v19c
+  date: '2026-10-20'
+  parent: null
+  change: 'V50a-c recipe on S2c_train (S2b + V12-99 on-policy b01/b02)'
+  flags:
+    epochs: '300'
+    latent_dim: '16'
+    seed: '5'
+  data: 'S2c_train'
+  seed: 5
+  run: V12-100
+  status: 'offline only'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.39 / 2.03 / 1.34
+      rho_A: 1.0119
+      B_fro_w: 110.89
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_100/S2CT_s5/refit_report.json'
+    closed_loop:
+      summary: 'MPC leave-starts-out h7 3.04 / 3.10 / 3.18 mm (V51a/b/c) vs V50 3.16 / 3.18 / 3.29; no suite'
+      source: 'data/lcs/realfirst/cmp/v12_100/acc_v51.json, handoffs/archive/RUN-STATE-2026-10-16-stage2.md'
+- id: V52a
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_107/WR_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_107/WR_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_107/WR_s5/ckpt/2026-10-20/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V52a/deploy_v20a
+  - data/lcs/realfirst/cmp/encoder_study/sim/V52a_s2/deploy_v20a
+  date: '2026-10-21'
+  parent: null
+  change: 'whole-run LCS (stage 1 + stage 2) with the V50b recipe (S2B)'
+  flags:
+    epochs: '300'
+    latent_dim: '16'
+    seed: '5'
+  data: 'WR (T1ga_f_tr + S2c minus test files)'
+  seed: 5
+  run: V12-107
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.90 / 3.72 / 1.84
+      rho_A: 1.0211
+      B_fro_w: 185.10
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_107/WR_s5/refit_report.json'
+    closed_loop:
+      summary: 'full suite in S (wr625b15): seated 1/10, both 0/10 (V12-110)'
+      source: 'data/lcs/realfirst/cmp/v12_110/suite/summarize.out'
+- id: V52b
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_107/WR_s4
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_107/WR_s4/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_107/WR_s4/ckpt/2026-10-20/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports: []
+  date: '2026-10-21'
+  parent: null
+  change: 'as V52a'
+  flags:
+    epochs: '300'
+    latent_dim: '16'
+    seed: '4'
+  data: 'WR'
+  seed: 4
+  run: V12-107
+  status: 'not evaluated'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.87 / 3.18 / 1.81
+      rho_A: 1.0222
+      B_fro_w: 187.88
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_107/WR_s4/refit_report.json'
+    closed_loop:
+      summary: 'decfit only; not prepped (pick was V52c, V52a)'
+      source: 'data/lcs/realfirst/cmp/v12_107/pick.json'
+- id: V52c
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_107/WRW_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_107/WRW_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_107/WRW_s5/ckpt/2026-10-20/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V52c/deploy_v20c
+  - data/lcs/realfirst/cmp/encoder_study/sim/V52c_s2/deploy_v20c
+  date: '2026-10-21'
+  parent: null
+  change: 'as V52a, stage-1 rows weight 2'
+  flags:
+    epochs: '300'
+    latent_dim: '16'
+    seed: '5'
+  data: 'WR_w'
+  seed: 5
+  run: V12-107
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.98 / 4.18 / 1.92
+      rho_A: 1.0147
+      B_fro_w: 177.09
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_107/WRW_s5/refit_report.json'
+    closed_loop:
+      summary: 'full suite in S: seated 0/10 (V12-110); split-scene whole 3/20 (stage 1 8/20; V12-114)'
+      source: 'data/lcs/realfirst/cmp/v12_110/suite/summarize.out, cmp/v12_114/summary.md'
+- id: V53a
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/WR2WFT_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/WR2WFT_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/WR2WFT_s5/ckpt/2026-10-21/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports: []
+  date: '2026-10-21'
+  parent: V52c
+  change: 'V52c warm fine-tune, 60 ep lr 3e-4, in-scene rows weight 3'
+  flags:
+    epochs: '60'
+    latent_dim: '16'
+    seed: '5'
+  data: 'WR2_w'
+  seed: 5
+  run: V12-111
+  status: 'abandoned'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.91 / 4.47 / 1.84
+      rho_A: 1.0173
+      B_fro_w: 161.15
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/WR2WFT_s5/refit_report.json'
+    closed_loop:
+      summary: 'decfit killed: stage-1 latent no better than V52; not deployed'
+      source: 'data/lcs/realfirst/cmp/v12_111/chain.status'
+- id: V53b
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/WR2FT_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/WR2FT_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/WR2FT_s5/ckpt/2026-10-21/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports: []
+  date: '2026-10-21'
+  parent: V52c
+  change: 'V52c warm fine-tune, 60 ep lr 3e-4'
+  flags:
+    epochs: '60'
+    latent_dim: '16'
+    seed: '5'
+  data: 'WR2'
+  seed: 5
+  run: V12-111
+  status: 'abandoned'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.92 / 4.38 / 1.83
+      rho_A: 1.0135
+      B_fro_w: 167.34
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/WR2FT_s5/refit_report.json'
+    closed_loop:
+      summary: 'decfit killed (as V53a); not deployed'
+      source: 'data/lcs/realfirst/cmp/v12_111/chain.status'
+- id: V54a
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/S1WFT_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/S1WFT_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/S1WFT_s5/ckpt/2026-10-21/no_wandb/checkpoint_epoch_0080.pt
+  step: 80
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V54a/deploy_v22a
+  - data/lcs/realfirst/cmp/encoder_study/sim/V54a_s2/deploy_v22a
+  date: '2026-10-21'
+  parent: V52c
+  change: 'V52c warm fine-tune, 80 ep lr 3e-4, stage-1 + in-scene rows weight 3'
+  flags:
+    epochs: '80'
+    latent_dim: '16'
+    seed: '5'
+  data: 'WR2_s1w'
+  seed: 5
+  run: V12-111
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.96 / 4.34 / 1.90
+      rho_A: 1.0196
+      B_fro_w: 165.86
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/S1WFT_s5/refit_report.json'
+    closed_loop:
+      summary: 'stage 1 in S 2/9'
+      source: 'data/lcs/realfirst/cmp/v12_111/s1_S/hard_suite.md'
+- id: V54b
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/S1WV45_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/S1WV45_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/S1WV45_s5/ckpt/2026-10-21/no_wandb/checkpoint_epoch_0080.pt
+  step: 80
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V54b/deploy_v22b
+  date: '2026-10-21'
+  parent: V45c
+  change: 'V45c warm fine-tune, 80 ep lr 3e-4, stage-1 + in-scene rows weight 3'
+  flags:
+    epochs: '80'
+    latent_dim: '16'
+    seed: '5'
+  data: 'WR2_s1w'
+  seed: 5
+  run: V12-111
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 2.08 / 3.74 / 2.02
+      rho_A: 1.0325
+      B_fro_w: 169.53
+      separation_auc: 0.9375
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_111/S1WV45_s5/refit_report.json'
+    closed_loop:
+      summary: 'stage 1 in S 1/10, in the stage-1 scene 3/20'
+      source: 'data/lcs/realfirst/cmp/v12_111/s1_S/hard_suite.md, s1_scene1/hard_suite.md'
+- id: V55a
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_113/L32_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_113/L32_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_113/L32_s5/ckpt/2026-10-21/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V55a/deploy_v23a
+  - data/lcs/realfirst/cmp/encoder_study/sim/V55a_s2/deploy_v23a
+  date: '2026-10-21'
+  parent: null
+  change: 'whole-run LCS, latent 32, V52 recipe, 300 ep fresh'
+  flags:
+    epochs: '300'
+    latent_dim: '32'
+    seed: '5'
+  data: 'WR_s1w (stage-1 rows weight 3)'
+  seed: 5
+  run: V12-113
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.96 / 4.06 / 1.88
+      rho_A: 1.0204
+      B_fro_w: 289.20
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_113/L32_s5/refit_report.json'
+    closed_loop:
+      summary: 'stage 1 (stage-1 scene) 2/10'
+      source: 'data/lcs/realfirst/cmp/v12_113/s1_scene1/hard_suite.md'
+- id: V55b
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_113/L24_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_113/L24_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_113/L24_s5/ckpt/2026-10-21/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V55b/deploy_v23b
+  - data/lcs/realfirst/cmp/encoder_study/sim/V55b_s2/deploy_v23b
+  date: '2026-10-21'
+  parent: null
+  change: 'as V55a, latent 24'
+  flags:
+    epochs: '300'
+    latent_dim: '24'
+    seed: '5'
+  data: 'WR_s1w'
+  seed: 5
+  run: V12-113
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 2.08 / 3.79 / 2.01
+      rho_A: 1.0144
+      B_fro_w: 250.93
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_113/L24_s5/refit_report.json'
+    closed_loop:
+      summary: 'stage 1 (stage-1 scene) 8/10; full in S seated 6/10, both 0/10; V12-118 seated 13/20, both 0/20'
+      source: 'data/lcs/realfirst/cmp/v12_113/s1_scene1/hard_suite.md, e2e_S/summarize.out, cmp/v12_118/eval/summarize.out'
+- id: V56
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_118/WR5FT_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_118/WR5FT_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_118/WR5FT_s5/ckpt/2026-10-21/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V56/deploy_v24a
+  - data/lcs/realfirst/cmp/encoder_study/sim/V56_s2/deploy_v24a
+  date: '2026-10-21'
+  parent: V55b
+  change: 'V55b warm fine-tune, 60 ep lr 3e-4, on V55b DART whole-run chains in S'
+  flags:
+    epochs: '60'
+    latent_dim: '24'
+    seed: '5'
+  data: 'WR5_w'
+  seed: 5
+  run: V12-118
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.76 / 3.70 / 1.70
+      rho_A: 1.0126
+      B_fro_w: 225.75
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_118/WR5FT_s5/refit_report.json'
+    closed_loop:
+      summary: 'full in S seated 5/20, both 0/20 (V55b 13/20, 0/20)'
+      source: 'data/lcs/realfirst/cmp/v12_118/eval/summarize.out'
+- id: V57
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WP_L24_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WP_L24_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WP_L24_s5/ckpt/2026-10-21/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V57/deploy_v25a
+  - data/lcs/realfirst/cmp/encoder_study/sim/V57_s2/deploy_v25a
+  date: '2026-10-22'
+  parent: null
+  change: 'whole-run LCS, fresh latent 24 (V55b recipe); stage-1 deploy from the in-scene demos'
+  flags:
+    epochs: '300'
+    latent_dim: '24'
+    seed: '5'
+  data: 'WP (wr_pin640b1 chains + MILES + scripted stage-1 demos)'
+  seed: 5
+  run: V12-123
+  status: 'not evaluated'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.89 / 3.21 / 1.83
+      rho_A: 1.2241
+      B_fro_w: 303.28
+      separation_auc: 0.959703947368421
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WP_L24_s5/refit_report.json'
+    closed_loop:
+      summary: 'deploy variant for the waypoint-source check only (V57t picked)'
+      source: 'data/lcs/realfirst/cmp/v12_123/wp_check.json'
+- id: V57s
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WP_L24_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WP_L24_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WP_L24_s5/ckpt/2026-10-21/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V57s/deploy_v25s
+  date: '2026-10-22'
+  parent: null
+  change: 'V57 checkpoint, stage-1 deploy from the successful in-scene demos only'
+  flags:
+    epochs: '300'
+    latent_dim: '24'
+    seed: '5'
+  data: 'WP'
+  seed: 5
+  run: V12-123
+  status: 'not evaluated'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.89 / 3.21 / 1.83
+      rho_A: 1.2241
+      B_fro_w: 303.28
+      separation_auc: 0.959703947368421
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WP_L24_s5/refit_report.json'
+    closed_loop:
+      summary: 'deploy variant (waypoint-source check)'
+      source: 'data/lcs/realfirst/cmp/v12_123/wp_check.json'
+- id: V57t
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WP_L24_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WP_L24_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WP_L24_s5/ckpt/2026-10-21/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V57t/deploy_v25t
+  - data/lcs/realfirst/cmp/encoder_study/sim/V57t_s2/deploy_v25t
+  date: '2026-10-22'
+  parent: null
+  change: 'V57 checkpoint, stage-1 deploy on T1ga_f_tr (T1 rules)'
+  flags:
+    epochs: '300'
+    latent_dim: '24'
+    seed: '5'
+  data: 'WP'
+  seed: 5
+  run: V12-123
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.89 / 3.21 / 1.83
+      rho_A: 1.2241
+      B_fro_w: 303.28
+      separation_auc: 0.959703947368421
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WP_L24_s5/refit_report.json'
+    closed_loop:
+      summary: 'full 20: seated 20/20, both 0/20 (stage 2 large off under x14); scripted ref 17/20'
+      source: 'data/lcs/realfirst/cmp/v12_123/eval_V57t/summarize.out'
+- id: V57b
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WPb_FT_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WPb_FT_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WPb_FT_s5/ckpt/2026-10-21/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V57b/deploy_v25b
+  - data/lcs/realfirst/cmp/encoder_study/sim/V57b_s2/deploy_v25b
+  date: '2026-10-22'
+  parent: V57
+  change: 'V57 warm fine-tune, 100 ep lr 3e-4, + scripted chains d3-d6 + V57t DART runs'
+  flags:
+    epochs: '100'
+    latent_dim: '24'
+    seed: '5'
+  data: 'WPb'
+  seed: 5
+  run: V12-123
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.89 / 3.25 / 1.82
+      rho_A: 1.1733
+      B_fro_w: 282.26
+      separation_auc: 0.9825980392156862
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_123/WPb_FT_s5/refit_report.json'
+    closed_loop:
+      summary: 'full 20: seated 20/20, exit 19/20, both 0/20'
+      source: 'data/lcs/realfirst/cmp/v12_123/eval_V57b/summarize.out'
+- id: V57c
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_125/WPc_L24_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_125/WPc_L24_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_125/WPc_L24_s5/ckpt/2026-10-22/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V57c/deploy_v25c
+  - data/lcs/realfirst/cmp/encoder_study/sim/V57c_s2/deploy_v25c
+  date: '2026-10-23'
+  parent: null
+  change: 'V57 recipe fresh + stage-2 demo chains + stage-2 MILES around 3 grasp-spread demos'
+  flags:
+    epochs: '300'
+    latent_dim: '24'
+    seed: '5'
+  data: 'WPc'
+  seed: 5
+  run: V12-125
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.90 / 2.96 / 1.84
+      rho_A: 1.0171
+      B_fro_w: 289.58
+      separation_auc: 0.9644886363636364
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_125/WPc_L24_s5/refit_report.json'
+    closed_loop:
+      summary: 'full 20: seated 20/20, both 0/20; stage-2-only 0/12 (V12-126); + knot0_chain 1/24 (V12-128)'
+      source: 'data/lcs/realfirst/cmp/v12_125/eval_V57c/summarize.out, cmp/v12_128/chain.status'
+- id: V57d
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_126/WPc_L24_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_126/WPc_L24_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_126/WPc_L24_s5/ckpt/2026-10-22/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V57d/deploy_v25d
+  - data/lcs/realfirst/cmp/encoder_study/sim/V57d_s2/deploy_v25d
+  date: '2026-10-23'
+  parent: null
+  change: 'V57c with actions knot1_minus_measured (both arms)'
+  flags:
+    epochs: '300'
+    latent_dim: '24'
+    seed: '5'
+  data: 'WPc (rewritten actions)'
+  seed: 5
+  run: V12-126
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.89 / 3.30 / 1.85
+      rho_A: 1.0086
+      B_fro_w: 170.08
+      separation_auc: 0.9346590909090909
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_126/WPc_L24_s5/refit_report.json'
+    closed_loop:
+      summary: 'stage 1 0/10 seated (UR never descends); stage-2-only 0/12'
+      source: 'data/lcs/realfirst/cmp/v12_126/chain.status, handoffs/RUN-STATE-20261104-pre-demo-gui.md'
+- id: V58a
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P_L16_s6
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P_L16_s6/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P_L16_s6/ckpt/2026-10-23/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V58a_s2/deploy_v26a
+  date: '2026-10-23'
+  parent: null
+  change: 'stage-2-only LCS, fresh latent 16 (S2B recipe, 200 ep), cmd_delta'
+  flags:
+    epochs: '200'
+    latent_dim: '16'
+    seed: '6'
+  data: 'S2P (stage-2 frames: walks, MILES2, on-policy V57x/V50b; failures cut at onset)'
+  seed: 6
+  run: V12-127
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.56 / 2.13 / 1.52
+      rho_A: 1.0277
+      B_fro_w: 120.11
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P_L16_s6/refit_report.json'
+    closed_loop:
+      summary: 's2-12: V58a 0/9, V58a_ch (knot0_chain 15 mm / 5 deg) 3/12, V58a_ch10 3/12'
+      source: 'data/lcs/realfirst/cmp/v12_127/chain.status'
+- id: V58b
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2Pk_L16_s6
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2Pk_L16_s6/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2Pk_L16_s6/ckpt/2026-10-23/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V58b_s2/deploy_v26b
+  date: '2026-10-23'
+  parent: null
+  change: 'V58a with actions knot1_minus_measured'
+  flags:
+    epochs: '200'
+    latent_dim: '16'
+    seed: '6'
+  data: 'S2Pk'
+  seed: 6
+  run: V12-127
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.56 / 2.41 / 1.52
+      rho_A: 1.0807
+      B_fro_w: 144.37
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2Pk_L16_s6/refit_report.json'
+    closed_loop:
+      summary: 's2-12: 1/6, V58b_ch 0/6 (dropped after 6 starts)'
+      source: 'data/lcs/realfirst/cmp/v12_127/chain.status'
+- id: V58c
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P2_ft_a
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P2_ft_a/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P2_ft_a/ckpt/2026-10-23/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V58c_s2/deploy_v26c
+  date: '2026-10-23'
+  parent: V58a
+  change: 'DAgger round 2: V58a fine-tune 100 ep lr 3e-4 + own on-policy rows (weight 3)'
+  flags:
+    epochs: '100'
+    latent_dim: '16'
+    seed: '6'
+  data: 'S2P2'
+  seed: 6
+  run: V12-127
+  status: 'best stage-2 (two-model chain)'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.54 / 2.13 / 1.50
+      rho_A: 1.0230
+      B_fro_w: 121.89
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P2_ft_a/refit_report.json'
+    closed_loop:
+      summary: 's2-12x2: V58c_ch 16/24 (held-out 6/12); e2e after V45c 15/20 (default grip); 10/20 at 30 N (V58X, V12-136)'
+      source: 'data/lcs/realfirst/cmp/v12_127/chain.status, e2e_V58c_ch/summarize.out, cmp/v12_136/e2e_V58X/summarize.out'
+- id: V58e
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P3_ft_c
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P3_ft_c/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P3_ft_c/ckpt/2026-10-23/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V58e_s2/deploy_v26e
+  date: '2026-10-23'
+  parent: V58c
+  change: 'DAgger round 3 (V58c_ch + DART rows)'
+  flags:
+    epochs: '100'
+    latent_dim: '16'
+    seed: '6'
+  data: 'S2P3'
+  seed: 6
+  run: V12-127
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.55 / 2.16 / 1.50
+      rho_A: 1.0324
+      B_fro_w: 123.18
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P3_ft_c/refit_report.json'
+    closed_loop:
+      summary: 's2-12x2: 13/24'
+      source: 'data/lcs/realfirst/cmp/v12_127/chain.status'
+- id: V58f
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P4_ft
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P4_ft/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P4_ft/ckpt/2026-10-23/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V58f_s2/deploy_v26f
+  date: '2026-10-23'
+  parent: V58c
+  change: 'DAgger round 4 (+ 6 negative-slide / yaw grasps)'
+  flags:
+    epochs: '100'
+    latent_dim: '16'
+    seed: '6'
+  data: 'S2P4'
+  seed: 6
+  run: V12-127
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.57 / 2.07 / 1.51
+      rho_A: 1.0310
+      B_fro_w: 125.12
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_127/S2P4_ft/refit_report.json'
+    closed_loop:
+      summary: 's2-12x2: 16/24 (= V58c; set2_gv_06 0/6)'
+      source: 'data/lcs/realfirst/cmp/v12_127/chain.status'
+- id: V59a
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W1_L16_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W1_L16_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W1_L16_s5/ckpt/2026-10-23/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V59a/deploy_v27a
+  - data/lcs/realfirst/cmp/encoder_study/sim/V59a_s2/deploy_v27a
+  date: '2026-10-24'
+  parent: null
+  change: 'whole-run LCS latent 16 (V57 recipe, 200 ep), no UR-exit frames'
+  flags:
+    epochs: '200'
+    latent_dim: '16'
+    seed: '5'
+  data: 'W1'
+  seed: 5
+  run: V12-128
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.78 / 2.77 / 1.76
+      rho_A: 1.0123
+      B_fro_w: 244.61
+      separation_auc: 0.8
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W1_L16_s5/refit_report.json'
+    closed_loop:
+      summary: 's2-12x2 V59a_ch 4/24; e2e seat check seated 0/10'
+      source: 'data/lcs/realfirst/cmp/v12_128/chain.status, e2e_r0_V59a/summarize.out'
+- id: V59b
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W1_L24_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W1_L24_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W1_L24_s5/ckpt/2026-10-23/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V59b/deploy_v27b
+  - data/lcs/realfirst/cmp/encoder_study/sim/V59b_s2/deploy_v27b
+  date: '2026-10-24'
+  parent: null
+  change: 'as V59a, latent 24'
+  flags:
+    epochs: '200'
+    latent_dim: '24'
+    seed: '5'
+  data: 'W1'
+  seed: 5
+  run: V12-128
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.68 / 2.83 / 1.62
+      rho_A: 1.0128
+      B_fro_w: 301.26
+      separation_auc: 0.9
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W1_L24_s5/refit_report.json'
+    closed_loop:
+      summary: 's2-12x2 1/24; e2e seat check seated 8/9, both 3/9'
+      source: 'data/lcs/realfirst/cmp/v12_128/chain.status, e2e_r0_V59b/summarize.out'
+- id: V59c
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W2_ft_a
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W2_ft_a/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W2_ft_a/ckpt/2026-10-24/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V59c/deploy_v27c
+  - data/lcs/realfirst/cmp/encoder_study/sim/V59c_s2/deploy_v27c
+  date: '2026-10-24'
+  parent: V59a
+  change: 'DAgger round 1 (stage-2 DART rows weight 3), 100 ep lr 3e-4'
+  flags:
+    epochs: '100'
+    latent_dim: '16'
+    seed: '5'
+  data: 'W2'
+  seed: 5
+  run: V12-128
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.78 / 2.65 / 1.74
+      rho_A: 1.0099
+      B_fro_w: 242.60
+      separation_auc: 0.9
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W2_ft_a/refit_report.json'
+    closed_loop:
+      summary: 's2-12x2 5/24'
+      source: 'data/lcs/realfirst/cmp/v12_128/chain.status'
+- id: V59d
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W2_ft_b
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W2_ft_b/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W2_ft_b/ckpt/2026-10-24/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V59d/deploy_v27d
+  - data/lcs/realfirst/cmp/encoder_study/sim/V59d_s2/deploy_v27d
+  date: '2026-10-24'
+  parent: V59b
+  change: 'DAgger round 1'
+  flags:
+    epochs: '100'
+    latent_dim: '24'
+    seed: '5'
+  data: 'W2'
+  seed: 5
+  run: V12-128
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.67 / 2.67 / 1.61
+      rho_A: 1.0149
+      B_fro_w: 292.33
+      separation_auc: 0.9
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W2_ft_b/refit_report.json'
+    closed_loop:
+      summary: 's2-12x2 0/24'
+      source: 'data/lcs/realfirst/cmp/v12_128/chain.status'
+- id: V59e
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W3_ft_a
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W3_ft_a/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W3_ft_a/ckpt/2026-10-24/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V59e/deploy_v27e
+  - data/lcs/realfirst/cmp/encoder_study/sim/V59e_s2/deploy_v27e
+  date: '2026-10-24'
+  parent: V59c
+  change: 'DAgger round 2 (latent 16)'
+  flags:
+    epochs: '100'
+    latent_dim: '16'
+    seed: '5'
+  data: 'W3'
+  seed: 5
+  run: V12-128
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.77 / 2.69 / 1.73
+      rho_A: 1.0128
+      B_fro_w: 247.12
+      separation_auc: 0.9
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W3_ft_a/refit_report.json'
+    closed_loop:
+      summary: 's2-12x2 10/24; e2e 0/20 (stage 1 never seats)'
+      source: 'data/lcs/realfirst/cmp/v12_128/chain.status, e2e_final_V59e/summarize.out'
+- id: V59f
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W3_ft_b
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W3_ft_b/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W3_ft_b/ckpt/2026-10-24/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V59f/deploy_v27f
+  - data/lcs/realfirst/cmp/encoder_study/sim/V59f_s2/deploy_v27f
+  date: '2026-10-24'
+  parent: V59d
+  change: 'DAgger round 2 (latent 24)'
+  flags:
+    epochs: '100'
+    latent_dim: '24'
+    seed: '5'
+  data: 'W3'
+  seed: 5
+  run: V12-128
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.67 / 2.71 / 1.61
+      rho_A: 1.0184
+      B_fro_w: 294.00
+      separation_auc: 0.9
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_128/W3_ft_b/refit_report.json'
+    closed_loop:
+      summary: 's2-12x2 2/24; e2e 2/20 (seated 16/20)'
+      source: 'data/lcs/realfirst/cmp/v12_128/chain.status, e2e_final_V59f/summarize.out'
+- id: V60a
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B1_h1
+  config: null
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B1_h1/checkpoint_lcs_only.pt
+  checkpoint_s2: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B1_h2/checkpoint_lcs_only.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V60a/deploy_v28a
+  - data/lcs/realfirst/cmp/encoder_study/sim/V60a_s2/deploy_v28a
+  date: '2026-10-26'
+  parent: V59e
+  change: 'design B: V59e encoder/decoder frozen + stage-1 / stage-2 LCS heads (lcs_only, 100 ep)'
+  data: 'H1 / H2 (W3 split by stage)'
+  seed: 5
+  run: V12-129
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm_s1: 1.68 / 2.88 / 1.63
+      rho_A_s1: 1.0593
+      B_fro_w_s1: 302.97
+      separation_auc_s1: 0.9303128371089536
+      refit_one_step_h7_recon_mm_s2: 1.53 / 2.22 / 1.44
+      rho_A_s2: 1.0251
+      B_fro_w_s2: 278.05
+      separation_auc_s2: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B1_h1/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B1_h2/refit_report.json'
+    closed_loop:
+      summary: 's2-12x2 V60a_ch 20/24 (held-out 10/12); e2e 0/20 (seated 0/20); after V45c stage 1 (V60aX) 14/20, 8/20 at 30 N'
+      source: 'data/lcs/realfirst/cmp/v12_129/chain.status, e2e_r0_V60aX/summarize.out, cmp/v12_137/e2e_V60aX/summarize.out'
+- id: V60b
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/A3_L16_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/A3_L16_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/A3_L16_s5/ckpt/2026-10-26/no_wandb/checkpoint_epoch_0300.pt
+  step: 300
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V60b/deploy_v28b
+  - data/lcs/realfirst/cmp/encoder_study/sim/V60b_s2/deploy_v28b
+  date: '2026-10-26'
+  parent: null
+  change: 'design A: one encoder/decoder + 2 LCS heads trained jointly (--n-dyn-heads 2, fresh L16, 300 ep)'
+  flags:
+    epochs: '300'
+    latent_dim: '16'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'A3 (W3 with stage labels)'
+  seed: 5
+  run: V12-129
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.83 / 6.90 / 1.65
+      rho_A: 1.0097
+      B_fro_w: 272.37
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/A3_L16_s5/refit_report.json'
+    closed_loop:
+      summary: 's2-12x2 5/24; e2e 1/20 (seated 5/20)'
+      source: 'data/lcs/realfirst/cmp/v12_129/e2e_r0_V60b/summarize.out'
+- id: V60c
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B2_h2
+  config: null
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B2_h2/checkpoint_lcs_only.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V60c_s2/deploy_v28c
+  date: '2026-10-26'
+  parent: V45c
+  change: 'design B on V45c''s encoder: stage 1 = V45c, stage-2 head lcs_only'
+  data: 'H2'
+  seed: 5
+  run: V12-129
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 14.04 / 31.38 / 17.09
+      rho_A: 1.3451
+      B_fro_w: 257.99
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B2_h2/refit_report.json'
+    closed_loop:
+      summary: 'stage-2 recon 17.1 mm (V45c latent cannot encode stage 2); e2e at 30 N 0/20 (V12-136)'
+      source: 'data/lcs/realfirst/cmp/v12_136/e2e_V60c/summarize.out'
+- id: V60d
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/A4_ft
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/A4_ft/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/A4_ft/ckpt/2026-10-26/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V60d/deploy_v28d
+  - data/lcs/realfirst/cmp/encoder_study/sim/V60d_s2/deploy_v28d
+  date: '2026-10-26'
+  parent: V60b
+  change: 'design A DAgger round 1, 100 ep lr 3e-4'
+  flags:
+    epochs: '100'
+    latent_dim: '16'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'A4'
+  seed: 5
+  run: V12-129
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.85 / 5.95 / 1.65
+      rho_A: 1.0157
+      B_fro_w: 268.27
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/A4_ft/refit_report.json'
+    closed_loop:
+      summary: 's2-12x2 9/24; e2e 2/20 (seated 6/20)'
+      source: 'data/lcs/realfirst/cmp/v12_129/e2e_r1_V60d/summarize.out'
+- id: V60e
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B3_h1
+  config: null
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B3_h1/checkpoint_lcs_only.pt
+  checkpoint_s2: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B1_h2/checkpoint_lcs_only.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V60e/deploy_v28e
+  - data/lcs/realfirst/cmp/encoder_study/sim/V60e_s2/deploy_v28e
+  date: '2026-10-26'
+  parent: V60a
+  change: 'design B: stage-1 head refit on its own stuck stage-1 chains; stage-2 head = V60a''s'
+  data: 'A4 stage-1 rows'
+  seed: 5
+  run: V12-129
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm_s1: 1.69 / 3.10 / 1.63
+      rho_A_s1: 1.0805
+      B_fro_w_s1: 307.96
+      separation_auc_s1: 0.8972357723577236
+      refit_one_step_h7_recon_mm_s2: 1.53 / 2.22 / 1.44
+      rho_A_s2: 1.0251
+      B_fro_w_s2: 278.05
+      separation_auc_s2: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B3_h1/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B1_h2/refit_report.json'
+    closed_loop:
+      summary: 'e2e 4/20 (seated 20/20); 1/20 at 30 N (V12-137)'
+      source: 'data/lcs/realfirst/cmp/v12_129/e2e_r1_V60e/summarize.out, cmp/v12_137/e2e_V60e/summarize.out'
+- id: V60f
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/A5_ft
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/A5_ft/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/A5_ft/ckpt/2026-10-26/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V60f/deploy_v28f
+  - data/lcs/realfirst/cmp/encoder_study/sim/V60f_s2/deploy_v28f
+  date: '2026-10-26'
+  parent: V60d
+  change: 'design A round 2'
+  flags:
+    epochs: '100'
+    latent_dim: '16'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'A5'
+  seed: 5
+  run: V12-129
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.84 / 5.79 / 1.64
+      rho_A: 1.0178
+      B_fro_w: 269.68
+      separation_auc: 0.7
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/A5_ft/refit_report.json'
+    closed_loop:
+      summary: 's2-12x2 7/24; e2e 1/20 (seated 3/20; the RUN-STATE says 0/20)'
+      source: 'data/lcs/realfirst/cmp/v12_129/e2e_r2_V60f/summarize.out'
+- id: V60g
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B3_h1
+  config: null
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B3_h1/checkpoint_lcs_only.pt
+  checkpoint_s2: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B4_h2/checkpoint_lcs_only.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V60g/deploy_v28g
+  - data/lcs/realfirst/cmp/encoder_study/sim/V60g_s2/deploy_v28g
+  date: '2026-10-26'
+  parent: V60e
+  change: 'design B round 2: stage-2 head refit on own e2e stage-2 rows'
+  data: 'A5 stage-2 rows'
+  seed: 5
+  run: V12-129
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm_s1: 1.69 / 3.10 / 1.63
+      rho_A_s1: 1.0805
+      B_fro_w_s1: 307.96
+      separation_auc_s1: 0.8972357723577236
+      refit_one_step_h7_recon_mm_s2: 1.53 / 2.22 / 1.44
+      rho_A_s2: 1.0274
+      B_fro_w_s2: 277.53
+      separation_auc_s2: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B3_h1/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_129/B4_h2/refit_report.json'
+    closed_loop:
+      summary: 's2-12x2 14/24; e2e 2/20 (seated 20/20)'
+      source: 'data/lcs/realfirst/cmp/v12_129/e2e_r2_V60g/summarize.out'
+- id: V61p_V12_131
+  note_id: 'V61p (V12-131) (ID used twice)'
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_131/H1_L32_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_131/H1_L32_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_131/H1_L32_s5/ckpt/2026-10-27/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61p/deploy_v29p
+  date: '2026-10-28'
+  parent: null
+  change: 'pilot (prep shake-out): seg_ctx z_belt 24 + z_ctx 8, grip gate, W1 200 ep (ID reused by V12-146, see the V12-146 row)'
+  flags:
+    belt_ctx_dim: '8'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '200'
+    latent_dim: '32'
+    seed: '5'
+  data: 'W1'
+  seed: 5
+  run: V12-131
+  status: 'not evaluated'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.69 / 3.13 / 1.63
+      rho_A: 1.0115
+      B_fro_w: 362.37
+      separation_auc: 0.7
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_131/H1_L32_s5/refit_report.json'
+    closed_loop:
+      summary: 'prep shake-out only (deploy_v29p)'
+      source: 'data/lcs/realfirst/cmp/v12_131/v61_models.json'
+- id: V61a
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_131/H3_ft
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_131/H3_ft/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_131/H3_ft/ckpt/2026-10-28/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61a/deploy_v29a
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61a/deploy_v29a.prev0
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61a_s2/deploy_v29a
+  date: '2026-10-28'
+  parent: null
+  change: 'V59f lineage (W1 200 ep -> W2 -> W3 FT) with z = [z_belt 24, z_ctx 8 (scene cloud, EE pose/twist, grip; board frame)], decoder and cost on z_belt, LCS input g*u'
+  flags:
+    belt_ctx_dim: '8'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '100'
+    latent_dim: '32'
+    seed: '5'
+  data: 'W1 -> W3'
+  seed: 5
+  run: V12-131/132
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.67 / 3.03 / 1.61
+      rho_A: 1.0091
+      B_fro_w: 320.32
+      separation_auc: 0.7
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_131/H3_ft/refit_report.json'
+    closed_loop:
+      summary: 'e2e 4/20 (seated 18/20); 30 N grip 6/20 (V12-132)'
+      source: 'data/lcs/realfirst/cmp/v12_131/e2e_V61a/summarize.out, cmp/v12_132/e2e_V61a_g30/summarize.out'
+- id: V61b
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/J1_L50_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/J1_L50_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/J1_L50_s5/ckpt/2026-10-28/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61b/deploy_v30b
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61b_s2/deploy_v30b
+  date: '2026-10-28'
+  parent: null
+  change: 'z = [z_belt 16, z_ctx 34 raw ctx numbers x 0.107], no decfit'
+  flags:
+    belt_ctx_dim: '34'
+    belt_encoder_inputs: 'seg_ctxv'
+    epochs: '200'
+    latent_dim: '50'
+    seed: '5'
+  data: 'W1'
+  seed: 5
+  run: V12-133
+  status: 'abandoned'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.70 / 3.10 / 1.64
+      rho_A: 1.1532
+      B_fro_w: 1999.31
+      separation_auc: 0.2
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/J1_L50_s5/refit_report.json'
+    closed_loop:
+      summary: 'dropped by the user: r0 e2e 0/4 partial (dyn-loss share z_ctx 93.6 %)'
+      source: 'data/lcs/realfirst/cmp/v12_133/chain.status, e2e_stats_V61c.md'
+- id: V61c
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/L1_L38_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/L1_L38_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/L1_L38_s5/ckpt/2026-10-28/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61c/deploy_v30d
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61c_s2/deploy_v30d
+  date: '2026-10-28'
+  parent: null
+  change: 'V61b with z_ctx 22 (EE xyz + rot6d + grip, std floors), no aux head'
+  flags:
+    belt_ctx_dim: '22'
+    belt_encoder_inputs: 'seg_ctxv'
+    epochs: '200'
+    latent_dim: '38'
+    seed: '5'
+  data: 'W1'
+  seed: 5
+  run: V12-133
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.68 / 2.79 / 1.61
+      rho_A: 1.0161
+      B_fro_w: 358.77
+      separation_auc: 0.4
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/L1_L38_s5/refit_report.json'
+    closed_loop:
+      summary: 'e2e 30 N 0/20 (seated 6/20)'
+      source: 'data/lcs/realfirst/cmp/v12_133/e2e_V61c_r0/summarize.out'
+- id: V61d
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/M1_L16_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/M1_L16_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/M1_L16_s5/ckpt/2026-10-28/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61d/deploy_v30e
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61d_s2/deploy_v30e
+  date: '2026-10-28'
+  parent: null
+  change: 'ablation: z_belt 16 only, grasp bits gate u'
+  flags:
+    belt_ctx_dim: '0'
+    belt_encoder_inputs: 'seg_ctxv'
+    epochs: '200'
+    latent_dim: '16'
+    seed: '5'
+  data: 'W1'
+  seed: 5
+  run: V12-133
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.74 / 2.85 / 1.67
+      rho_A: 1.0322
+      B_fro_w: 218.72
+      separation_auc: 0.8
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/M1_L16_s5/refit_report.json'
+    closed_loop:
+      summary: 'e2e 30 N 0/20 (seated 7/20)'
+      source: 'data/lcs/realfirst/cmp/v12_133/e2e_V61d_r0/summarize.out'
+- id: V61e
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/N1_L32_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/N1_L32_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/N1_L32_s5/ckpt/2026-10-28/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61e/deploy_v30f
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61e_s2/deploy_v30f
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61e_s2/deploy_v30f.prev0
+  date: '2026-10-28'
+  parent: null
+  change: 'scene_rv: DP3-style scene branch + robot vector -> one linear fusion, z 32; goals = scene part + current robot part'
+  flags:
+    belt_encoder_inputs: 'scene_rv'
+    epochs: '200'
+    latent_dim: '32'
+    seed: '5'
+  data: 'W1'
+  seed: 5
+  run: V12-133
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.68 / 2.60 / 1.61
+      rho_A: 1.0298
+      B_fro_w: 356.88
+      separation_auc: 0.9
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_133/N1_L32_s5/refit_report.json'
+    closed_loop:
+      summary: 'e2e 30 N 0/20 (seated 0/20)'
+      source: 'data/lcs/realfirst/cmp/v12_133/e2e_V61e_r0/summarize.out'
+- id: V61f
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_135/F1_L32_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_135/F1_L32_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_135/F1_L32_s5/ckpt/2026-10-28/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61f/deploy_v30g
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61f_s2/deploy_v30g
+  date: '2026-10-29'
+  parent: null
+  change: 'V61e with the belt_seg cloud as the point branch (--rv-cloud belt)'
+  flags:
+    belt_encoder_inputs: 'scene_rv'
+    epochs: '200'
+    latent_dim: '32'
+    seed: '5'
+  data: 'W1'
+  seed: 5
+  run: V12-135
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.64 / 2.88 / 1.57
+      rho_A: 1.0440
+      B_fro_w: 355.25
+      separation_auc: 0.6
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_135/F1_L32_s5/refit_report.json'
+    closed_loop:
+      summary: 'e2e 30 N 0/20 (seated 6/20)'
+      source: 'data/lcs/realfirst/cmp/v12_135/e2e_V61f_r0/summarize.out'
+- id: V61g
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_135/G1_L32_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_135/G1_L32_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_135/G1_L32_s5/ckpt/2026-10-29/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61g/deploy_v30h
+  date: '2026-10-29'
+  parent: null
+  change: 'V61f trained on stage-1 rows only'
+  flags:
+    belt_encoder_inputs: 'scene_rv'
+    epochs: '200'
+    latent_dim: '32'
+    seed: '5'
+  data: 'W1s1'
+  seed: 5
+  run: V12-135
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.82 / 2.92 / 1.76
+      rho_A: 1.0158
+      B_fro_w: 364.22
+      separation_auc: 0.9588888888888889
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_135/G1_L32_s5/refit_report.json'
+    closed_loop:
+      summary: 'stage 1 at 30 N 3/20 (V45c 19/20)'
+      source: 'data/lcs/realfirst/cmp/v12_135/s1_V61g_g30/summarize.out, cmp/v12_134/s1_V45c_g30/summarize.out'
+- id: V62a_V12_137
+  note_id: 'V62a (V12-137) (ID used twice)'
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_137/H2X_h2B
+  config: null
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_137/H2X_h2B/checkpoint_lcs_only.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62a_s2/deploy_v31a
+  date: '2026-10-29'
+  parent: V60a
+  change: 'design B (V59e encoder frozen) stage-2 head refit from B1_h2 on H2X (+134 non-V45c on-policy stage-2 rows); ID reused by V12-152'
+  data: 'H2X'
+  seed: 5
+  run: V12-137
+  status: 'candidate'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.53 / 2.25 / 1.44
+      rho_A: 1.0376
+      B_fro_w: 279.66
+      separation_auc: 1.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_137/H2X_h2B/refit_report.json'
+    closed_loop:
+      summary: 'after V45c stage 1 (X62) 12/20 at 30 N, best two-model chain at 30 N then; after V60g stage 1 (G62) 1/20'
+      source: 'data/lcs/realfirst/cmp/v12_137/e2e_X62/summarize.out, e2e_G62/summarize.out'
+- id: V61h
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_138/K1_L32_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_138/K1_L32_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_138/K1_L32_s5/ckpt/2026-10-29/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61h/deploy_v32h
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61h_s2/deploy_v32h
+  date: '2026-10-29'
+  parent: null
+  change: 'V61a recipe round 1 only: z = [z_belt 16, z_ctx 16 (scene cloud + EE pose + grip)], one LCS, decfit'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '200'
+    latent_dim: '32'
+    seed: '5'
+  data: 'W1'
+  seed: 5
+  run: V12-138
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.72 / 2.72 / 1.65
+      rho_A: 1.1667
+      B_fro_w: 279.35
+      separation_auc: 0.9
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_138/K1_L32_s5/refit_report.json'
+    closed_loop:
+      summary: 'e2e 30 N 0/20 (seated 20/20); its stage 1 + V61j stage 2 (H61j) 11/16'
+      source: 'data/lcs/realfirst/cmp/v12_138/e2e_V61h/summarize.out, cmp/v12_145/e2e_H61j/summarize.out'
+- id: V61i
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_139/M1_L32_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_139/M1_L32_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_139/M1_L32_s5/ckpt/2026-10-29/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61i/deploy_v33i
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61i_s2/deploy_v33i
+  date: '2026-10-29'
+  parent: null
+  change: 'V61h + mode-gated LCS (stage-2 head = head 1 + delta on all matrices, L2 1e-5)'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '200'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W1s'
+  seed: 5
+  run: V12-139
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.79 / 4.36 / 1.64
+      rho_A: 1.0589
+      B_fro_w: 256.69
+      separation_auc: 0.7
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_139/M1_L32_s5/refit_report.json'
+    closed_loop:
+      summary: 'e2e 8x2 2/16 (seated 12/16); stage tests s1 8/16, s2 0/12'
+      source: 'data/lcs/realfirst/cmp/v12_139/e2e_V61i/summarize.out, cmp/v12_143/s2_summary.txt'
+- id: V61j
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_141/N1_L32_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_141/N1_L32_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_141/N1_L32_s5/ckpt/2026-10-29/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61j/deploy_v34j
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61j_s2/deploy_v34j
+  date: '2026-10-29'
+  parent: null
+  change: 'V61i with the delta on A, B, d only (like_base init)'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '200'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W1s'
+  seed: 5
+  run: V12-141
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.75 / 4.44 / 1.65
+      rho_A: 1.0518
+      B_fro_w: 921.54
+      separation_auc: 0.6
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_141/N1_L32_s5/refit_report.json'
+    closed_loop:
+      summary: 'e2e 8x2 1/16 (seated 4/16); stage tests s1 5/16, s2 8/12 (best stage-2 head of the family)'
+      source: 'data/lcs/realfirst/cmp/v12_141/e2e_V61j/summarize.out, cmp/v12_143/chain.status'
+- id: V61k
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_142/P1_L32_s5
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_142/P1_L32_s5/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_142/P1_L32_s5/ckpt/2026-10-29/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61k/deploy_v35k
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61k_s2/deploy_v35k
+  date: '2026-10-29'
+  parent: null
+  change: 'V61i with like_base delta init (all matrices)'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '200'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W1s'
+  seed: 5
+  run: V12-142
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.76 / 4.00 / 1.65
+      rho_A: 1.1372
+      B_fro_w: 292.70
+      separation_auc: 0.0
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_142/P1_L32_s5/refit_report.json'
+    closed_loop:
+      summary: 'e2e 8x2 3/16 (seated 8/16); stage tests s1 6/16, s2 3/12 (summed per start)'
+      source: 'data/lcs/realfirst/cmp/v12_142/e2e_V61k/summarize.out, cmp/v12_143/chain.status'
+- id: V61l
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_144/Q1_ft
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_144/Q1_ft/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_144/Q1_ft/ckpt/2026-10-29/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61l/deploy_v36l
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61l_s2/deploy_v36l
+  date: '2026-10-30'
+  parent: V61j
+  change: 'V61j DAgger round 1 (own 30 N chains + DART, weight 3), 100 ep lr 3e-4'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '100'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W1sD'
+  seed: 5
+  run: V12-144
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.74 / 4.24 / 1.63
+      rho_A: 1.0578
+      B_fro_w: 351.34
+      separation_auc: 0.7
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_144/Q1_ft/refit_report.json'
+    closed_loop:
+      summary: 'e2e 8x2 0/16 (seated 7/16); stage tests s1 8/16, s2 2/12'
+      source: 'data/lcs/realfirst/cmp/v12_144/e2e_V61l/summarize.out, cmp/v12_143/chain.status'
+- id: V61m
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_145/R1_ft
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_145/R1_ft/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_145/R1_ft/ckpt/2026-10-30/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61m/deploy_v37m
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61m_s2/deploy_v37m
+  date: '2026-10-30'
+  parent: V61j
+  change: 'V61j + 30 N on-policy round (H61j/X62 chains, stage-2 DART), 100 ep lr 3e-4'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '100'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W2'
+  seed: 5
+  run: V12-145
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.74 / 3.91 / 1.64
+      rho_A: 1.1057
+      B_fro_w: 950.42
+      separation_auc: 0.4
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_145/R1_ft/refit_report.json'
+    closed_loop:
+      summary: 'e2e 8x2 0/14 (seated 1/14); stage tests s1 3/16, s2 4/12 (summed per start)'
+      source: 'data/lcs/realfirst/cmp/v12_145/e2e_V61m/summarize.out, cmp/v12_143/chain.status'
+- id: V61n
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_145/S1_ft
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_145/S1_ft/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_145/S1_ft/ckpt/2026-10-30/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61n/deploy_v37n
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61n_s2/deploy_v37n
+  date: '2026-10-30'
+  parent: V61h
+  change: 'V61h + the same 30 N on-policy round'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '100'
+    latent_dim: '32'
+    seed: '5'
+  data: 'W2'
+  seed: 5
+  run: V12-145
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.73 / 2.79 / 1.66
+      rho_A: 1.0831
+      B_fro_w: 256.96
+      separation_auc: 0.8
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_145/S1_ft/refit_report.json'
+    closed_loop:
+      summary: 'e2e 8x2 1/16 (seated 16/16); stage tests s1 16/16, s2 0/12; its stage 1 + V61j stage 2 (N61j) 10/16'
+      source: 'data/lcs/realfirst/cmp/v12_145/e2e_V61n/summarize.out, e2e_N61j/summarize.out, cmp/v12_143/chain.status'
+- id: V61o
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_146/O1_30
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_146/O1_30/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_146/O1_30/ckpt/2026-10-30/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61o/deploy_v38o
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61o_s2/deploy_v38o
+  date: '2026-10-31'
+  parent: null
+  change: 'V61h recipe from scratch on 30 N-only data'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '200'
+    latent_dim: '32'
+    seed: '5'
+  data: 'W30 (V45c + scripted-walk chains at 30 N, stage-1/2 MILES)'
+  seed: 5
+  run: V12-146
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.94 / 3.27 / 1.86
+      rho_A: 1.0509
+      B_fro_w: 344.64
+      separation_auc: 0.9826793920113114
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_146/O1_30/refit_report.json'
+    closed_loop:
+      summary: 'e2e 8x2 1/16 (seated 8/16)'
+      source: 'data/lcs/realfirst/cmp/v12_146/e2e_V61o/summarize.out'
+- id: V61p_V12_146
+  note_id: 'V61p (V12-146) (ID used twice)'
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_146/P1_30
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_146/P1_30/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_146/P1_30/ckpt/2026-10-30/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61p/deploy_v38p
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61p_s2/deploy_v38p
+  date: '2026-10-31'
+  parent: null
+  change: 'V61j recipe (gated A,B,d) from scratch on 30 N-only data (same ID as the V12-131 pilot)'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '200'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W30'
+  seed: 5
+  run: V12-146
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.99 / 5.41 / 1.79
+      rho_A: 1.0086
+      B_fro_w: 275.57
+      separation_auc: 0.9915164369034994
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_146/P1_30/refit_report.json'
+    closed_loop:
+      summary: 'e2e 8x2 0/16 (seated 7/16)'
+      source: 'data/lcs/realfirst/cmp/v12_146/e2e_V61p/summarize.out'
+- id: V61q
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_148/J1_148
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_148/J1_148/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_148/J1_148/ckpt/2026-11-02/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61q/deploy_v39q
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61q_s2/deploy_v39q
+  date: '2026-11-02'
+  parent: null
+  change: 'V61j recipe (gated A,B,d) from scratch on 5 demos + MILES'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '200'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W148 (V12-147 5 demos + stage-1 / continuous stage-2 MILES, weight 1)'
+  seed: 5
+  run: V12-148
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 3.30 / 9.77 / 1.73
+      rho_A: 1.0061
+      B_fro_w: 299.17
+      separation_auc: null
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_148/J1_148/refit_report.json'
+    closed_loop:
+      summary: 'e2e 8x2 0/16 (seated 8/16); _tol50b 0/16 (seated 12/16, V12-151d)'
+      source: 'data/lcs/realfirst/cmp/v12_148/e2e_V61q/summarize.out, cmp/v12_151/e2e_V61q_tol50b/summarize.out'
+- id: V61r
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_148/H1_148
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_148/H1_148/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_148/H1_148/ckpt/2026-11-02/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61r/deploy_v39r
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61r_s2/deploy_v39r
+  date: '2026-11-02'
+  parent: null
+  change: 'shared encoder + two independent LCS heads (n_dyn_heads 2, no gating)'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '200'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W148'
+  seed: 5
+  run: V12-148
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 2.07 / 5.93 / 1.73
+      rho_A: 1.0152
+      B_fro_w: 385.45
+      separation_auc: null
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_148/H1_148/refit_report.json'
+    closed_loop:
+      summary: 'e2e 8x2 0/16 (seated 2/16)'
+      source: 'data/lcs/realfirst/cmp/v12_148/e2e_V61r/summarize.out'
+- id: V61s
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_148/S1_148
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_148/S1_148/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_148/S1_148/ckpt/2026-11-02/no_wandb/checkpoint_epoch_0200.pt
+  checkpoint_s2: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_148/S2_148/ckpt/2026-11-02/no_wandb/checkpoint_epoch_0200.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61s/deploy_v39s
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61s_s2/deploy_v39s
+  date: '2026-11-02'
+  parent: null
+  change: 'per-stage models (own encoder + single LCS each, V61h recipe), H61j-style split'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '200'
+    latent_dim: '32'
+    seed: '5'
+  data: 'W148_s1 / W148_s2'
+  seed: 5
+  run: V12-148
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm_s1: 1.94 / 2.88 / 1.92
+      rho_A_s1: 1.0036
+      B_fro_w_s1: 344.73
+      separation_auc_s1: null
+      refit_one_step_h7_recon_mm_s2: 1.48 / 2.37 / 1.45
+      rho_A_s2: 1.0143
+      B_fro_w_s2: 226.80
+      separation_auc_s2: null
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_148/S1_148/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_148/S2_148/refit_report.json'
+    closed_loop:
+      summary: 'e2e 8x2 1/16 (seated 9/16)'
+      source: 'data/lcs/realfirst/cmp/v12_148/e2e_V61s/summarize.out'
+- id: V61t
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_149/T1_149
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_149/T1_149/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_149/T1_149/ckpt/2026-11-02/no_wandb/checkpoint_epoch_0100.pt
+  checkpoint_s2: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_149/T2_149/ckpt/2026-11-02/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61t/deploy_v39t
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61t_s2/deploy_v39t
+  date: '2026-11-02'
+  parent: V61s
+  change: 'V61s DAgger round 1 (V61s + DART 0.15 on 5 near-demo non-eval starts x2), FT 100 ep lr 3e-4, weight 1'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '100'
+    latent_dim: '32'
+    seed: '5'
+  data: 'W149_s1 / _s2'
+  seed: 5
+  run: V12-149/151
+  status: 'candidate'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm_s1: 1.91 / 2.61 / 1.88
+      rho_A_s1: 1.0064
+      B_fro_w_s1: 336.91
+      separation_auc_s1: 0.8703703703703703
+      refit_one_step_h7_recon_mm_s2: 1.45 / 60.10 / 1.43
+      rho_A_s2: 1.0040
+      B_fro_w_s2: 198.78
+      separation_auc_s2: 0.875
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_149/T1_149/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_149/T2_149/refit_report.json'
+    closed_loop:
+      summary: 'e2e 8x2 9/16, strict 2/16; _tol50 10/16 (strict 5/16); _tol50b 12/16 (strict 4/16); _tol70 6/16; _tol10 0/16'
+      source: 'data/lcs/realfirst/cmp/v12_149/e2e_V61t/summarize.out, cmp/v12_151/chain.status, strict*.md'
+- id: V61u
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_150/T1_150
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_150/T1_150/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_150/T1_150/ckpt/2026-11-02/no_wandb/checkpoint_epoch_0100.pt
+  checkpoint_s2: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_150/T2_150/ckpt/2026-11-02/no_wandb/checkpoint_epoch_0100.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61u/deploy_v39u
+  - data/lcs/realfirst/cmp/encoder_study/sim/V61u_s2/deploy_v39u
+  date: '2026-11-03'
+  parent: V61t
+  change: 'V61t DAgger round 2 (+ up+10 / up-10 starts, grasp loss cut at the slip onset)'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '100'
+    latent_dim: '32'
+    seed: '5'
+  data: 'W150_s1 / _s2'
+  seed: 5
+  run: V12-150
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm_s1: 1.90 / 2.56 / 1.86
+      rho_A_s1: 1.0440
+      B_fro_w_s1: 350.42
+      separation_auc_s1: 0.8928571428571429
+      refit_one_step_h7_recon_mm_s2: 1.43 / 2.11 / 1.41
+      rho_A_s2: 1.0136
+      B_fro_w_s2: 191.53
+      separation_auc_s2: 0.8888888888888888
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_150/T1_150/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_150/T2_150/refit_report.json'
+    closed_loop:
+      summary: 'e2e 8x2 7/16, strict 1/16'
+      source: 'data/lcs/realfirst/cmp/v12_150/e2e_V61u/summarize.out, strict.md'
+- id: V62a_V12_152
+  note_id: 'V62a (V12-152) (ID used twice)'
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_q
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_q/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_q/ckpt/2026-11-03/no_wandb/checkpoint_epoch_0200.pt
+  checkpoint_s1: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_q_h1_j7/checkpoint_lcs_only.pt
+  checkpoint_s2: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_q_h2_j7/checkpoint_lcs_only.pt
+  step: 200
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62a/deploy_v39a
+  date: '2026-11-03'
+  parent: null
+  change: 'V61q recipe from scratch + per-head 7-step lcs_only refits'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '200'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'not evaluated'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.86 / 3.32 / 1.81
+      rho_A: 1.0128
+      B_fro_w: 279.32
+      separation_auc: 0.8306595365418895
+      refit_one_step_h7_recon_mm_s1: 1.81 / 2.53 / 1.77
+      rho_A_s1: 1.0022
+      B_fro_w_s1: 435.93
+      separation_auc_s1: 0.9047619047619048
+      refit_one_step_h7_recon_mm_s2: 1.55 / 2.28 / 1.53
+      rho_A_s2: 1.0032
+      B_fro_w_s2: 349.57
+      separation_auc_s2: 0.8518518518518519
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_q/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_q_h1_j7/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_q_h2_j7/refit_report.json'
+    closed_loop:
+      summary: 'e2e cancelled: the ID collided with V12-137''s V62a (its V62a_s2 jsons overwritten; deploy_v31a intact)'
+      source: 'data/lcs/realfirst/cmp/v12_152/chain.status'
+- id: V62b
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_all
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_all/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_all/ckpt/2026-11-03/no_wandb/checkpoint_epoch_0200.pt
+  checkpoint_s1: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_all_h1_j7/checkpoint_lcs_only.pt
+  checkpoint_s2: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_all_h2_j7/checkpoint_lcs_only.pt
+  step: 200
+  exports: []
+  date: '2026-11-03'
+  parent: null
+  change: 'gated on every LCS matrix, delta L2 0 (+ per-head 7-step refits)'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '200'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'not evaluated'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 12.12 / 1060.09 / 1.73
+      rho_A: 1.1434
+      B_fro_w: 290.52
+      separation_auc: 0.8841354723707665
+      refit_one_step_h7_recon_mm_s1: 1.74 / 2.48 / 1.71
+      rho_A_s1: 1.0104
+      B_fro_w_s1: 384.56
+      separation_auc_s1: 0.9285714285714286
+      refit_one_step_h7_recon_mm_s2: 1.45 / 2.05 / 1.42
+      rho_A_s2: 1.0150
+      B_fro_w_s2: 404.29
+      separation_auc_s2: 0.8333333333333334
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_all/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_all_h1_j7/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_all_h2_j7/refit_report.json'
+    closed_loop:
+      summary: 'trained (joint h7 1060 mm before the refits); prep / e2e cancelled with V62a'
+      source: 'data/lcs/realfirst/cmp/v12_152/chain.status'
+- id: V62c
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_l48
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_l48/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_l48/ckpt/2026-11-03/no_wandb/checkpoint_epoch_0200.pt
+  checkpoint_s1: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_l48_h1_j7/checkpoint_lcs_only.pt
+  checkpoint_s2: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_l48_h2_j7/checkpoint_lcs_only.pt
+  step: 200
+  exports: []
+  date: '2026-11-03'
+  parent: null
+  change: 'V61q recipe, latent 48 (belt 32 + ctx 16) (+ per-head 7-step refits)'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '200'
+    latent_dim: '48'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'not evaluated'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.81 / 3.70 / 1.76
+      rho_A: 1.0816
+      B_fro_w: 399.24
+      separation_auc: 0.8146167557932263
+      refit_one_step_h7_recon_mm_s1: 1.77 / 2.51 / 1.73
+      rho_A_s1: 1.0213
+      B_fro_w_s1: 651.88
+      separation_auc_s1: 0.8988095238095238
+      refit_one_step_h7_recon_mm_s2: 1.51 / 2.30 / 1.48
+      rho_A_s2: 1.0146
+      B_fro_w_s2: 433.18
+      separation_auc_s2: 0.8425925925925926
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_l48/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_l48_h1_j7/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/Q152_l48_h2_j7/refit_report.json'
+    closed_loop:
+      summary: 'prep / e2e cancelled with V62a'
+      source: 'data/lcs/realfirst/cmp/v12_152/chain.status'
+- id: V62j
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_qh1_j7
+  config: null
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_qh1_j7/checkpoint_lcs_only.pt
+  checkpoint_s2: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_qh2_j7/checkpoint_lcs_only.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62j/deploy_v39j
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62j_s2/deploy_v39j
+  date: '2026-11-03'
+  parent: V61q
+  change: 'V61q''s encoder frozen + 7-step lcs_only refits of both heads'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm_s1: 1.70 / 2.48 / 1.67
+      rho_A_s1: 1.0014
+      B_fro_w_s1: 463.68
+      separation_auc_s1: 0.9523809523809523
+      refit_one_step_h7_recon_mm_s2: 1.44 / 2.33 / 1.41
+      rho_A_s2: 1.0052
+      B_fro_w_s2: 384.04
+      separation_auc_s2: 0.7592592592592593
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_qh1_j7/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_qh2_j7/refit_report.json'
+    closed_loop:
+      summary: '_tol50b 10/16, strict 4/16'
+      source: 'data/lcs/realfirst/cmp/v12_152/e2e_V62j/summarize.out, strict_V62j.md'
+- id: V62k
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_qh1_j7
+  config: null
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_qh1_j7/checkpoint_lcs_only.pt
+  checkpoint_s2: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_anc1e-2/checkpoint_lcs_only.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62k/deploy_v39k
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62k_s2/deploy_v39k
+  date: '2026-11-03'
+  parent: V62j
+  change: 'stage-2 head = stage-1 refit + anchored delta (L2 1e-2, delta/init norm ratio 0.078)'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm_s1: 1.70 / 2.48 / 1.67
+      rho_A_s1: 1.0014
+      B_fro_w_s1: 463.68
+      separation_auc_s1: 0.9523809523809523
+      refit_one_step_h7_recon_mm_s2: 1.48 / 2.31 / 1.41
+      rho_A_s2: 1.0131
+      B_fro_w_s2: 492.53
+      separation_auc_s2: 0.7592592592592593
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_qh1_j7/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_anc1e-2/refit_report.json'
+    closed_loop:
+      summary: '_tol50b 7/16, strict 1/16'
+      source: 'data/lcs/realfirst/cmp/v12_152/e2e_V62k/summarize.out, strict_V62k.md'
+- id: V62l
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_qh1_j7
+  config: null
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_qh1_j7/checkpoint_lcs_only.pt
+  checkpoint_s2: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_anc1e-3/checkpoint_lcs_only.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62l/deploy_v39l
+  date: '2026-11-03'
+  parent: V62j
+  change: 'as V62k, anchor L2 1e-3 (delta/init norm ratio 0.170)'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'not evaluated'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm_s1: 1.70 / 2.48 / 1.67
+      rho_A_s1: 1.0014
+      B_fro_w_s1: 463.68
+      separation_auc_s1: 0.9523809523809523
+      refit_one_step_h7_recon_mm_s2: 1.46 / 2.35 / 1.41
+      rho_A_s2: 1.0033
+      B_fro_w_s2: 529.46
+      separation_auc_s2: 0.7592592592592593
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_qh1_j7/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_anc1e-3/refit_report.json'
+    closed_loop:
+      summary: 'prepped (json only), no e2e'
+      source: 'data/lcs/realfirst/cmp/v12_152/chain.status'
+- id: V62m
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wnz
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wnz/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wnz/ckpt/2026-11-03/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62m/deploy_v39m
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62m_s2/deploy_v39m
+  date: '2026-11-03'
+  parent: V62k
+  change: 'joint gated model, warm (W152_init_anc), 60 ep lr 1e-4; 7-step loss on the LCS heads, encoder by recon + decoded-next'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '60'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 3.49 / 11.93 / 1.76
+      rho_A: 1.0089
+      B_fro_w: 366.89
+      separation_auc: 0.8342245989304813
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wnz/refit_report.json'
+    closed_loop:
+      summary: '_tol50b 8/16 (strict 1/16; 2 starts under host load); rerun 6/16 (strict 1/16)'
+      source: 'data/lcs/realfirst/cmp/v12_152/e2e_V62m/summarize.out, strict_V62m.md'
+- id: V62p
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wz01
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wz01/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wz01/ckpt/2026-11-03/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62p/deploy_v39p
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62p_s2/deploy_v39p
+  date: '2026-11-03'
+  parent: V62k
+  change: 'V62m + 7-step loss from enc(o_t) at 0.1 incl. the encoder gradient (from_z 0.1)'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '60'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'best e2e'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 2.26 / 9.55 / 1.78
+      rho_A: 1.0170
+      B_fro_w: 359.13
+      separation_auc: 0.750445632798574
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wz01/refit_report.json'
+    closed_loop:
+      summary: '_tol50b 12/16, strict 11/16; rerun 12/16, strict 6/16; one-demo goals set2_gv_09 (done relabelled at frame 48) 15/16 (strict 12/16), set3_gv_02 0/16'
+      source: 'data/lcs/realfirst/cmp/v12_152/e2e_V62p/summarize.out, strict_V62p.md'
+- id: V62s
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_qh1_j7
+  config: null
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_qh1_j7/checkpoint_lcs_only.pt
+  checkpoint_s2: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_free_ABd/checkpoint_lcs_only.pt
+  step: 100
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62s/deploy_v39s
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62s_s2/deploy_v39s
+  date: '2026-11-03'
+  parent: V62j
+  change: 'stage-2 head = stage-1 refit with only A, B, d retrained (frozen V61q encoder)'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm_s1: 1.70 / 2.48 / 1.67
+      rho_A_s1: 1.0014
+      B_fro_w_s1: 463.68
+      separation_auc_s1: 0.9523809523809523
+      refit_one_step_h7_recon_mm_s2: 1.44 / 2.33 / 1.41
+      rho_A_s2: 1.0067
+      B_fro_w_s2: 490.89
+      separation_auc_s2: 0.7592592592592593
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_qh1_j7/refit_report.json; ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/L152_free_ABd/refit_report.json'
+    closed_loop:
+      summary: '_tol50b 9/16, strict 1/16'
+      source: 'data/lcs/realfirst/cmp/v12_152/e2e_V62s/summarize.out, strict_V62s.md'
+- id: V62t
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wabd
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wabd/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wabd/ckpt/2026-11-03/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62t/deploy_v39t
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62t_s2/deploy_v39t
+  date: '2026-11-03'
+  parent: V62s
+  change: 'joint, warm (V61q encoder + stage-1 refit + A,B,d delta), 7-step loss, 60 ep lr 1e-4'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '60'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 2.88 / 10.65 / 1.75
+      rho_A: 1.0089
+      B_fro_w: 407.39
+      separation_auc: 0.8199643493761141
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wabd/refit_report.json'
+    closed_loop:
+      summary: '_tol50b 10/16, strict 3/16'
+      source: 'data/lcs/realfirst/cmp/v12_152/e2e_V62t/summarize.out, strict_V62t.md'
+- id: V62u
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wabdz
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wabdz/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wabdz/ckpt/2026-11-03/no_wandb/checkpoint_epoch_0060.pt
+  step: 60
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62u/deploy_v39u
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62u_s2/deploy_v39u
+  date: '2026-11-03'
+  parent: V62s
+  change: 'V62t + from_z 0.1 (V62p with A,B,d delta)'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '60'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 2.21 / 7.13 / 1.85
+      rho_A: 1.0081
+      B_fro_w: 349.24
+      separation_auc: 0.7254901960784313
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wabdz/refit_report.json'
+    closed_loop:
+      summary: '_tol50b 0/16, strict 0/16'
+      source: 'data/lcs/realfirst/cmp/v12_152/e2e_V62u/summarize.out, strict_V62u.md'
+- id: V62v
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fabd
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fabd/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fabd/ckpt/2026-11-03/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62v/deploy_v39v
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62v_s2/deploy_v39v
+  date: '2026-11-03'
+  parent: null
+  change: 'scratch, A,B,d like_base delta, ms 1.0 no from_z, 1-step 50 ep then K ramp 2->7, 250 ep'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 5.31 / 7.46 / 1.75
+      rho_A: 1.0035
+      B_fro_w: 251.82
+      separation_auc: 0.786096256684492
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fabd/refit_report.json'
+    closed_loop:
+      summary: '_tol50b 1/16, strict 1/16'
+      source: 'data/lcs/realfirst/cmp/v12_152/e2e_V62v/summarize.out, strict_V62v.md'
+- id: V62w
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz/ckpt/2026-11-03/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62w/deploy_v39w
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62w_s2/deploy_v39w
+  date: '2026-11-03'
+  parent: null
+  change: 'V62p recipe from scratch (all-matrix zero-init delta, delta L2 1e-5, from_z 0.1)'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.83 / 4.03 / 1.76
+      rho_A: 1.0358
+      B_fro_w: 368.67
+      separation_auc: 0.768270944741533
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz/refit_report.json'
+    closed_loop:
+      summary: '_tol50b 0/16, strict 0/16 (delta collapsed under the L2)'
+      source: 'data/lcs/realfirst/cmp/v12_152/e2e_V62w/summarize.out, strict_V62w.md'
+- id: V62x
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fabdz
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fabdz/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fabdz/ckpt/2026-11-03/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62x/deploy_v39x
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62x_s2/deploy_v39x
+  date: '2026-11-03'
+  parent: null
+  change: 'scratch, A,B,d like_base delta, from_z 0.1'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 1.86 / 4.86 / 1.72
+      rho_A: 1.0081
+      B_fro_w: 262.02
+      separation_auc: 0.8235294117647058
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fabdz/refit_report.json'
+    closed_loop:
+      summary: '_tol50b 5/16, strict 5/16'
+      source: 'data/lcs/realfirst/cmp/v12_152/e2e_V62x/summarize.out, strict_V62x.md'
+- id: V62y
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fabdz0
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fabdz0/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fabdz0/ckpt/2026-11-03/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62y/deploy_v39y
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62y_s2/deploy_v39y
+  date: '2026-11-04'
+  parent: null
+  change: 'V62x without the delta L2'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 2.50 / 4.74 / 1.74
+      rho_A: 1.0070
+      B_fro_w: 425.04
+      separation_auc: 0.7130124777183601
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fabdz0/refit_report.json'
+    closed_loop:
+      summary: '_tol50b 3/16, strict 1/16 (seated 16/16)'
+      source: 'data/lcs/realfirst/cmp/v12_152/e2e_V62y/summarize.out, strict_V62y.md'
+- id: V62z
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0/ckpt/2026-11-03/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62z/deploy_v39z
+  - data/lcs/realfirst/cmp/encoder_study/sim/V62z_s2/deploy_v39z
+  date: '2026-11-04'
+  parent: null
+  change: 'V62w without the delta L2 (scratch, all-matrix zero-init delta, ms ramp, from_z 0.1)'
+  flags:
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 2.41 / 5.71 / 1.76
+      rho_A: 1.0101
+      B_fro_w: 297.70
+      separation_auc: 0.8502673796791443
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0/refit_report.json'
+    closed_loop:
+      summary: '_tol50b 2/16, strict 2/16'
+      source: 'data/lcs/realfirst/cmp/v12_152/e2e_V62z/summarize.out, strict_V62z.md'
+- id: V63a
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0a
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0a/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0a/ckpt/2026-11-03/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports: []
+  date: '2026-11-04'
+  parent: V62z
+  change: 'V62z recipe + anchor (alpha 0.5): belt points [xyz, alpha x along-belt distance g from the Franka tip] in encoder, decoder and Chamfer'
+  flags:
+    belt_anchor_g: '0.5'
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'offline only'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 3.07 / 9.83 / 2.48
+      rho_A: 1.0077
+      B_fro_w: 247.69
+      separation_auc: 0.6880570409982175
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0a/refit_report.json'
+    closed_loop:
+      summary: 'e2e postponed by the user (anchor must first predict small-pulley belt motion); e2e stage-2 k0 xyz 2.96 mm'
+      source: 'data/lcs/realfirst/cmp/v12_152/chain.status, logs/bme_fold_scratch_e2e.log'
+- id: V63b
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wz01a
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wz01a/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wz01a/ckpt/2026-11-03/no_wandb/checkpoint_epoch_0070.pt
+  step: 70
+  exports: []
+  date: '2026-11-04'
+  parent: V62p
+  change: 'V62p recipe (warm) + anchor alpha 0.5'
+  flags:
+    belt_anchor_g: '0.5'
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '70'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'offline only'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 5.57 / 12.37 / 3.51
+      rho_A: 1.0181
+      B_fro_w: 251.62
+      separation_auc: 0.6417112299465241
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wz01a/refit_report.json'
+    closed_loop:
+      summary: 'e2e postponed; refit one_step 5.57 / h7 12.37 / recon 3.51 mm'
+      source: 'data/lcs/realfirst/cmp/v12_152/chain.status, logs/bme_fold_warm_e2e.log'
+- id: V63c
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r/config.yaml
+  checkpoint: null
+  step: null
+  exports: []
+  date: null
+  parent: V62z
+  change: 'anchor 0.5 + ring decoder (68 ordered nodes, node 0 = anchor)'
+  flags:
+    belt_anchor_g: '0.5'
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    belt_ring_nodes: '68'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'abandoned'
+  results:
+    offline: null
+    closed_loop:
+      summary: 'stopped: observed g took the long way round in 15-26 % of frames; restarted with the fold (V63f)'
+      source: 'data/lcs/realfirst/cmp/v12_152/chain.status'
+- id: V63d
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wz01r
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wz01r/config.yaml
+  checkpoint: null
+  step: null
+  exports: []
+  date: null
+  parent: V62p
+  change: 'V62p recipe + anchor 0.5 + ring 68'
+  flags:
+    belt_anchor_g: '0.5'
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    belt_ring_nodes: '68'
+    epochs: '90'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'abandoned'
+  results:
+    offline: null
+    closed_loop:
+      summary: 'stopped with V63c (restarted as V63g)'
+      source: 'data/lcs/realfirst/cmp/v12_152/chain.status'
+- id: V63e
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0af
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0af/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0af/ckpt/2026-11-04/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports: []
+  date: '2026-11-04'
+  parent: V63a
+  change: 'V63a + fold 0.645 (g > L/2 -> L - g), free points'
+  flags:
+    belt_anchor_g: '0.5'
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'offline only'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 2.81 / 10.46 / 2.12
+      rho_A: 1.0026
+      B_fro_w: 257.94
+      separation_auc: 0.8823529411764706
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0af/refit_report.json'
+    closed_loop:
+      summary: 'e2e stage-2 k0 xyz 2.92 mm (V62z 2.30)'
+      source: 'data/lcs/realfirst/cmp/v12_152/logs/bme_fold_scratch_e2e.log'
+- id: V63f
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0rf
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0rf/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0rf/ckpt/2026-11-04/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports: []
+  date: '2026-11-04'
+  parent: V63c
+  change: 'ring 68 + fold, V62z recipe'
+  flags:
+    belt_anchor_g: '0.5'
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    belt_ring_nodes: '68'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'offline only'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 8.74 / 65.79 / 8.49
+      rho_A: 1.0174
+      B_fro_w: 417.17
+      separation_auc: 0.7183600713012478
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0rf/refit_report.json'
+    closed_loop:
+      summary: 'e2e stage-2 k0 xyz 7.05 mm'
+      source: 'data/lcs/realfirst/cmp/v12_152/logs/bme_fold_scratch_e2e.log'
+- id: V63g
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wz01rf
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wz01rf/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wz01rf/ckpt/2026-11-04/no_wandb/checkpoint_epoch_0090.pt
+  step: 90
+  exports: []
+  date: '2026-11-04'
+  parent: V63d
+  change: 'ring 68 + fold, V62p recipe (warm, fresh ring layer, 30 AE-only epochs)'
+  flags:
+    belt_anchor_g: '0.5'
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    belt_ring_nodes: '68'
+    epochs: '90'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'offline only'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 26.16 / 27.20 / 10.11
+      rho_A: 1.0022
+      B_fro_w: 328.01
+      separation_auc: 0.7058823529411765
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_wz01rf/refit_report.json'
+    closed_loop:
+      summary: 'e2e stage-2 k0 xyz 7.05 mm; refit one_step 26.2 mm'
+      source: 'data/lcs/realfirst/cmp/v12_152/logs/bme_fold_warm_e2e.log'
+- id: V63h
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0rn
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0rn/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0rn/ckpt/2026-11-04/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V63h/deploy_v39h
+  - data/lcs/realfirst/cmp/encoder_study/sim/V63h_s2/deploy_v39h
+  date: '2026-11-04'
+  parent: V63f
+  change: 'ablation: ring 68 + fold, alpha 0.001 (g ~ invisible)'
+  flags:
+    belt_anchor_g: '0.001'
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    belt_ring_nodes: '68'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'rejected'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 2.59 / 5.41 / 2.40
+      rho_A: 0.9984
+      B_fro_w: 121.67
+      separation_auc: 0.7522281639928698
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0rn/refit_report.json'
+    closed_loop:
+      summary: '_tol50b 0/16, strict 0/16 (seated 6/16); e2e stage-2 k0 xyzgt 4.14 mm'
+      source: 'data/lcs/realfirst/cmp/v12_152/e2e_V63h/summarize.out, strict_V63h.md, logs/bme_ablate_e2e.log'
+- id: V63i
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r1
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r1/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r1/ckpt/2026-11-04/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports: []
+  date: '2026-11-04'
+  parent: V63f
+  change: 'ablation: alpha 1.0'
+  flags:
+    belt_anchor_g: '1.0'
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    belt_ring_nodes: '68'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'offline only'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 22.39 / 37.79 / 21.97
+      rho_A: 1.0028
+      B_fro_w: 0.16
+      separation_auc: 0.6292335115864528
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r1/refit_report.json'
+    closed_loop:
+      summary: 'e2e stage-2 k0 xyzgt 16.00 mm'
+      source: 'data/lcs/realfirst/cmp/v12_152/logs/bme_ablate_e2e.log'
+- id: V63j
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r05
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r05/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r05/ckpt/2026-11-04/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports:
+  - data/lcs/realfirst/cmp/encoder_study/sim/V63j/deploy_v39j
+  - data/lcs/realfirst/cmp/encoder_study/sim/V63j_s2/deploy_v39j
+  date: '2026-11-04'
+  parent: V63f
+  change: 'alpha sweep: ring 68 + fold, alpha 0.05 (best offline)'
+  flags:
+    belt_anchor_g: '0.05'
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    belt_ring_nodes: '68'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'candidate'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 3.24 / 5.48 / 3.19
+      rho_A: 1.0053
+      B_fro_w: 252.76
+      separation_auc: 0.8128342245989305
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r05/refit_report.json'
+    closed_loop:
+      summary: '_tol50b 7/16, strict 4/16 (seated 16/16); e2e stage-2 k0 xyzgt 3.77 mm'
+      source: 'data/lcs/realfirst/cmp/v12_152/e2e_V63j/summarize.out, strict_V63j.md, logs/bme_sweep_e2e.log'
+- id: V63k
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r15
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r15/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r15/ckpt/2026-11-04/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports: []
+  date: '2026-11-04'
+  parent: V63f
+  change: 'alpha 0.15'
+  flags:
+    belt_anchor_g: '0.15'
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    belt_ring_nodes: '68'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '5'
+  data: 'W150all'
+  seed: 5
+  run: V12-152
+  status: 'offline only'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 3.92 / 5.69 / 3.88
+      rho_A: 1.0045
+      B_fro_w: 256.16
+      separation_auc: 0.7896613190730838
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r15/refit_report.json'
+    closed_loop:
+      summary: 'e2e stage-2 k0 xyzgt 4.06 mm; no e2e'
+      source: 'data/lcs/realfirst/cmp/v12_152/logs/bme_sweep_e2e.log'
+- id: V63l
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0rn6
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0rn6/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0rn6/ckpt/2026-11-04/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports: []
+  date: '2026-11-04'
+  parent: V63h
+  change: 'V63h (alpha 0.001) seed 6'
+  flags:
+    belt_anchor_g: '0.001'
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    belt_ring_nodes: '68'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '6'
+  data: 'W150all'
+  seed: 6
+  run: V12-152
+  status: 'offline only'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 4.48 / 14.73 / 3.62
+      rho_A: 1.0028
+      B_fro_w: 2.98
+      separation_auc: 0.7058823529411765
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0rn6/refit_report.json'
+    closed_loop:
+      summary: 'e2e stage-2 k0 xyzgt 5.27 mm; no e2e'
+      source: 'data/lcs/realfirst/cmp/v12_152/logs/bme_sweep_e2e.log'
+- id: V63m
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r05s6
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r05s6/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r05s6/ckpt/2026-11-04/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports: []
+  date: '2026-11-04'
+  parent: V63j
+  change: 'V63j seed 6'
+  flags:
+    belt_anchor_g: '0.05'
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    belt_ring_nodes: '68'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '6'
+  data: 'W150all'
+  seed: 6
+  run: V12-152
+  status: 'abandoned'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 13.00 / 20.85 / 6.13
+      rho_A: 1.0034
+      B_fro_w: 2.61
+      separation_auc: 0.45454545454545453
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r05s6/refit_report.json'
+    closed_loop:
+      summary: 'collapsed offline (e2e stage-2 k0 xyzgt 9.50 mm vs V63j 3.77); e2e cancelled'
+      source: 'data/lcs/realfirst/cmp/v12_152/logs/bme_seeds_e2e.log'
+- id: V63n
+  tag: null
+  run_dir: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r05s7
+  config: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r05s7/config.yaml
+  checkpoint: ~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r05s7/ckpt/2026-11-04/no_wandb/checkpoint_epoch_0250.pt
+  step: 250
+  exports: []
+  date: '2026-11-04'
+  parent: V63j
+  change: 'V63j seed 7'
+  flags:
+    belt_anchor_g: '0.05'
+    belt_ctx_dim: '16'
+    belt_encoder_inputs: 'seg_ctx'
+    belt_ring_nodes: '68'
+    epochs: '250'
+    latent_dim: '32'
+    n_dyn_heads: '2'
+    seed: '7'
+  data: 'W150all'
+  seed: 7
+  run: V12-152
+  status: 'abandoned'
+  results:
+    offline:
+      refit_one_step_h7_recon_mm: 15.24 / 15.25 / 15.24
+      rho_A: 0.9983
+      B_fro_w: 6.74
+      separation_auc: 0.5472370766488414
+      source: '~/git/lcs_learning/outputs/sim_belt_v12_20261006/v12_152/J152_fpz0r05s7/refit_report.json'
+    closed_loop:
+      summary: 'collapsed offline (xyzgt 11.91 mm); e2e cancelled'
+      source: 'data/lcs/realfirst/cmp/v12_152/logs/bme_seeds_e2e.log'
 evals:
 - label: BL · nom · - · -
   model: BL

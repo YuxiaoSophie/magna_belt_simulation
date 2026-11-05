@@ -31,10 +31,16 @@ import argparse
 import dataclasses
 import json
 import math
+import os
 import sys
 import time
 import zlib
 from collections import Counter
+
+# Before numpy/torch load; children (MPPI node, OSC) inherit it. Idle OpenMP/BLAS workers spin
+# and delay this process's LCM wakeups by tens of ms.
+for _v in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS"):
+    os.environ.setdefault(_v, "1")
 from pathlib import Path
 
 import numpy as np
@@ -60,13 +66,16 @@ from round_belt_task.episode_io import (
     write_json,
 )
 from round_belt_task.motion import MotionError
-from round_belt_task.osc_bridge import OscTimeout
+from round_belt_task.offline_simulation import held_for
+from round_belt_task.osc_bridge import UTIME_PER_STEP, OscTimeout
 from round_belt_task.outcome import (
     LABELS,
+    SMALL_SEAT_MM,
     classify,
     classify_episode,
     frame_metrics,
     slant_episode,
+    success_both,
 )
 from round_belt_task.waypoints import (
     MAGNA_PARAMS_SIM_YAML,
@@ -78,11 +87,15 @@ from task_common import clearance_model as cm
 from task_common import lcs_dataset as lcs
 from task_common import sim_snapshot
 from task_common.latent_encoder import (
+    FRANKA_CLOSED_MM,
+    UR_CLOSED_BYTE,
     BeltCloudPointNetEncoder,
+    BeltCtxEncoder,
     DemoGoals,
     LatentEncoder,
     LearnedLcs,
     encoder_input,
+    grip_features,
     latent_state_message,
 )
 from task_common.lcm_contract import LcmChannels
@@ -123,6 +136,7 @@ PRED_ITERS = 25
 N_KNOTS = 7
 END_POLL_S = 0.05
 UR_EXACT_DT_TOL_S = 1e-6  # line knot times are utime-quantised (1 us)
+PACE_CAP_S = 0.05  # --realtime: a lag beyond this rebases the clock instead of a catch-up burst
 RESET_ARG_DEFAULTS = {"reset": "snapshot", "reset_spec": []}
 CLOUD_ARG_DEFAULTS = {"cloud_noise": "off", "belt_seg": False, "belt_seg_source": "camera"}
 CONTROLLERS = ("magna", "mppi")
@@ -143,6 +157,56 @@ BANK_ARG_DEFAULTS = {"mppi_waypoint_bank": None, "mppi_bank_knn": 1}
 CMD_RESPONSE, CMD_IN_FORCE, CMD_NONE = 0, 1, 2
 CMD_PREFIX = 3  # demo-prefix replay before the controller starts (demo_prefix.py)
 PREFIX_ARG_DEFAULTS = {"prefix_demos": None, "prefix_frac": 0.0, "prefix_offset_to_node": None}
+STAGE2_ARG_DEFAULTS = {"end_snapshot": False, "grasp_arms": "both", "outcome_pulley": "large",
+                       "small_thresholds": None, "post_mpc": None,
+                       "start_settle_s": START_SETTLE_S, "franka_width_max": None,
+                       "clearance_jaw_bytes": None, "stage2_chain": False, "stage2_deploy": None,
+                       "stage2_waypoints": None, "stage2_mppi_config": None,
+                       "stage2_max_episode_s": 30.0, "stage2_early_stop": "4,20,12",
+                       "stage2_mppi_max_duration_s": 3.0, "ur_exit_byte": 191,
+                       "ur_exit_settle_s": 2.0, "ur_exit_lift_mm": 40.0, "ur_exit_speed_mps": 0.05,
+                       "ur_exit_final_settle_s": 1.0}
+# --stage2-teleop (stage2_teleop.py): chain-only, dropped from index.args at default.
+TELEOP_ARG_DEFAULTS = {"stage2_teleop": False, "teleop_lin_mps": 0.05, "teleop_ang_rps": 0.1666,
+                       "teleop_tilt_deg": 29.5, "teleop_floor_mm": 2.0, "teleop_max_s": 300.0,
+                       "teleop_wait_s": 10.0, "teleop_stale_s": 0.5, "live_viewer": False,
+                       "viewer_port": 8080, "render_every": 20,
+                       "teleop_channel": "SPACE_MOUSE_FRANKA_STATE", "teleop_stage1": False,
+                       "teleop_cmd_file": None}
+STAGE2_ARG_DEFAULTS.update(TELEOP_ARG_DEFAULTS)
+STAGE2_ARG_DEFAULTS["publish_body_poses"] = False
+STAGE2_ARG_DEFAULTS["realtime"] = False
+VIEWER_ARGS = ("live_viewer", "viewer_port", "render_every", "publish_body_poses", "realtime")
+# --stage2-scripted (stage2_scripted.py): chain-only, dropped from index.args at default.
+SCRIPTED_ARG_DEFAULTS = {"stage2_scripted": False, "scripted_params": "nominal",
+                         "scripted_dart": 0.0, "scripted_seed": 20261019, "scripted_set": None}
+STAGE2_ARG_DEFAULTS.update(SCRIPTED_ARG_DEFAULTS)
+# --stage2-start-snapshot (V12-125, MILES branch source): chain-only, dropped at default.
+S2SNAP_ARG_DEFAULTS = {"stage2_start_snapshot": False}
+STAGE2_ARG_DEFAULTS.update(S2SNAP_ARG_DEFAULTS)
+# --scripted-ur (V12-130): hold / feed = no UR exit, the UR keeps its grasp through the scripted
+# walk and both hands open at the release; chain + --stage2-scripted only, dropped at default.
+SCRIPTED_UR_ARG_DEFAULTS = {"scripted_ur": "exit"}
+STAGE2_ARG_DEFAULTS.update(SCRIPTED_UR_ARG_DEFAULTS)
+# --log-plan-age (V12-125): per-frame sim_plan_age_s, dropped from index.args at default.
+PLANAGE_ARG_DEFAULTS = {"log_plan_age": False}
+# --franka-grip-n (V12-132): force-limited Franka squeeze in the sim, dropped at default.
+GRIP_ARG_DEFAULTS = {"franka_grip_n": None}
+TELEOP_LEAD = {"lead_m": 0.02, "lead_deg": 15.0}  # target vs measured (anti-runaway)
+POST_MPC = ("stage2_release",)
+POST_PHASES = ("release", "out", "lift", "settle")  # phase labels "post:<p>" after "done"
+CMD_POST = 6  # post-MPC scripted release (stage2_collect uses 5 for its scripted walk)
+CMD_UR_EXIT = 8  # --stage2-chain UR open + exit (stage2_onpolicy uses 7)
+UR_EXIT_PHASES = ("ur:open", "ur:lift", "ur:park", "ur:settle")
+CMD_TELEOP = 9  # --stage2-teleop SpaceMouse phase
+CHAIN_ARGS = [k for k in STAGE2_ARG_DEFAULTS if k.startswith(("stage2_", "ur_exit_"))
+              or k in TELEOP_ARG_DEFAULTS or k in SCRIPTED_ARG_DEFAULTS
+              or k in SCRIPTED_UR_ARG_DEFAULTS]
+
+
+def _nodeless(ch: dict) -> bool:
+    """Teleop / scripted stage 2: no stage-2 node, stage 1's encoder throughout."""
+    return bool(ch.get("teleop") or ch.get("scripted"))
 
 
 def create_parser() -> argparse.ArgumentParser:
@@ -260,6 +324,126 @@ def create_parser() -> argparse.ArgumentParser:
                         "demo with the nearest initial latent (latent_waypoints.py --bank-out)")
     p.add_argument("--mppi-bank-knn", type=int, default=b["mppi_bank_knn"],
                    help="mppi bank: mean of the k nearest demos (1 = nearest only)")
+    g = STAGE2_ARG_DEFAULTS
+    p.add_argument("--end-snapshot", action="store_true", default=g["end_snapshot"],
+                   help="save the sim state at each episode end to <out>/end_states/<name>.npz")
+    p.add_argument("--grasp-arms", choices=("both", "franka"), default=g["grasp_arms"],
+                   help="grasp-lost checks (after settle, per frame) on both arms or the Franka "
+                        "only (UR already released)")
+    p.add_argument("--outcome-pulley", choices=("large", "small", "both"),
+                   default=g["outcome_pulley"],
+                   help="episode label / early-stop stream: the large pulley, the small one, or "
+                        "engaged iff both are (else the failing pulley's label)")
+    p.add_argument("--small-thresholds", nargs="*", default=g["small_thresholds"],
+                   metavar="KEY=VALUE", help="OutcomeThresholds overrides for the small pulley")
+    p.add_argument("--post-mpc", choices=POST_MPC, default=g["post_mpc"],
+                   help="after the MPC (end marker + --settle-s, --max-episode-s, early stop or "
+                        "abort): stage2_release = stage2_collect's release (hand open, out to r 45 "
+                        "mm, lift, settle); the episode label is the one after it (needs "
+                        "--grasp-arms franka --outcome-pulley both)")
+    p.add_argument("--start-settle-s", type=float, default=g["start_settle_s"],
+                   help="settle after the start-state restore, before the controller")
+    p.add_argument("--franka-width-max", type=float, default=g["franka_width_max"],
+                   help="held() Franka hand-width limit mm (stage-2 belt: 20, as the collector)")
+    p.add_argument("--clearance-jaw-bytes", type=int, nargs="+", default=g["clearance_jaw_bytes"],
+                   help="2F-85 jaw bytes of the board-clearance abort geometry (default: the "
+                        "nominal plan's; stage 2: the parked UR's 191)")
+    p.add_argument("--stage2-chain", action="store_true", default=g["stage2_chain"],
+                   help="whole run: stage-1 MPC (both arms, large pulley) -> scripted UR open + "
+                        "exit (stage2_starts.ur_exit) -> a stage-2 MPC node (--stage2-*) -> "
+                        "--post-mpc stage2_release; stage 1 not engaged -> no exit / stage 2")
+    p.add_argument("--stage2-deploy", type=Path, default=g["stage2_deploy"],
+                   help="chain: the stage-2 node's deploy.npz (its encoder in stage 2)")
+    p.add_argument("--stage2-waypoints", type=Path, default=g["stage2_waypoints"],
+                   help="chain: the stage-2 latent_waypoints.py artifact")
+    p.add_argument("--stage2-mppi-config", type=Path, default=g["stage2_mppi_config"],
+                   help="chain: the stage-2 MppiParams yaml")
+    p.add_argument("--stage2-max-episode-s", type=float, default=g["stage2_max_episode_s"],
+                   help="chain: stage-2 timeout")
+    p.add_argument("--stage2-early-stop", default=g["stage2_early_stop"],
+                   metavar="W_ENGAGED,W_FAIL,T_MIN", help="chain: stage-2 early stop (both label)")
+    p.add_argument("--stage2-mppi-max-duration-s", type=float,
+                   default=g["stage2_mppi_max_duration_s"],
+                   help="chain: the stage-2 node's --mppi-max-duration-s (final hold)")
+    p.add_argument("--ur-exit-byte", type=int, default=g["ur_exit_byte"],
+                   help="chain: 2F-85 release byte (and the exit's clearance geometry)")
+    p.add_argument("--ur-exit-settle-s", type=float, default=g["ur_exit_settle_s"],
+                   help="chain: settle after the UR opens")
+    p.add_argument("--ur-exit-lift-mm", type=float, default=g["ur_exit_lift_mm"])
+    p.add_argument("--ur-exit-speed-mps", type=float, default=g["ur_exit_speed_mps"])
+    p.add_argument("--ur-exit-final-settle-s", type=float, default=g["ur_exit_final_settle_s"],
+                   help="chain: settle after the UR parks at place_9")
+    e = TELEOP_ARG_DEFAULTS
+    p.add_argument("--stage2-teleop", action="store_true", default=e["stage2_teleop"],
+                   help="chain: a SpaceMouse teleop phase (stage2_teleop.py) replaces the "
+                        "stage-2 node (no --stage2-deploy/-waypoints/-mppi-config)")
+    p.add_argument("--teleop-lin-mps", type=float, default=e["teleop_lin_mps"],
+                   help="teleop: full-deflection linear speed")
+    p.add_argument("--teleop-ang-rps", type=float, default=e["teleop_ang_rps"],
+                   help="teleop: full-deflection angular speed")
+    p.add_argument("--teleop-tilt-deg", type=float, default=e["teleop_tilt_deg"],
+                   help="teleop: Franka tilt cap (the stage-2 MPC's)")
+    p.add_argument("--teleop-floor-mm", type=float, default=e["teleop_floor_mm"],
+                   help="teleop: finger_tip target floor above the plate")
+    p.add_argument("--teleop-max-s", type=float, default=e["teleop_max_s"],
+                   help="teleop: phase limit (sim s), then done (the no-tty path)")
+    p.add_argument("--teleop-wait-s", type=float, default=e["teleop_wait_s"],
+                   help="teleop: wait for a first SpaceMouse message before stepping")
+    p.add_argument("--teleop-stale-s", type=float, default=e["teleop_stale_s"],
+                   help="teleop: zero velocity when the last message is older (wall)")
+    vx = p.add_mutually_exclusive_group()  # --realtime bypasses the viewer's control_step wrap
+    vx.add_argument("--live-viewer", action="store_true", default=e["live_viewer"],
+                    help="a viser view of the sim (teleop: during the teleop phase only)")
+    p.add_argument("--viewer-port", type=int, default=e["viewer_port"])
+    p.add_argument("--render-every", type=int, default=e["render_every"],
+                   help="--live-viewer render / --publish-body-poses publish period (steps)")
+    p.add_argument("--publish-body-poses", action="store_true", default=g["publish_body_poses"],
+                   help="publish every body pose on NEWTON_VIEWER_DRAW every --render-every "
+                        "steps (scripts/lcm_viewer.py)")
+    vx.add_argument("--realtime", action="store_true", default=g["realtime"],
+                    help="pace every sim step on one absolute wall clock (--pace x sim time, late "
+                         "steps catch up, a lag > 50 ms rebases), start the stage-2 node during "
+                         "the UR exit, overlap the MPC loop's bookkeeping with the GPU step")
+    p.add_argument("--teleop-channel", default=e["teleop_channel"],
+                   help="teleop: lcmt_spacemouse_state channel on --lcm-url")
+    p.add_argument("--teleop-stage1", action="store_true", default=e["teleop_stage1"],
+                   help="teleop: stage 1 is a teleop phase too (--mode baseline, no controller; "
+                        "the UR holds), d -> UR exit")
+    p.add_argument("--teleop-cmd-file", type=Path, default=e["teleop_cmd_file"],
+                   help="teleop: keys also from this file (first char, emptied once read)")
+    e = SCRIPTED_ARG_DEFAULTS
+    p.add_argument("--stage2-scripted", action="store_true", default=e["stage2_scripted"],
+                   help="chain: stage2_collect's scripted D10L walk (no loops) replaces the "
+                        "stage-2 node (no --stage2-deploy/-waypoints/-mppi-config)")
+    p.add_argument("--scripted-params", choices=("nominal", "draw"),
+                   default=e["scripted_params"],
+                   help="scripted: D10L nominal parameters or a draw from PARAM_RANGES")
+    p.add_argument("--scripted-dart", type=float, default=e["scripted_dart"],
+                   help="scripted: knot-noise scale x stage2_collect.DART sigmas (0 = none)")
+    p.add_argument("--scripted-seed", type=int, default=e["scripted_seed"],
+                   help="scripted: parameter / noise seed (keyed with the episode name)")
+    p.add_argument("--scripted-set", action="append", default=e["scripted_set"],
+                   metavar="KEY=VALUE",
+                   help="scripted: override one walk parameter (stage2_collect.NOMINAL key) after "
+                        "--scripted-params (repeat)")
+    p.add_argument("--scripted-ur", choices=("exit", "hold", "feed"),
+                   default=SCRIPTED_UR_ARG_DEFAULTS["scripted_ur"],
+                   help="scripted: exit = UR open + exit before the walk; hold = the UR keeps its "
+                        "grasp at its stage-1 end pose; feed = keeps it and moves toward the small "
+                        "pulley during descent..arc, back in the end hold; hold/feed open both "
+                        "hands at the release")
+    p.add_argument("--stage2-start-snapshot", action="store_true",
+                   default=S2SNAP_ARG_DEFAULTS["stage2_start_snapshot"],
+                   help="chain: save the state after the UR exit (stage-2 start) to "
+                        "<out>/stage2_states/<name>.npz")
+    p.add_argument("--log-plan-age", action="store_true",
+                   default=PLANAGE_ARG_DEFAULTS["log_plan_age"],
+                   help="per frame sim_plan_age_s: OSC time the controller's Franka plan in force "
+                        "is first applied (the first state after the bridge received it, +-1 "
+                        "control step) minus the latent utime it was solved for; NaN without a plan")
+    p.add_argument("--franka-grip-n", type=float, default=GRIP_ARG_DEFAULTS["franka_grip_n"],
+                   metavar="N", help="sim Franka squeeze force [N, both fingers], force-limited "
+                                     "(RoundBeltLcmSimulation --franka-grip-n); default the yaml's")
     return p
 
 
@@ -419,6 +603,11 @@ class EvalContext:
     reset: dict | None = None  # --reset scripted: {module, spec, rng, homes}
     mppi: dict | None = None  # --controller mppi: _mppi_options
     prefix: dict | None = None  # --prefix-frac > 0: _prefix_options
+    outcome_pulley: str = "large"
+    small_thresholds: object = None
+    post_mpc: str | None = None
+    chain: dict | None = None  # --stage2-chain: _chain_options (+ "pp": phase2_probe ctx)
+    pacer: Pacer | None = None  # --realtime
 
     @property
     def plate_top_z(self) -> float:
@@ -452,7 +641,7 @@ def _marker_events(lines: list[tuple[str, float]], mode: str) -> dict:
 
 def _phase_and_stage(ctx: EvalContext, ev: dict, t: float) -> tuple[int, int]:
     """(phase index into ``ctx.phase_labels``, stage count) at osc time ``t``."""
-    n_pre, done = ctx.n_pre, len(ctx.phase_labels) - 1
+    n_pre, done = ctx.n_pre, ctx.phase_labels.index("done")
     pre_done = sum(1 for tt in ev["pre_reached"].values() if tt <= t + 1e-9)
     stages_done = sum(1 for s in ev["stages"].values() if s["t"] <= t + 1e-9)
     stage = stages_done if ctx.mode == "learned" else pre_done
@@ -497,6 +686,10 @@ def _resolve_commands(frames: list[dict], bridge: ControllerBridge, dt_step: flo
         fr["knots"], fr["knot_times"] = knots[:N_KNOTS].copy(), np.asarray(times[:N_KNOTS])
         fr["knot0"], fr["knot1"] = knots[0].copy(), knots[1].copy()
         fr["cmd_source"] = source
+        if bridge.plan_recv_utime is not None:
+            got = None if pick is None else bridge.plan_recv_utime.get(pick.utime)
+            fr["plan_age_s"] = (math.nan if got is None
+                                else (got + UTIME_PER_STEP - pick.utime) * 1e-6)
         line = None
         if pick is not None:
             line = next((m for m in lines if m.wall >= pick.wall), None)
@@ -550,6 +743,7 @@ def build_writer(frames: list[dict], pcd: bool,
     writer = lcs.EpisodeWriter(sample_steps=SAMPLE_STEPS, action_definition=definition)
     track = cli.tracking_errors(frames)
     realised = lcs.realised_delta(np.stack([fr["prop"] for fr in frames]))
+    plan_age = any("plan_age_s" in fr for fr in frames)
     for t, fr in enumerate(frames):
         action = frame_action(fr, definition)
         cloud = fr["cloud"] if pcd else np.zeros((1, 3), np.float32)
@@ -586,6 +780,8 @@ def build_writer(frames: list[dict], pcd: bool,
                                  frame_action(fr, "knot1_minus_measured"),
                              "realised_delta": realised[t],
                              **cli.cloud_feature_extras(fr),
+                             **({"plan_age_s": np.float64(fr.get("plan_age_s", math.nan))}
+                                if plan_age else {}),
                          })
     return writer, track
 
@@ -613,9 +809,9 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int,
         ctx.cloud_rng = np.random.default_rng([zlib.crc32(state.id.encode()), repeat,
                                                cli.CLOUD_NOISE_RNG])
     t1 = time.perf_counter()
-    grasp = sim.settle(round(START_SETTLE_S / dt))
+    grasp = sim.settle(round(getattr(args, "start_settle_s", START_SETTLE_S) / dt))
     timing["settle"] = time.perf_counter() - t1
-    if grasp.held() != (True, True):
+    if not grasp.held_for(args.grasp_arms):
         logger.warning(f"[EVAL] {name} skipped: grasp lost after settle ({grasp.describe()})")
         return {**row, "file": None, "status": "skipped", "outcome": None,
                 "reason": f"grasp lost after settle ({grasp.describe()})"}
@@ -634,21 +830,31 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int,
     t2 = time.perf_counter()
     events_raw: list[tuple[str, float]] = []
     status, reason = "ok", None
+    tp1 = ctx.chain is not None and ctx.chain.get("teleop_s1", False)
     try:
-        if ctx.mppi is None:
+        if tp1:  # --teleop-stage1: no controller, the operator drives the Franka
+            pass
+        elif ctx.mppi is None:
             ctrl.start(args.lcm_url, ctx.params_rel, log_path, magna_root=args.magna_root)
         else:
             off = (pre["report"]["node_offset_frames"]
                    if pre is not None and ctx.prefix["offset_to_node"] else None)
             _start_mppi(ctrl, ctx, log_path, demo_offset_frames=off)
-        ctrl.wait_for(CONTROLLER_STARTED, CONTROLLER_START_TIMEOUT_S)
+        if not tp1:
+            ctrl.wait_for(CONTROLLER_STARTED, CONTROLLER_START_TIMEOUT_S)
         if ctx.controller_info is None:
             ctx.controller_info = ctrl.describe()
         timing["controller_start"] = time.perf_counter() - t2
         if args.record and pre is None:
             _start_recording(sim, ctx, state, name)
         sampler = _sampler(sim, ctx) if pre is None else pre["sampler"]
-        loop = _run_loop(sim, ctx, ctrl, sampler, events_raw)
+        kw = {} if ctx.chain is None else {"outcome_pulley": "large"}  # stage 1: large label
+        if tp1:
+            import stage2_teleop
+
+            loop = stage2_teleop.stage1(sim, ctx, sampler, timing, args)
+        else:
+            loop = _run_loop(sim, ctx, ctrl, sampler, events_raw, **kw)
         status, reason = loop["status"], loop["reason"]
         frames = loop["frames"]
         n_pre = pre_steps = 0
@@ -657,13 +863,7 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int,
             for fr in frames:
                 fr["step"] += pre_steps
             frames = pre["frames"] + frames
-        # Late answers to the last published state.
-        end = time.perf_counter() + END_POLL_S
-        while time.perf_counter() < end:
-            bridge.poll()
-            time.sleep(0.005)
-        events_raw.extend((line, sim.osc_time_s()) for line in ctrl.read_new_lines()
-                          if any(m in line for m in CONTROLLER_MARKERS))
+        _late_markers(sim, ctrl, events_raw)
     except BaseException:
         if pre is not None:  # the prefix opened the recording before the controller start
             finish_recording(sim, ctx.out, name, "controller error after the prefix")
@@ -671,29 +871,96 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int,
     finally:
         ctrl_code = ctrl.stop()
         sim.commander_hook = sim.make_hold_hook()
+    chain = None
+    if ctx.chain is not None:
+        # --realtime: the stage-2 node starts before the UR exit; stopped here on every path
+        early = getattr(args, "realtime", False) and not _nodeless(ctx.chain)
+        node2 = MppiControllerProcess() if early else None
+        try:
+            chain = _chain_stage2(sim, ctx, sampler, frames, n_pre, pre_steps, loop, name, timing,
+                                  node2)
+        finally:
+            if node2 is not None:
+                node2.stop()
+        frames = frames + chain["frames"]
+    release = None
+    if ctx.post_mpc is not None and not (chain is not None and chain["stopped"]):
+        release = _post_mpc_release(sim, ctx if chain is None else chain["ctx2"], sampler,
+                                    frames[-1], timing)
+    end_state = None
+    if args.end_snapshot:
+        snap = sim_snapshot.capture(sim, f"end:{name}", notes=f"{ctx.mode} episode end; status "
+                                    f"{status}; reason {reason}")
+        end_state = f"end_states/{name}.npz"
+        sim_snapshot.save(snap, ctx.out / end_state)
     timing.update(loop["timing"])
     recording = finish_recording(sim, ctx.out, name, "episode done")
 
     t3 = time.perf_counter()
     ev = _marker_events(events_raw, ctx.mode)
-    _resolve_commands(frames[n_pre:], bridge, dt)
+    if chain is None:  # the chain resolved stage 1 before the stage-2 node
+        _resolve_commands(frames[n_pre:], bridge, dt)
     t_start = frames[n_pre]["time"]
+    n_mpc = len(frames)
+    if release is not None:
+        frames = frames + release["frames"]
     if ctx.reset is not None and from_reset is None:
         ctx.reset["homes"].setdefault(state.id, (frames[0]["ee_f"].copy(),
                                                  frames[0]["ee_u"].copy()))
-    done = len(ctx.phase_labels) - 1
+    done = ctx.phase_labels.index("done")
+    io = bridge if chain is None else chain["io1"]
     for j, fr in enumerate(frames):
+        if j >= n_mpc:  # post-MPC release
+            fr["phase"] = ctx.phase_labels.index(f"post:{fr['post_phase']}")
+            fr["stage"] = frames[n_mpc - 1]["stage"]
+            fr["ctrl_hand_mm"], fr["ctrl_robotiq"] = release["report"]["hand_mm"], -1
+            continue
+        if chain is not None and (tp1 or j >= chain["from"][0]):  # set by the chain / teleop
+            fr.setdefault("stage", frames[chain["from"][0] - 1]["stage"])  # exit: stage 1's
+            continue
         fr["phase"], fr["stage"] = _phase_and_stage(ctx, ev, fr["time"])
         if pre is not None:  # phase 0 = the prefix label; "done" stays last
             fr["phase"] = 0 if j < n_pre else (done if fr["phase"] == done else fr["phase"] + 1)
-        fr["ctrl_hand_mm"], fr["ctrl_robotiq"] = _gripper_at(bridge, fr["wall"])
-    latent_stats = _latent_diagnostics(ctx, frames)
+        fr["ctrl_hand_mm"], fr["ctrl_robotiq"] = _gripper_at(io, fr["wall"])
+    if chain is None or _nodeless(ctx.chain):  # stage 1's encoder throughout
+        latent_stats = _latent_diagnostics(ctx, frames)
+    else:  # stage-2 + release latents come from the stage-2 deploy's encoder
+        c2 = chain["from"][1]
+        latent_stats = _latent_diagnostics(ctx, frames[:c2])
+        if c2 < len(frames):
+            chain["report"]["stage2"]["latent"] = _latent_diagnostics(chain["ctx2"], frames[c2:])
     belt_T = np.stack([fr["belt"] for fr in frames])
     pulley_T = np.stack([fr["pulley_raw"] for fr in frames])
     label, metrics = classify_episode(belt_T, pulley_T, ctx.thresholds)
     metrics.update(slant_episode(belt_T, pulley_T, ctx.tangent, ctx.thresholds))
+    pulley_row, pulley_post = {}, {}
+    if ctx.outcome_pulley != "large":
+        small_T = np.stack([fr["pulley_small_raw"] for fr in frames])
+        _, small_m = classify_episode(belt_T, small_T, ctx.small_thresholds, seat_mm=SMALL_SEAT_MM)
+        labs = _pulley_labels(ctx, belt_T[-1], pulley_T[-1], small_T[-1])
+        label = _stream_label(ctx, *labs)
+        pulley_row = {"outcome_large": labs[0], "outcome_small": labs[1], "success_both": labs[2],
+                      "final_wrap_small_deg": float(small_m["wrap_deg"][-1]),
+                      "final_h_small_mm": float(small_m["h_median_mm"][-1])}
+        pulley_post = {"wrap_small_deg": small_m["wrap_deg"],
+                       "h_small_median_mm": small_m["h_median_mm"],
+                       "outcome_large": np.array(labs[0]), "outcome_small": np.array(labs[1]),
+                       "success_both": np.array(labs[2])}
+    if chain is not None:
+        if chain["stopped"]:  # stage 1 / UR exit failed: no release, the large label
+            label = pulley_row["outcome_large"]
+        pulley_post["chain_from"] = np.int32([chain["from"][0] if chain["frames"] else -1,
+                                              chain["from"][1] if chain["n_stage2"] else -1])
+    if release is not None:
+        release["report"].update(from_frame=n_mpc, mpc_end=_label_row(ctx, frames[n_mpc - 1]),
+                              final=_label_row(ctx, frames[-1]),
+                              mpc_duration_s=(frames[n_mpc - 1]["step"] - pre_steps) * dt)
+        pulley_post.update(post_from=np.int32(n_mpc),
+                           mpc_end_outcome=np.array(release["report"]["mpc_end"]["label"]))
     min_clear_mm = sampler.min_clearance_m * 1e3
     tip_min_mm = loop["tip_min_m"] * 1e3
+    if chain is not None and chain["n_stage2"]:
+        tip_min_mm = min(tip_min_mm, chain["tip_min_m"] * 1e3)
     if pre is not None:
         min_clear_mm = min(min_clear_mm, pre["report"]["min_clearance_mm"])
         tip_min_mm = min(tip_min_mm, pre["report"]["tip_min_mm"])
@@ -710,7 +977,7 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int,
     if ctx.mode == "baseline":
         stage_times = {str(k): v - t_start for k, v in sorted(ev["pre_reached"].items())}
     grip_diff = sorted({(round(h, 3), int(b)) for h, b in
-                        ((fr["ctrl_hand_mm"], fr["ctrl_robotiq"]) for fr in frames)
+                        ((fr["ctrl_hand_mm"], fr["ctrl_robotiq"]) for fr in frames[:n_mpc])
                         if not math.isnan(h) or b >= 0})
     if grip_diff:
         logger.info(f"[EVAL] {name}: controller gripper commands (not applied): {grip_diff}")
@@ -742,6 +1009,22 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int,
     if pre is not None:
         extras_meta["cmd_source_codes"]["prefix"] = CMD_PREFIX
         extras_meta["prefix"] = pre["report"]
+    if release is not None:
+        extras_meta["cmd_source_codes"]["post_mpc"] = CMD_POST
+        extras_meta["post_mpc"] = release["report"]
+        extras_meta["grippers"] += ("; post-MPC release: Franka hand "
+                                    f"{release['report']['hand_mm']:g} mm (applied)")
+    if chain is not None:
+        extras_meta["cmd_source_codes"]["ur_exit"] = CMD_UR_EXIT
+        extras_meta["chain"] = chain["report"]
+        extras_meta["grippers"] += (f"; chain UR exit: 2F-85 byte {ctx.args.ur_exit_byte} "
+                                    "(applied)")
+        if ctx.chain.get("scripted"):
+            extras_meta["cmd_source_codes"]["scripted"] = ctx.chain["cmd_source"]
+        if ctx.chain.get("teleop"):
+            extras_meta["cmd_source_codes"]["teleop"] = CMD_TELEOP
+            extras_meta["grippers"] += ("; teleop: Franka hand unchanged (SpaceMouse buttons not "
+                                        "applied)")
     if ctx.cloud is not None:
         extras_meta["cloud_noise"] = {**ctx.cloud["noise"].to_dict(),
                                       "camera_origins": ctx.cloud["origins"].tolist()}
@@ -759,7 +1042,7 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int,
             "min_franka_tip_clearance_mm": np.float32(tip_min_mm),
             "alignment": np.array(json.dumps(align)),
             "backend": np.array("osc"),
-            "osc_utime_offset_us": np.int64(bridge.utime_offset_us)}
+            "osc_utime_offset_us": np.int64(bridge.utime_offset_us), **pulley_post}
     post = {lcs.EXTRA_PREFIX + k: v for k, v in post.items()}
     omit: tuple[str, ...] = ()
     if args.no_pcd:
@@ -785,7 +1068,8 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int,
         "tracking_rms_mm": [float(np.sqrt(np.mean(move[:, j] ** 2))) for j in range(2)],
         "tracking_max_mm": [float(move[:, j].max()) for j in range(2)],
         "final_wrap_deg": float(metrics["wrap_deg"][-1]),
-        "final_h_median_mm": float(metrics["h_median_mm"][-1]), **slant_row(metrics),
+        "final_h_median_mm": float(metrics["h_median_mm"][-1]), **pulley_row,
+        **slant_row(metrics),
         "min_board_clearance_mm": min_clear_mm, "board_contact": min_clear_mm < 0.0,
         "min_franka_tip_clearance_mm": tip_min_mm,
         "grasp_ok_final": [bool(v) for v in frames[-1]["grasp_ok"]],
@@ -795,11 +1079,21 @@ def run_episode(sim, ctx: EvalContext, state: StartState, repeat: int,
         "controller_log": str(log_path.relative_to(ctx.out)), "controller_exit": ctrl_code,
         "recording": recording, "size_bytes": path.stat().st_size,
     }
+    if end_state is not None:
+        out_row["end_state"] = end_state
     if ctx.mppi is not None:
         out_row["mppi"] = _mppi_solve_stats(ctx.out, log_path)
     if pre is not None:
         out_row["prefix"] = pre["report"]
         timing["prefix"] = pre["wall_s"]
+    if release is not None:
+        out_row["post_mpc"] = release["report"]
+    if chain is not None:
+        out_row["chain"] = {**chain["report"], "success_both": bool(
+            release is not None and release["report"]["final"]["both"])}
+        if chain["n_stage2"] and not _nodeless(ctx.chain):
+            out_row["mppi_stage2"] = _mppi_solve_stats(ctx.out, chain["log_path2"])
+            out_row["events_stage2"] = chain["events2"]
     a = align["final"] if align else None
     logger.info(f"[EVAL] {name} {ctx.mode}: {label} ({status}{f': {reason}' if reason else ''})"
                 f", {steps * dt:.2f} s, stages {stage_ends}, wrap "
@@ -817,6 +1111,298 @@ def _start_recording(sim, ctx: EvalContext, state: StartState, name: str) -> Non
     sim.start_recording(ctx.out / "recordings", name, extra_meta={
         "learned_mpc": _recording_learned_meta(ctx, state),
         "osc_utime_offset_us": int(sim.bridge.utime_offset_us)})
+
+
+def _pulley_labels(ctx: EvalContext, belt, large7, small7) -> tuple[str, str, bool]:
+    """``(large label, small label, success_both)`` of one frame."""
+    th, th_s = ctx.thresholds, ctx.small_thresholds
+    fl = frame_metrics(belt, large7, th=th)
+    fs = frame_metrics(belt, small7, SMALL_SEAT_MM, th_s)
+    return classify(fl, th), classify(fs, th_s), success_both(fl, fs, th, th_s)
+
+
+def _stream_label(ctx: EvalContext, large: str, small: str, both: bool) -> str:
+    if ctx.outcome_pulley == "small":
+        return small
+    return "engaged" if both else small if small != "engaged" else large
+
+
+def _label_row(ctx: EvalContext, fr: dict) -> dict:
+    """Both pulleys' GT labels + metrics of one frame (stage2_collect.gt_labels + the stream
+    label)."""
+    fl = frame_metrics(fr["belt"], fr["pulley_raw"], th=ctx.thresholds)
+    fs = frame_metrics(fr["belt"], fr["pulley_small_raw"], SMALL_SEAT_MM, ctx.small_thresholds)
+    large, small = classify(fl, ctx.thresholds), classify(fs, ctx.small_thresholds)
+    both = success_both(fl, fs, ctx.thresholds, ctx.small_thresholds)
+    return {"label": _stream_label(ctx, large, small, both), "large": large, "small": small,
+            "both": bool(both), "large_wrap_deg": float(fl.wrap_deg),
+            "small_wrap_deg": float(fs.wrap_deg), "large_h_mm": float(fl.h_median_mm),
+            "small_h_mm": float(fs.h_median_mm), "held": bool(fr["grasp_ok"][0]),
+            "time": float(fr["time"])}
+
+
+def _post_mpc_release(sim, ctx: EvalContext, sampler, last: dict, timing: dict) -> dict:
+    """``--post-mpc stage2_release``: stage2_collect's release plan from the measured Franka pose
+    (hand open, out, lift, settle; no grasp abort, a tip-floor / board abort skips to the settle
+    as in the collector). Frames continue the episode's sample grid, ``cmd_source`` CMD_POST."""
+    import miles_seed as ms
+    import stage2_collect as s2
+
+    n, w0 = SAMPLE_STEPS, time.perf_counter()
+    s0 = last["sim_step"] - last["step"]
+    ee0 = sim.franka_measured_pose7()
+    plan = s2.release_plan(ee0)
+    ur = s2.Fixed(pose7_mat(UrTracking.fk(sim.arm_targets()[1])))
+    ur_kept = getattr(ctx.args, "scripted_ur", "exit") != "exit"
+    sim.set_grippers(s2.OPEN_MM, ctx.args.ur_exit_byte if ur_kept else None)
+    frames: list[dict] = []
+    phases: list[dict] = []
+    cur, ok = ee0, True
+    names = ["settle" if p == "done" else p for p, *_ in plan]
+    assert tuple(names) == POST_PHASES, names
+    for phase, (_, targets, speed, hold) in zip(names, plan, strict=True):
+        if not ok and phase != "settle":
+            phases.append({"phase": phase, "skipped": True})
+            continue
+        path = s2.walk_path(cur, targets, speed, hold)
+        steps = n * math.ceil(round(path.end / sim.frame_dt) / n)
+
+        def on_frame(k: int, cmd: dict, tau: float, phase=phase) -> None:
+            if sim.step_index == last["sim_step"]:  # the MPC's last frame
+                return
+            fr = _sample(sim, ctx, sampler, sim.step_index - s0, s0, publish=False,
+                         timing=timing.setdefault("post_detail", {"render": 0.0, "encode": 0.0}))
+            fr.update(cmd, n_knots=N_KNOTS, cmd_source=CMD_POST, ur_line=np.full(16, np.nan),
+                      ur_fresh_exact=False, ur_own_delta=np.full(6, np.nan), post_phase=phase)
+            frames.append(fr)
+
+        st = sim.step_index
+        if ur_kept and phase == "lift":  # the opened UR lifts clear with the Franka
+            import stage2_scripted
+
+            ur = stage2_scripted.Ramp(ur.pose7(0.0), ur.pose7(0.0) + np.r_[
+                0.0, 0.0, ctx.args.ur_exit_lift_mm * 1e-3, 0, 0, 0, 0], path.end)
+        rep = ms.drive(sim, ctx, path, ur, steps, on_frame, grasp_arms=None)
+        if ur_kept and phase == "lift":
+            ur = s2.Fixed(ur.pose7(path.end))
+        while (sim.step_index - st) % n:  # an abort mid-period: keep the sample grid
+            sim.control_step()
+        phases.append({"phase": phase, "duration_s": (sim.step_index - st) * sim.frame_dt,
+                       "abort": rep["abort"], "abort_kind": rep["abort_kind"],
+                       "tip_min_mm": rep["tip_min_mm"],
+                       "min_clearance_mm": rep["min_clearance_mm"]})
+        cur = targets[-1] if targets else cur
+        ok = ok and rep["abort"] is None
+    timing["post_mpc"] = time.perf_counter() - w0
+    return {"frames": frames, "report": {
+        "kind": ctx.post_mpc, "hand_mm": s2.OPEN_MM,
+        "start_pose": ee0.tolist(), "targets": {"out": plan[1][1][0].tolist(),
+                                                "lift": plan[2][1][0].tolist()},
+        "speeds_mps": dict(zip(names, (v for _, _, v, _ in plan), strict=True)),
+        "holds_s": dict(zip(names, (h for *_, h in plan), strict=True)),
+        "phases": phases, "ok": ok, "frames": len(frames)}}
+
+
+def _late_markers(sim, ctrl, events_raw: list) -> None:
+    """Late answers to the last published state; the node's remaining marker lines."""
+    end = time.perf_counter() + END_POLL_S
+    while time.perf_counter() < end:
+        sim.bridge.poll()
+        time.sleep(0.005)
+    events_raw.extend((line, sim.osc_time_s()) for line in ctrl.read_new_lines()
+                      if any(m in line for m in CONTROLLER_MARKERS))
+
+
+def _chain_stage2(sim, ctx: EvalContext, sampler, frames: list[dict], n_pre: int,
+                  pre_steps: int, loop: dict, name: str, timing: dict,
+                  node2: MppiControllerProcess | None = None) -> dict:
+    """``--stage2-chain`` after stage 1 (node stopped, hold hook on): resolve the stage-1
+    commands, then if the large pulley is engaged the UR open + exit (``stage2_starts.ur_exit``,
+    frames CMD_UR_EXIT) and, if the Franka holds and the large pulley stays engaged, the stage-2
+    node on the live state. Frames continue the episode grid with phase/stage/ctrl set;
+    ``stopped`` = no release."""
+    import phase2_probe as pp
+    import stage2_starts as s2s
+
+    args, bridge, ch, n, dt = ctx.args, sim.bridge, ctx.chain, SAMPLE_STEPS, sim.frame_dt
+    if not ch.get("teleop_s1"):  # teleop frames carry their own commands
+        _resolve_commands(frames[n_pre:], bridge, dt)  # the bridge log restarts for stage 2
+    last = frames[-1]
+    lab = _label_row(ctx, last)
+    s1 = {"status": loop["status"], "reason": loop["reason"],
+          "duration_s": (last["step"] - pre_steps) * dt, "large_label_end": lab["large"],
+          "wrap_deg_end": lab["large_wrap_deg"],
+          "failed": lab["large"] != "engaged" or loop.get("stop", False),
+          "osc_stats": {**bridge.stats(), **bridge.controller_stats()},
+          **({"teleop": loop["teleop"]} if "teleop" in loop else {})}
+    out = {"frames": [], "report": {"stage1": s1}, "stopped": True, "n_stage2": 0,
+           "from": [len(frames), len(frames)], "ctx2": None,
+           "io1": argparse.Namespace(hand_commands=bridge.hand_commands,
+                                     robotiq_commands=bridge.robotiq_commands)}
+    if s1["failed"]:
+        logger.info(f"[EVAL] {name} chain: stage 1 not engaged ({lab['large']}), no UR exit")
+        return out
+
+    if ch.get("ur"):  # --scripted-ur hold / feed: no UR open / exit, the walk starts here
+        import stage2_scripted
+
+        n = SAMPLE_STEPS
+
+        held = bool(sim.grasp_state().held_for("franka"))
+        out["report"]["ur_exit"] = {"kept": ch["ur"], "ok": True, "held_franka": held,
+                                    "failed": not held, "frames": 0}
+        if not held:
+            logger.warning(f"[EVAL] {name} chain: Franka not holding at the stage-1 end, no stage 2")
+            return out
+        if getattr(args, "stage2_start_snapshot", False):
+            rel = f"stage2_states/{name}.npz"
+            sim_snapshot.save(sim_snapshot.capture(sim, f"stage2_start:{name}",
+                                                   notes="stage-1 end, UR kept"), ctx.out / rel)
+            out["report"]["stage2_state"] = rel
+        for _ in range(n):  # one held period: the walk's first sample is not stage 1's last
+            sim.control_step()
+        sp = stage2_scripted.run(sim, ctx, sampler, last, timing, args, name, ur_mode=ch["ur"])
+        out["report"]["stage2"] = sp["report"]
+        out.update(frames=sp["frames"], stopped=not sp["done"], n_stage2=len(sp["frames"]),
+                   ctx2=ctx, tip_min_m=sp["tip_min_m"])
+        return out
+
+    pc, byte, s0 = ch["pp"], args.ur_exit_byte, last["sim_step"] - last["step"]
+    if node2 is not None:  # starts up during the UR exit: it publishes nothing before a latent
+        _start_mppi(node2, dataclasses.replace(ctx, mppi=ch),
+                    ctx.out / "controller" / f"{name}_s2.log", demo_offset_frames=0)
+    ur9, phase, fx = pc["ur9"], ["ur:open"], out["frames"]
+    hold = sim.franka_measured_pose7()
+    det = timing.setdefault("ur_exit_detail", {"render": 0.0, "encode": 0.0})
+    step0, w0 = sim.control_step, time.perf_counter()
+    live = vars(sim).get("control_step")  # the --live-viewer render wrap; restored below
+
+    def stepped() -> None:
+        step0()
+        if (sim.step_index - s0) % n:
+            return
+        if phase[0] != "ur:open" and phase[0] != "ur:settle":  # ur_exit swaps ctx["ur9"]
+            phase[0] = "ur:park" if pc["ur9"] is ur9 else "ur:lift"
+        fr = _sample(sim, ctx, sampler, sim.step_index - s0, s0, publish=False, timing=det)
+        # Franka: the hold; UR: the joint target's pose (ur_t1 = the next frame's, below)
+        fr.update(knots=np.repeat(hold[None], N_KNOTS, axis=0), knot0=hold.copy(),
+                  knot1=hold.copy(), knot_times=fr["time"] + lcs.ACTION_KNOT_DT_S
+                  * np.arange(N_KNOTS), traj_utime=-1, n_knots=N_KNOTS,
+                  ur_t=pose7_mat(UrTracking.fk(sim.arm_targets()[1])), cmd_source=CMD_UR_EXIT,
+                  ur_line=np.full(16, np.nan), ur_fresh_exact=False,
+                  ur_own_delta=np.full(6, np.nan), post_phase=phase[0],
+                  ctrl_hand_mm=math.nan, ctrl_robotiq=-1,
+                  phase=ctx.phase_labels.index(phase[0]))
+        fx.append(fr)
+
+    # pp.release / ur_exit step the sim themselves: sample on the episode grid around them.
+    # Their clearance abort uses pp["geo"][byte]; the harness sampler keeps its own geometry.
+    sim.control_step = stepped
+    try:
+        rel, _ = pp.release(sim, pc, None, byte, args.ur_exit_settle_s)
+        phase[0] = "ur:lift"
+        why, _ = s2s.ur_exit(sim, pc, byte, args.ur_exit_lift_mm, args.ur_exit_speed_mps)
+        phase[0] = "ur:settle"
+        sim.commander_hook = sim.make_hold_hook()
+        if why is None:
+            for _ in range(round(args.ur_exit_final_settle_s / dt)):
+                sim.control_step()
+    finally:
+        del sim.control_step
+        if live is not None:
+            sim.control_step = live
+    while (sim.step_index - s0) % n:
+        sim.control_step()
+    if fx and fx[-1]["sim_step"] == sim.step_index:
+        fx.pop()  # stage 2 samples this step as its first frame
+    for a, b in zip(fx, fx[1:] + fx[-1:], strict=True):
+        a["ur_t1"] = b["ur_t"]
+    body_q = sim.state_0.body_q.numpy()
+    fl = frame_metrics(body_q[sim.info.belt_bodies, :3].astype(np.float64),
+                       body_q[int(sim.info.pulley_bodies[1])].astype(np.float64),
+                       th=ctx.thresholds)
+    held = bool(sim.grasp_state(body_q).held_for("franka"))
+    ux = {"ok": why is None, "abort": why, "large_label_end": classify(fl, ctx.thresholds),
+          "wrap_deg_end": float(fl.wrap_deg), "held_franka": held, "byte": byte,
+          "release_label_end": str(rel["label_end"]), "release_wrap_min": float(rel["wrap_min"]),
+          "duration_s": (sim.step_index - last["sim_step"]) * dt, "frames": len(fx)}
+    ux["failed"] = not (ux["ok"] and held and ux["large_label_end"] == "engaged")
+    out["report"]["ur_exit"] = ux
+    out["from"][1] = len(frames) + len(fx)
+    timing["ur_exit"] = time.perf_counter() - w0
+    if ux["failed"]:
+        logger.warning(f"[EVAL] {name} chain: UR exit failed ({why or ''} held {held}, large "
+                       f"{ux['large_label_end']}), no stage 2")
+        return out
+    if getattr(args, "stage2_start_snapshot", False):
+        rel = f"stage2_states/{name}.npz"
+        sim_snapshot.save(sim_snapshot.capture(sim, f"stage2_start:{name}",
+                                               notes="after the UR exit"), ctx.out / rel)
+        out["report"]["stage2_state"] = rel
+
+    if ch.get("scripted"):  # scripted walk: no stage-2 node
+        import stage2_scripted
+
+        sp = stage2_scripted.run(sim, ctx, sampler, last, timing, args, name)
+        out["report"]["stage2"] = sp["report"]
+        out.update(frames=fx + sp["frames"], stopped=not sp["done"], n_stage2=len(sp["frames"]),
+                   ctx2=ctx, tip_min_m=sp["tip_min_m"])
+        return out
+
+    if ch.get("teleop"):  # teleop: no stage-2 node
+        import stage2_teleop
+
+        tp = stage2_teleop.run(sim, ctx, sampler, last, timing, args)
+        out["report"]["teleop"] = tp["report"]
+        out.update(frames=fx + tp["frames"], stopped=not tp["done"], n_stage2=len(tp["frames"]),
+                   ctx2=ctx, tip_min_m=min(f["tip_clearance_mm"] for f in tp["frames"]) * 1e-3)
+        return out
+
+    ctx2 = out["ctx2"] = dataclasses.replace(ctx, mppi=ch, encoder=ch["encoder"],
+                                             lcs_model=ch["lcs_model"])
+    sim.commander_hook = None
+    bridge.reset_controller_io()
+    bridge.reset_stats()
+    log2 = out["log_path2"] = ctx.out / "controller" / f"{name}_s2.log"
+    ctrl, ev_raw, w1 = node2 or MppiControllerProcess(), [], time.perf_counter()
+    try:
+        if node2 is None:
+            _start_mppi(ctrl, ctx2, log2, demo_offset_frames=0)  # the stage-2 suite's offset
+        ctrl.wait_for(CONTROLLER_STARTED, CONTROLLER_START_TIMEOUT_S)
+        timing["stage2_controller_start"] = time.perf_counter() - w1
+        loop2 = _run_loop(sim, ctx2, ctrl, sampler, ev_raw,
+                          max_episode_s=args.stage2_max_episode_s,
+                          early_stop=args.stage2_early_stop, grasp_arms="franka",
+                          outcome_pulley="both")
+        _late_markers(sim, ctrl, ev_raw)
+    finally:
+        code2 = ctrl.stop()
+        sim.commander_hook = sim.make_hold_hook()
+    f2 = loop2["frames"]
+    _resolve_commands(f2, bridge, dt)
+    ev2 = _marker_events(ev_raw, ctx.mode)
+    labels = ch["stage_labels"]
+    for fr in f2:
+        fr["step"] += f2[0]["sim_step"] - s0
+        fr["stage"] = sum(1 for st in ev2["stages"].values() if st["t"] <= fr["time"] + 1e-9)
+        end = ev2["mpc_completed"]
+        fr["phase"] = ctx.phase_labels.index(
+            "s2:done" if end is not None and fr["time"] >= end
+            else f"s2:{labels[min(fr['stage'], len(labels) - 1)]}")
+        fr["ctrl_hand_mm"], fr["ctrl_robotiq"] = _gripper_at(bridge, fr["wall"])
+    t2 = f2[0]["time"]
+    out["report"]["stage2"] = {
+        "status": loop2["status"], "reason": loop2["reason"],
+        "duration_s": (f2[-1]["step"] - f2[0]["step"]) * dt, "controller_exit": code2,
+        "controller_log": str(log2.relative_to(ctx.out)),
+        "label_end": _label_row(ctx, f2[-1])["label"]}
+    out["events2"] = {"controller_events": _events_dict(ev2, t2),
+                      "stage_ends": [ev2["stages"][k]["how"] for k in sorted(ev2["stages"])],
+                      "stage_times": {str(k): ev2["stages"][k]["t"] - t2
+                                      for k in sorted(ev2["stages"])}}
+    timing["stage2"] = loop2["timing"]
+    out.update(frames=fx + f2, stopped=False, n_stage2=len(f2), tip_min_m=loop2["tip_min_m"])
+    return out
 
 
 def _sampler(sim, ctx: EvalContext):
@@ -965,16 +1551,43 @@ def _latent_diagnostics(ctx: EvalContext, frames: list[dict]) -> dict | None:
             "goal_source": "demo_goals" if ctx.demo is not None else "deploy stage goals"}
 
 
-def _run_loop(sim, ctx: EvalContext, ctrl, sampler, events_raw: list) -> dict:
+class Pacer:
+    """``--realtime``: step k of a run starts at ``t0 + k * period``; a late step does not sleep
+    (catch up); a lag over ``PACE_CAP_S`` (a hitch, a pause between runs) rebases ``t0``."""
+
+    def __init__(self, period: float) -> None:
+        self.period, self.t0, self.k = period, -math.inf, 0
+
+    def wait(self) -> float:
+        """Sleep until this step's start time; returns the seconds slept."""
+        now = time.perf_counter()
+        due = self.t0 + self.k * self.period
+        if now - due > PACE_CAP_S:
+            self.t0, self.k, due = now, 0, now
+        self.k += 1
+        if due <= now:
+            return 0.0
+        time.sleep(due - now)
+        return due - now
+
+
+def _run_loop(sim, ctx: EvalContext, ctrl, sampler, events_raw: list, *,
+              max_episode_s: float | None = None, early_stop: str | None = None,
+              grasp_arms: str | None = None, outcome_pulley: str | None = None) -> dict:
+    """Keyword overrides (the chain's stage 2): None = ``args`` / ``ctx`` values."""
     args, bridge, n = ctx.args, sim.bridge, SAMPLE_STEPS
+    max_episode_s = args.max_episode_s if max_episode_s is None else max_episode_s
+    early_stop = args.early_stop if early_stop is None else early_stop
+    grasp_arms = args.grasp_arms if grasp_arms is None else grasp_arms
+    pulley = ctx.outcome_pulley if outcome_pulley is None else outcome_pulley
     dt = sim.frame_dt
     u_coords = sim.arm_coords()[1]
     plate_top = ctx.plate_top_z
     q_ur = sim.arm_targets()[1]
     lead_gain = sim.arm_kd / sim.arm_ke / sim.frame_dt
     lead_key = None
-    max_steps = round(args.max_episode_s / dt)
-    es = [float(x) for x in args.early_stop.split(",")] if args.early_stop else None
+    max_steps = round(max_episode_s / dt)
+    es = [float(x) for x in early_stop.split(",")] if early_stop else None
     es_lab, es_t0 = None, 0.0
     settle_steps = round(args.settle_s / dt)
     min_wall = args.pace * dt
@@ -988,38 +1601,17 @@ def _run_loop(sim, ctx: EvalContext, ctrl, sampler, events_raw: list) -> dict:
     board_neg = 0
     timing = {"render": 0.0, "encode": 0.0, "ik": 0.0, "step": 0.0, "pace_sleep": 0.0}
     wait0 = bridge.wait_s
-    t_loop = time.perf_counter()
-    while True:
-        if k % n == 0:
-            finished = abort is not None or (end_at is not None and k >= end_at + settle_steps)
-            if abort is None and end_at is None and k >= max_steps:
-                status, finished = "timeout", True
-                reason = f"no end marker after {args.max_episode_s:g} s"
-            frames.append(_sample(sim, ctx, sampler, k, s0, publish=not finished, timing=timing))
-            if abort is None and not all(frames[-1]["grasp_ok"]):
-                abort = f"grasp lost at step {k} ({sim.grasp_state().describe()})"
-                status, reason, finished = "aborted", abort, True
-            if es is not None and not finished and abort is None and end_at is None:
-                lab = classify(frame_metrics(frames[-1]["belt"], frames[-1]["pulley_raw"], th=ctx.thresholds),
-                               ctx.thresholds)
-                t = k * dt
-                if lab != es_lab:
-                    es_lab, es_t0 = lab, t
-                if t >= es[2] and t - es_t0 >= (es[0] if lab == "engaged" else es[1]):
-                    reason, finished = f"early stop: {lab} held {t - es_t0:.1f} s at {t:.1f} s", True
-            if finished:
-                break
-        w0 = time.perf_counter()
-        sim.control_step()
-        k += 1
-        bridge.poll()
-        timing["step"] += time.perf_counter() - w0
-        joint_q = sim.state_0.joint_q.numpy()
+    pacer = ctx.pacer
+    jq = bq = None  # --realtime: host state of step k (control_step_end)
+
+    def after_step(joint_q, body_q) -> None:
+        """Step k's checks: tip floor, board clearance, controller markers, aborts."""
+        nonlocal tip_min, board_neg, end_at, abort, status, reason
         ee_f = sim.franka_measured_pose7(joint_q)
         tip = float(ee_f[2] - plate_top)
         tip_min = min(tip_min, tip)
         if k % cli.CLEARANCE_EVERY == 0:
-            sampler.clearance(sim.state_0.body_q.numpy())
+            sampler.clearance(sim.state_0.body_q.numpy() if body_q is None else body_q)
         clear = sampler.last_clearance_m
         board_neg = board_neg + 1 if clear is not None and clear < 0.0 else 0
         for line in ctrl.read_new_lines():
@@ -1038,6 +1630,10 @@ def _run_loop(sim, ctx: EvalContext, ctrl, sampler, events_raw: list) -> dict:
                 status, reason = "aborted", abort
                 logger.warning(f"[EVAL] abort: {abort}")
                 _hold(sim, ctrl)
+
+    def ur_target(joint_q) -> None:
+        """The next step's UR joint target: IK along the controller's line, or hold on abort."""
+        nonlocal abort, status, reason, q_ur, lead_key
         line = bridge.latest_ur_line() if abort is None else None
         if line is not None:
             i0 = time.perf_counter()
@@ -1060,6 +1656,61 @@ def _run_loop(sim, ctx: EvalContext, ctrl, sampler, events_raw: list) -> dict:
             timing["ik"] += time.perf_counter() - i0
         elif abort is not None:
             sim.set_ur_target(joint_q[u_coords])
+
+    t_loop = time.perf_counter()
+    while True:
+        if k % n == 0:
+            if pacer is not None and k:  # the sample sees step k's checks, as without --realtime
+                bridge.poll()
+                after_step(jq, bq)
+            finished = abort is not None or (end_at is not None and k >= end_at + settle_steps)
+            if abort is None and end_at is None and k >= max_steps:
+                status, finished = "timeout", True
+                reason = f"no end marker after {max_episode_s:g} s"
+            frames.append(_sample(sim, ctx, sampler, k, s0, publish=not finished, timing=timing))
+            if abort is None and not held_for(frames[-1]["grasp_ok"], grasp_arms):
+                abort = f"grasp lost at step {k} ({sim.grasp_state().describe()})"
+                status, reason, finished = "aborted", abort, True
+            if es is not None and not finished and abort is None and end_at is None:
+                fr = frames[-1]
+                if pulley == "large":
+                    lab = classify(frame_metrics(fr["belt"], fr["pulley_raw"], th=ctx.thresholds),
+                                   ctx.thresholds)
+                else:
+                    lab = _stream_label(ctx, *_pulley_labels(ctx, fr["belt"], fr["pulley_raw"],
+                                                             fr["pulley_small_raw"]))
+                t = k * dt
+                if lab != es_lab:
+                    es_lab, es_t0 = lab, t
+                if t >= es[2] and t - es_t0 >= (es[0] if lab == "engaged" else es[1]):
+                    reason, finished = f"early stop: {lab} held {t - es_t0:.1f} s at {t:.1f} s", True
+            if finished:
+                break
+        if pacer is not None:
+            # Step k's checks (except on the sample grid) run while physics k + 1 is on the GPU,
+            # so their aborts act one step later; the UR target feeds physics: before the launch.
+            if k:
+                ur_target(jq)
+            timing["pace_sleep"] += pacer.wait()
+            w0 = time.perf_counter()
+            sim.control_step_begin()
+            try:
+                if k % n:
+                    bridge.poll()
+                    after_step(jq, bq)
+            finally:
+                jq, _, bq = sim.control_step_end()
+            k += 1
+            timing["step"] += time.perf_counter() - w0
+            continue
+        w0 = time.perf_counter()
+        sim.control_step()
+        k += 1
+        bridge.poll()
+        timing["step"] += time.perf_counter() - w0
+        joint_q = sim.state_0.joint_q.numpy()
+        after_step(joint_q, None)
+        ur_target(joint_q)
         spent = time.perf_counter() - w0
         if spent < min_wall:
             time.sleep(min_wall - spent)
@@ -1101,6 +1752,8 @@ def _sample(sim, ctx: EvalContext, sampler, k: int, s0: int, publish: bool,
         "prop": lcs.state_vector(q_f, q_u, v_f, v_u, ee_f, ee_u),
         "belt_pts": lcs.belt_points_ordered(belt),
     }
+    if getattr(ctx, "outcome_pulley", "large") != "large":  # miles_seed ctx is a Namespace
+        frame["pulley_small_raw"] = body_q[int(sim.info.pulley_bodies[0])].astype(np.float64)
     r0 = time.perf_counter()
     if not ctx.args.no_pcd:
         xyz, rgb = sim.point_cloud()
@@ -1119,10 +1772,21 @@ def _sample(sim, ctx: EvalContext, sampler, k: int, s0: int, publish: bool,
     frame["latent"] = np.full(ctx.encoder.latent_dim if ctx.encoder else 16, np.nan)
     if ctx.mode == "learned":
         e0 = time.perf_counter()
-        z = ctx.encoder.encode(encoder_input(ctx.encoder, frame), frame["prop"], frame["belt_pts"])
+        prop = frame["prop"]
+        if getattr(ctx.encoder, "grip_dim", 0):  # V12-131: measured gripper state + own commands
+            hand_cmd, ur_cmd = sim.gripper_commands()
+            grip = grip_features(grasp.franka_width_mm, grasp.ur_status,
+                                 hand_cmd is None or hand_cmd < FRANKA_CLOSED_MM,
+                                 (grasp.ur_status if ur_cmd is None else ur_cmd) >= UR_CLOSED_BYTE)
+            kw = {"scene": frame["cloud"]} if isinstance(ctx.encoder, BeltCtxEncoder) else {}
+            z = ctx.encoder.encode(encoder_input(ctx.encoder, frame), prop, frame["belt_pts"],
+                                   grip=grip, **kw)
+            prop = np.r_[prop, grip]  # the 44-d proprio block: the MPPI node's gate bits
+        else:
+            z = ctx.encoder.encode(encoder_input(ctx.encoder, frame), prop, frame["belt_pts"])
         frame["latent"] = z
         if publish:
-            bridge.set_latent(latent_state_message(utime, t, z, ee_f, ee_u, frame["prop"]))
+            bridge.set_latent(latent_state_message(utime, t, z, ee_f, ee_u, prop))
         timing["encode"] += time.perf_counter() - e0
     return frame
 
@@ -1302,7 +1966,8 @@ def _start_mppi(ctrl: MppiControllerProcess, ctx: EvalContext, log_path: Path,
         extra += ["--demo-offset-frames", str(offset)]
     if m.get("bank"):
         extra += ["--waypoint-bank", m["bank"]["path"], "--bank-knn", str(m["bank"]["knn"])]
-    ctrl.start(ctx.args.lcm_url, ctx.args.deploy, m["config"], log_path, goal=m["goal"],
+    ctrl.start(ctx.args.lcm_url, m.get("deploy", ctx.args.deploy), m["config"], log_path,
+               goal=m["goal"],
                stages=m["stages"], max_duration_s=m["max_duration_s"], extra_args=extra)
 
 
@@ -1329,6 +1994,24 @@ def _mppi_solve_stats(out: Path, log_path: Path) -> dict:
         stats["clear_min_mm"] = {"ur": min(r["clear_min_ur_mm"] for r in clear),
                                  "franka": min(r["clear_min_f_mm"] for r in clear)}
         stats["clear_violating_plans"] = sum(int(r["clear_violating"]) > 0 for r in clear)
+    tilt = [r for r in rows if "tilt_now_f_deg" in r]
+    if tilt:
+        stats["tilt_max_deg"] = {"now_franka": max(r["tilt_now_f_deg"] for r in tilt),
+                                 "plan_franka": max(r["tilt_plan_max_f_deg"] for r in tilt)}
+        stats["tilt_frac_penalised_mean"] = float(np.mean([r["frac_tilt_penalised"]
+                                                           for r in tilt]))
+    ff = [r for r in rows if "viol_plan" in r]
+    if ff:
+        stats["feasible_first"] = {
+            "frac_feasible_mean": float(np.mean([r["frac_feasible"] for r in ff])),
+            "plans_infeasible": sum(r["viol_plan"] > 0 for r in ff),
+            "viol_plan_max": max(r["viol_plan"] for r in ff)}
+    guard = [r["guard"] for r in rows if "guard" in r]
+    if guard:
+        stats["guard"] = {"plans": sum(g["first"] >= 0 for g in guard),
+                          "first_knot": sum(g["first"] == 0 for g in guard),
+                          "z_cut_mm_max": max(g["z_cut_mm"] for g in guard),
+                          "rot_cut_deg_max": max(g["rot_cut_deg"] for g in guard)}
     bank = next((r["bank"] for r in rows if "bank" in r), None)
     if bank is not None:
         stats["bank"] = bank
@@ -1425,7 +2108,19 @@ def evaluate(args: argparse.Namespace) -> dict:
         raise ValueError("--no-pcd is baseline only (the encoder needs the cloud)")
     cloud = cli.cloud_options(args)
     reset = _reset_options(args)
+    if args.grasp_arms != "both" and (reset is not None or args.prefix_demos):
+        raise ValueError("--grasp-arms franka: not with --reset scripted or --prefix-demos "
+                         "(they check both arms)")
+    if args.post_mpc is not None and not getattr(args, "stage2_chain", False) and (
+            args.grasp_arms != "franka" or args.outcome_pulley != "both"):
+        raise ValueError(f"--post-mpc {args.post_mpc}: needs --grasp-arms franka --outcome-pulley "
+                         "both")
+    if args.franka_width_max is not None:
+        import round_belt_task.offline_simulation as osim
+
+        osim.FRANKA_WIDTH_MM = (osim.FRANKA_WIDTH_MM[0], float(args.franka_width_max))
     mppi = _mppi_options(args, args.demo_goals is not None and Path(args.demo_goals).is_file())
+    chain = _chain_options(args, mppi)
     if mppi is None:
         params_rel = Path(args.params or DEFAULT_PARAMS[mode])
         params = _controller_yaml(args.magna_root, params_rel)
@@ -1455,6 +2150,9 @@ def evaluate(args: argparse.Namespace) -> dict:
         deploy_meta = {"path": str(args.deploy), "sha256": sha256_file(args.deploy),
                        "goal_source": lcs_model.goal_source,
                        "n_stage_goals": int(lcs_model.stage_goals.shape[0])}
+        if chain is not None and not _nodeless(chain) and (chain["lcs_model"].stage_goals.shape
+                                  != lcs_model.stage_goals.shape):
+            raise ValueError("--stage2-deploy: stage goals differ from --deploy's (goal_dist)")
     demo = None
     demo_meta = None
     if args.demo_goals is not None and Path(args.demo_goals).is_file():
@@ -1487,11 +2185,18 @@ def evaluate(args: argparse.Namespace) -> dict:
                     + [f"mpc:{lab}" for lab in stage_labels] + ["done"])
     if prefix is not None:
         phase_labels = [prefix["module"].PHASE_LABEL, *phase_labels]
+    if chain is not None:
+        phase_labels += [*(["s1:teleop"] if chain.get("teleop_s1") else []), *UR_EXIT_PHASES,
+                         *(f"s2:{lab}" for lab in chain["stage_labels"]),
+                         *([] if _nodeless(chain) else ["s2:done"])]
+    if args.post_mpc is not None:
+        phase_labels += [f"post:{p}" for p in POST_PHASES]
 
     label = args.label or mode
     out = Path(args.out or DEFAULT_OUT_ROOT / f"{time.strftime('%Y%m%d-%H%M%S')}-{label}")
     out.mkdir(parents=True, exist_ok=True)
     thresholds = cli.parse_thresholds(args.thresholds)
+    small_thresholds = cli.parse_thresholds(args.small_thresholds or [])
     nominal = load_pre_mpc_segment(MAGNA_PARAMS_SIM_YAML, first=cli.FIRST, last=cli.LAST)
     tangent = pert.belt_tangent(nominal)
     osc_binary, osc_root = default_osc_binary()
@@ -1524,20 +2229,42 @@ def evaluate(args: argparse.Namespace) -> dict:
                        **BANK_ARG_DEFAULTS}.items():
         if index["args"].get(key) == value:
             index["args"].pop(key)
-    for key, value in PREFIX_ARG_DEFAULTS.items():
+    for key, value in {**PREFIX_ARG_DEFAULTS, **STAGE2_ARG_DEFAULTS, **PLANAGE_ARG_DEFAULTS,
+                       **GRIP_ARG_DEFAULTS}.items():
         if index["args"].get(key) == value:
             index["args"].pop(key)
     if prefix is not None:
         index["prefix"] = _prefix_index_block(prefix)
+    if args.outcome_pulley != "large":
+        index["outcome_pulley"] = args.outcome_pulley
+        index["small_thresholds"] = dataclasses.asdict(small_thresholds)
+    if args.post_mpc is not None:
+        index["post_mpc"] = {"kind": args.post_mpc, "phases": list(POST_PHASES),
+                             "cmd_source": CMD_POST,
+                             "rule": "label after the release = the episode outcome; MPC-end "
+                                     "label in post_mpc.mpc_end"}
+    if chain is not None:
+        index["chain"] = _chain_index_block(args, chain)
     index_path = out / "index.json"
     write_json(index_path, index)
 
     from round_belt_task.osc_simulation import RoundBeltOscSimulation
 
+    teleop = chain is not None and chain.get("teleop", False)
+    grip_kw = {} if args.franka_grip_n is None else {"franka_grip_n": args.franka_grip_n}
     sim = RoundBeltOscSimulation.build(lcm_url=args.lcm_url, osc_timeout_s=args.osc_timeout_s,
-                                       bridge_cls=ControllerBridge)
+                                       bridge_cls=ControllerBridge,
+                                       viewer=_live_viewer(args), **grip_kw,
+                                       **({"publish_body_poses": True,
+                                           "body_poses_every": args.render_every}
+                                          if args.publish_body_poses else {}))
+    if args.live_viewer and not teleop:  # teleop renders in its own loop
+        step = sim.control_step
+        sim.control_step = lambda: (step(), sim.step_index % args.render_every or sim.render())
     sim.args.record_state_every = cli.RECORD_STATE_EVERY
     sim.bridge.record_targets = bool(args.record)
+    if getattr(args, "log_plan_age", False):
+        sim.bridge.plan_recv_utime = {}
     t_run = time.perf_counter()
     rows = index["episodes"]
     try:
@@ -1545,25 +2272,40 @@ def evaluate(args: argparse.Namespace) -> dict:
         index["osc"] = {**sim.osc.describe(), "warm_up_s": warm, "timeout_s": args.osc_timeout_s}
         first = sim_snapshot.load(plan[0][0].file)
         sim.restore(first)  # clearance geometry is read at a start pose, gripper closed
-        jaws = sorted({w.ur_gripper_byte for w in nominal if w.ur_gripper_byte is not None})
+        jaws = (sorted({w.ur_gripper_byte for w in nominal if w.ur_gripper_byte is not None})
+                if args.clearance_jaw_bytes is None else list(args.clearance_jaw_bytes))
         board, gripper = sim.clearance_geometry(jaw_bytes=tuple(jaws))
         if mppi is not None and args.mppi_clearance:
             mppi["clearance"] = _export_clearance(sim, args, out, plan[0][0].file)
             index["controller"]["clearance"] = mppi["clearance"]
             write_json(index_path, index)
+        if chain is not None:  # stage 1's clearance model; the stage-2 yaml's block wins
+            chain["clearance"] = None if mppi is None else mppi["clearance"]
+            chain["pp"] = _chain_pp_ctx(sim, args.ur_exit_byte)
         ctx = EvalContext(args=args, out=out, mode=mode, params_rel=params_rel,
                           thresholds=thresholds, tangent=tangent, board=board, gripper=gripper,
                           encoder=encoder, lcs_model=lcs_model, demo=demo,
                           phase_labels=phase_labels, n_pre=len(pre_labels), n_stages=n_stages,
                           stage_labels=stage_labels,
                           learned_mpc_meta=learned_mpc_meta(args, mode, params_rel, params, demo),
-                          mppi=mppi)
+                          mppi=mppi, outcome_pulley=args.outcome_pulley,
+                          small_thresholds=small_thresholds, post_mpc=args.post_mpc,
+                          chain=chain)
         if cloud is not None:
             ctx.cloud = {**cloud, "origins": cli.sim_camera_origins(sim)}
             index["cloud_noise_spec"] = cloud["noise"].to_dict()
         ctx.reset = reset
         ctx.prefix = prefix
-        for s, r in plan:
+        if getattr(args, "realtime", False):  # one clock for every step (_run_loop: its own)
+            ctx.pacer = pacer = Pacer(args.pace * sim.frame_dt)
+            step = sim.control_step
+            sim.control_step = lambda: (pacer.wait(), step())
+        episodes = plan
+        if teleop:
+            import stage2_teleop
+
+            episodes = stage2_teleop.Session(plan, sys.stdin.isatty(), rows)
+        for s, r in episodes:
             reset_row = from_reset = None
             try:
                 if ctx.reset is not None:
@@ -1583,6 +2325,10 @@ def evaluate(args: argparse.Namespace) -> dict:
                 logger.warning(f"[EVAL] {s.id}/{r} skipped: {exc}")
                 row = {"file": None, "start_state": s.to_dict(), "repeat": r, "mode": mode,
                        "status": "skipped", "outcome": None, "reason": str(exc)}
+            ch = row.get("chain", {})
+            if teleop and "abort" in (ch.get("teleop", {}).get("operator"),
+                                      ch.get("stage1", {}).get("teleop", {}).get("operator")):
+                row = stage2_teleop.discard(out, row)
             if reset_row is not None:
                 row["reset_before"] = reset_row
             rows.append(row)
@@ -1601,7 +2347,193 @@ def evaluate(args: argparse.Namespace) -> dict:
                 + (f" (95% CI {ci[0]:.2f}-{ci[1]:.2f})" if ci else "")
                 + f", outcomes {s['outcomes']}, aborted {s['aborted']}, timeouts "
                   f"{s['timeouts']}, skipped {s['skipped']} -> {out}")
+    if teleop:
+        logger.info("[EVAL] teleop: {}/{} both engaged".format(*stage2_teleop.tally(rows)))
     return index
+
+
+def _live_viewer(args: argparse.Namespace):
+    """``--live-viewer``: a viser viewer for the sim (None = the build's null viewer)."""
+    if not args.live_viewer:
+        return None
+    import newton
+
+    from utils.viewer_patches import patch_viewer_shape_names, patch_viser_texture_material
+
+    patch_viewer_shape_names()
+    patch_viser_texture_material()
+    viewer = newton.viewer.ViewerViser(port=args.viewer_port, label="teleop", verbose=True)
+    if hasattr(viewer, "_pause"):
+        viewer._pause = False
+    return viewer
+
+
+def _chain_options(args: argparse.Namespace, mppi: dict | None) -> dict | None:
+    """``--stage2-chain``: the stage-2 node's ``_mppi_options`` dict (+ ``deploy``, its
+    ``encoder`` / ``lcs_model``, ``stage_labels``); None when off (chain flags at default)."""
+    flags = {k: getattr(args, k, STAGE2_ARG_DEFAULTS[k]) for k in CHAIN_ARGS}
+    flags.update({k: STAGE2_ARG_DEFAULTS[k] for k in VIEWER_ARGS})  # any run may have a viewer
+    if not flags["stage2_chain"]:
+        bad = [k for k, v in flags.items() if v != STAGE2_ARG_DEFAULTS[k]]
+        if bad:
+            raise ValueError(f"--{', --'.join(k.replace('_', '-') for k in bad)}: only with "
+                             "--stage2-chain")
+        return None
+    if flags["teleop_stage1"] and (mppi is not None or args.mode != "baseline"
+                                   or not flags["stage2_teleop"]):
+        raise ValueError("--teleop-stage1 needs --mode baseline --stage2-teleop")
+    # V12-147: the waypoint baseline as stage 1 chains into the scripted walk (or teleop) only
+    baseline_s1 = mppi is None and args.mode == "baseline" and (flags["stage2_scripted"]
+                                                                 or flags["teleop_stage1"])
+    if ((not baseline_s1 and (mppi is None or mppi["goal_kind"] != "waypoints"))
+            or args.post_mpc != "stage2_release" or args.outcome_pulley != "both"
+            or args.grasp_arms != "both"):
+        raise ValueError("--stage2-chain needs --controller mppi --mppi-goal waypoints (or "
+                         "--mode baseline --stage2-scripted) --post-mpc stage2_release "
+                         "--outcome-pulley both --grasp-arms both")
+    if mppi is not None and (mppi["transport"]["demo_actions"] is not None or mppi.get("bank")):
+        raise ValueError("--stage2-chain: not with --mppi-demo-actions / --mppi-waypoint-bank")
+    keys = ("stage2_deploy", "stage2_waypoints", "stage2_mppi_config")
+    bad = [k for k in {**SCRIPTED_ARG_DEFAULTS, **SCRIPTED_UR_ARG_DEFAULTS}
+           if flags[k] != STAGE2_ARG_DEFAULTS[k]]
+    if bad and not flags["stage2_scripted"]:
+        raise ValueError(f"--{', --'.join(k.replace('_', '-') for k in bad)}: only with "
+                         "--stage2-scripted")
+    if flags["stage2_scripted"]:
+        given = [k for k in keys if flags[k] is not None]
+        if given:
+            raise ValueError(f"--stage2-scripted: no stage-2 node, drop --"
+                             f"{', --'.join(k.replace('_', '-') for k in given)}")
+        bad = [k for k in TELEOP_ARG_DEFAULTS if flags[k] != TELEOP_ARG_DEFAULTS[k]]
+        if bad:
+            raise ValueError(f"--stage2-scripted: not with --"
+                             f"{', --'.join(k.replace('_', '-') for k in bad)}")
+        import stage2_collect
+        import stage2_scripted
+
+        keys = {*stage2_collect.NOMINAL, *stage2_scripted.EXTRA_SET}
+        bad = [kv for kv in flags["scripted_set"] or []
+               if kv.partition("=")[0] not in keys or "=" not in kv]
+        if bad:
+            raise ValueError(f"--scripted-set {bad}: KEY=VALUE with KEY in {sorted(keys)}")
+        return {"scripted": True, "stage_labels": list(stage2_scripted.PHASES),
+                "clearance": None, "config": None, "cmd_source": stage2_collect.CMD_STAGE2,
+                "params": flags["scripted_params"], "dart": flags["scripted_dart"],
+                "seed": flags["scripted_seed"],
+                **({"ur": flags["scripted_ur"]} if flags["scripted_ur"] != "exit" else {})}
+    if flags["stage2_teleop"]:
+        given = [k for k in keys if flags[k] is not None]
+        if given:
+            raise ValueError(f"--stage2-teleop: no stage-2 node, drop --"
+                             f"{', --'.join(k.replace('_', '-') for k in given)}")
+        return {"teleop": True, "teleop_s1": flags["teleop_stage1"], "stage_labels": ["teleop"],
+                "clearance": None, "config": None,
+                "limits": {"lin_mps": flags["teleop_lin_mps"], "ang_rps": flags["teleop_ang_rps"],
+                           "tilt_deg": flags["teleop_tilt_deg"],
+                           "floor_m": flags["teleop_floor_mm"] * 1e-3,
+                           "stale_s": flags["teleop_stale_s"], **TELEOP_LEAD}}
+    bad = [k for k in TELEOP_ARG_DEFAULTS if flags[k] != TELEOP_ARG_DEFAULTS[k]]
+    if bad:
+        raise ValueError(f"--{', --'.join(k.replace('_', '-') for k in bad)}: only with "
+                         "--stage2-teleop")
+    missing = [k for k in keys if not flags[k] or not Path(flags[k]).is_file()]
+    if missing:
+        raise FileNotFoundError(f"--stage2-chain: {[(k, flags[k]) for k in missing]}")
+    dep, wp, cfg = (Path(flags[k]).resolve() for k in keys)
+    encoder = LatentEncoder.load(dep)
+    if isinstance(encoder, BeltCloudPointNetEncoder) and not args.belt_seg:
+        raise ValueError(f"{dep}: a belt_cloud_pointnet deploy encodes the segmented belt "
+                         "cloud; add --belt-seg")
+    with np.load(wp, allow_pickle=False) as f:
+        n_wp = len(f["frames"])
+    one = mppi["stages"] == "last" or mppi["transport"]["goal_mode"] == "track"
+    return {"config": cfg, "config_sha256": sha256(cfg),
+            "params": yaml.safe_load(cfg.read_text()) or {}, "goal_kind": "waypoints",
+            "goal": f"waypoints:{wp}", "stages": mppi["stages"],
+            "max_duration_s": float(flags["stage2_mppi_max_duration_s"]),
+            "debug_channel": mppi["debug_channel"], "clearance": None,
+            "transport": {**mppi["transport"], "waypoints": str(wp),
+                          "waypoints_sha256": sha256(wp)},
+            "deploy": str(dep), "deploy_sha256": sha256(dep), "encoder": encoder,
+            "lcs_model": LearnedLcs.load(dep),
+            "stage_labels": ["stage0"] if one else [f"stage{k}" for k in range(n_wp)]}
+
+
+def stage2_scripted_ur_method(mode: str) -> str:
+    import stage2_scripted
+
+    return stage2_scripted.UR_MODES[mode]
+
+
+def _chain_pp_ctx(sim, byte: int) -> dict:
+    """phase2_probe's ctx for ``ur_exit`` (as ``stage2_starts.main``)."""
+    import phase2_probe as pp
+
+    geo = {byte: sim.clearance_geometry(jaw_bytes=(byte,))}
+    plate = geo[byte][0].plate
+    pc = {"geo": geo, "large7": bc.known_large_pulley_pose7(),
+          "plate_top": float(plate.pos[2] + np.abs(plate.rot[2]) @ plate.half),
+          "origins": cli.sim_camera_origins(sim)}
+    _, pc["ur9"] = pp.franka_targets("scene")
+    return pc
+
+
+def _chain_index_block(args: argparse.Namespace, ch: dict) -> dict:
+    from round_belt_task.constants import SCENE_DIRECTIVES
+
+    teleop, scripted = ch.get("teleop", False), ch.get("scripted", False)
+    flags = {k: (str(v) if isinstance(v, Path) else v)
+             for k, v in ((k, getattr(args, k)) for k in CHAIN_ARGS
+                          if (teleop or k not in TELEOP_ARG_DEFAULTS)
+                          and (scripted or k not in SCRIPTED_ARG_DEFAULTS)
+                          and (k not in S2SNAP_ARG_DEFAULTS or getattr(args, k))
+                          and (k not in ("teleop_stage1", "teleop_cmd_file") or getattr(args, k))
+                          and (k not in SCRIPTED_UR_ARG_DEFAULTS or ch.get("ur")))}
+    if scripted and ch.get("ur"):
+        return {"flags": flags, "scene": str(SCENE_DIRECTIVES),
+                "scripted": {"flags": {k: flags[k] for k in SCRIPTED_ARG_DEFAULTS},
+                             "cmd_source": ch["cmd_source"],
+                             "phase_labels": [f"s2:{p}" for p in ch["stage_labels"]],
+                             "method": "stage2_collect D10L walk without loops from the live "
+                                       "state, DART x --scripted-dart",
+                             "end": "walk done -> release (both hands open, UR lifts); a drive "
+                                    "abort -> no release"},
+                "ur_keep": {"mode": ch["ur"], "method": stage2_scripted_ur_method(ch["ur"])}}
+    if scripted:
+        return {"flags": flags, "scene": str(SCENE_DIRECTIVES),
+                "scripted": {"flags": {k: flags[k] for k in SCRIPTED_ARG_DEFAULTS},
+                             "cmd_source": ch["cmd_source"],
+                             "phase_labels": [f"s2:{p}" for p in ch["stage_labels"]],
+                             "method": "stage2_collect D10L walk without loops from the live "
+                                       "state (Collector._run's walk calls), DART x "
+                                       "--scripted-dart",
+                             "end": "walk done -> release; a drive abort -> no release"},
+                "ur_exit": {"phases": list(UR_EXIT_PHASES), "cmd_source": CMD_UR_EXIT,
+                            "method": "stage2_starts.ur_exit: open, settle, straight up, "
+                                      "place_9 (Franka holds), settle"}}
+    s2 = ({"teleop": {"flags": {k: flags[k] for k in TELEOP_ARG_DEFAULTS if k in flags},
+                      "limits": ch["limits"],
+                      "keys": {"d": "done (release runs)", "a": "abort (episode discarded)",
+                               "p": "pause / resume"},
+                      "cmd_source": CMD_TELEOP, "phase_label": "s2:teleop",
+                      "action": "knot1 - knot0 of the teleop hook's trajectory published with "
+                                "the sampled state (= v * 0.075)",
+                      "end": "d / --teleop-max-s (sim) -> release; grasp lost / OSC dead -> no "
+                             "release (kept); a -> discarded (npz + recording removed)",
+                      **({"stage1": "s1:teleop, cmd_source 9, stage 0, no controller, UR held at "
+                                    "its start target; d / --teleop-max-s -> UR exit, a -> "
+                                    "discarded"} if ch.get("teleop_s1") else {})}}
+          if teleop else
+          {"stage2": {**_mppi_index_block(ch), "deploy": ch["deploy"],
+                      "deploy_sha256": ch["deploy_sha256"], "stage_labels": ch["stage_labels"],
+                      "demo_offset_frames": 0}})
+    return {"flags": flags, "scene": str(SCENE_DIRECTIVES), **s2,
+            "ur_exit": {"phases": list(UR_EXIT_PHASES), "cmd_source": CMD_UR_EXIT,
+                        "method": "stage2_starts.ur_exit: open, settle, straight up, place_9 "
+                                  "(Franka holds), settle"},
+            "rule": "stage 1 large not engaged -> no exit; exit failed (abort / Franka not "
+                    "holding / large not engaged) -> no stage 2, no release; outcome = the "
+                    "large label then, else the label after the release"}
 
 
 def _mppi_index_block(m: dict) -> dict:

@@ -1,0 +1,24 @@
+franka_publish_rate: 200 # slow down publishing rate due to limited UDP bandwidth on MacOS
+ur_publish_rate: 200
+robotiq_publish_rate: 200
+actuator_delay: 0.000
+publish_efforts: true
+object_publish_rate: 20
+dt: 0.005
+realtime_rate: 1
+q_init_franka: [1.71717, 1.10002, -1.4548, -2.25837, 1.259265, 1.94719, 0.331838]
+q_init_franka_hand: [-0.004, 0.004]
+q_init_ur: [0.0, -1.5708, 1.5708, -1.5708, -1.5708, 0.0]
+q_init_robotiq: [0.3]
+
+q_init_bike_chain: [1, 0, 0, 0, 0.55, -0.13, 0.03,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+  0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+bike_chain_start_body_name: "inner_chain_link_0"
+bike_chain_end_body_name: "dummy_63_2"

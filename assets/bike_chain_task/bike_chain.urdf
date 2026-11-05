@@ -1,0 +1,5310 @@
+<?xml version="1.0"?>
+<robot name="bike_chain">
+
+  <material name="mat_chain_link">
+    <color rgba="0.3 0.3 0.3 1"/>
+  </material>
+
+  <link name="inner_chain_link_0">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_0_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_0_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_0_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_0_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_0">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_0_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_0_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_1">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_1_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_1_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_1_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_1_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_1">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_1_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_1_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_2">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_2_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_2_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_2_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_2_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_2">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_2_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_2_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_3">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_3_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_3_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_3_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_3_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_3">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_3_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_3_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_4">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_4_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_4_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_4_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_4_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_4">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_4_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_4_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_5">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_5_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_5_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_5_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_5_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_5">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_5_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_5_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_6">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_6_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_6_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_6_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_6_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_6">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_6_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_6_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_7">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_7_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_7_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_7_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_7_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_7">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_7_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_7_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_8">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_8_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_8_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_8_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_8_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_8">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_8_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_8_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_9">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_9_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_9_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_9_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_9_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_9">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_9_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_9_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_10">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_10_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_10_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_10_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_10_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_10">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_10_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_10_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_11">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_11_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_11_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_11_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_11_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_11">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_11_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_11_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_12">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_12_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_12_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_12_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_12_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_12">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_12_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_12_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_13">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_13_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_13_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_13_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_13_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_13">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_13_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_13_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_14">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_14_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_14_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_14_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_14_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_14">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_14_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_14_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_15">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_15_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_15_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_15_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_15_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_15">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_15_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_15_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_16">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_16_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_16_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_16_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_16_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_16">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_16_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_16_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_17">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_17_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_17_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_17_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_17_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_17">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_17_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_17_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_18">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_18_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_18_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_18_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_18_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_18">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_18_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_18_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_19">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_19_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_19_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_19_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_19_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_19">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_19_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_19_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_20">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_20_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_20_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_20_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_20_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_20">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_20_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_20_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_21">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_21_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_21_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_21_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_21_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_21">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_21_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_21_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_22">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_22_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_22_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_22_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_22_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_22">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_22_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_22_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_23">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_23_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_23_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_23_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_23_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_23">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_23_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_23_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_24">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_24_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_24_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_24_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_24_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_24">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_24_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_24_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_25">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_25_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_25_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_25_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_25_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_25">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_25_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_25_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_26">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_26_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_26_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_26_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_26_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_26">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_26_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_26_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_27">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_27_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_27_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_27_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_27_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_27">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_27_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_27_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_28">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_28_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_28_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_28_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_28_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_28">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_28_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_28_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_29">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_29_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_29_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_29_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_29_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_29">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_29_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_29_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_30">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_30_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_30_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_30_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_30_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_30">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_30_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_30_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="inner_chain_link_31">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="inner_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="inner_chain_link_31_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_31_collision_top_plate">
+      <origin xyz="0 0 0.00575" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_31_collision_left_shaft">
+      <origin xyz="0 0 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+    <collision name="inner_chain_link_31_collision_right_shaft">
+      <origin xyz="0 0.009525 0.0035" rpy="0 0 0"/>
+      <geometry>
+        <cylinder length="0.0045" radius="0.0025"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="outer_chain_link_31">
+    <inertial>
+      <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+      <mass value="0.005"/>
+      <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+               iyy="6.97e-8" iyz="0" 
+               izz="8.33e-8"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="outer_chain_link.obj"/>
+      </geometry>
+      <material name="mat_chain_link"/>
+    </visual>
+    <collision name="outer_chain_link_31_collision_bottom_plate">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+    <collision name="outer_chain_link_31_collision_top_plate">
+      <origin xyz="0 0 0.00875" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="chain_link_collision.obj"/>
+      </geometry>
+    </collision>
+  </link>
+
+    <link name="dummy_0_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_0_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_1_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_1_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_2_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_2_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_3_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_3_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_4_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_4_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_5_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_5_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_6_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_6_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_7_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_7_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_8_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_8_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_9_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_9_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_10_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_10_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_11_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_11_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_12_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_12_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_13_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_13_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_14_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_14_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_15_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_15_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_16_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_16_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_17_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_17_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_18_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_18_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_19_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_19_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_20_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_20_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_21_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_21_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_22_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_22_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_23_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_23_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_24_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_24_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_25_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_25_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_26_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_26_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_27_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_27_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_28_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_28_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_29_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_29_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_30_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_30_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_31_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_31_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_32_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_32_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_33_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_33_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_34_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_34_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_35_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_35_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_36_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_36_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_37_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_37_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_38_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_38_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_39_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_39_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_40_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_40_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_41_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_41_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_42_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_42_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_43_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_43_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_44_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_44_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_45_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_45_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_46_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_46_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_47_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_47_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_48_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_48_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_49_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_49_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_50_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_50_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_51_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_51_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_52_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_52_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_53_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_53_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_54_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_54_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_55_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_55_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_56_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_56_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_57_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_57_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_58_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_58_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_59_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_59_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_60_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_60_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_61_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_61_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_62_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_62_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_63_1">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+    <link name="dummy_63_2">
+      <inertial>
+        <origin xyz="0 0.0047625 0.0035" rpy="0 0 0"/>
+        <mass value="0.005"/>
+        <inertia ixx="6.97e-8" ixy="0" ixz="0" 
+                 iyy="6.97e-8" iyz="0" 
+                 izz="8.33e-8"/>
+      </inertial>
+    </link>
+
+
+  <joint name="joint_inner_chain_link_0_dummy_0_1" type="revolute">
+    <parent link="inner_chain_link_0"/>
+    <child link="dummy_0_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_0_1_dummy_0_2" type="revolute">
+    <parent link="dummy_0_1"/>
+    <child link="dummy_0_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_0_2_outer_chain_link_0" type="prismatic">
+    <parent link="dummy_0_2"/>
+    <child link="outer_chain_link_0"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_0_dummy_1_1" type="revolute">
+    <parent link="outer_chain_link_0"/>
+    <child link="dummy_1_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_1_1_dummy_1_2" type="revolute">
+    <parent link="dummy_1_1"/>
+    <child link="dummy_1_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_1_2_inner_chain_link_1" type="prismatic">
+        <parent link="dummy_1_2"/>
+        <child link="inner_chain_link_1"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_1_dummy_2_1" type="revolute">
+    <parent link="inner_chain_link_1"/>
+    <child link="dummy_2_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_2_1_dummy_2_2" type="revolute">
+    <parent link="dummy_2_1"/>
+    <child link="dummy_2_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_2_2_outer_chain_link_1" type="prismatic">
+    <parent link="dummy_2_2"/>
+    <child link="outer_chain_link_1"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_1_dummy_3_1" type="revolute">
+    <parent link="outer_chain_link_1"/>
+    <child link="dummy_3_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_3_1_dummy_3_2" type="revolute">
+    <parent link="dummy_3_1"/>
+    <child link="dummy_3_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_3_2_inner_chain_link_2" type="prismatic">
+        <parent link="dummy_3_2"/>
+        <child link="inner_chain_link_2"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_2_dummy_4_1" type="revolute">
+    <parent link="inner_chain_link_2"/>
+    <child link="dummy_4_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_4_1_dummy_4_2" type="revolute">
+    <parent link="dummy_4_1"/>
+    <child link="dummy_4_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_4_2_outer_chain_link_2" type="prismatic">
+    <parent link="dummy_4_2"/>
+    <child link="outer_chain_link_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_2_dummy_5_1" type="revolute">
+    <parent link="outer_chain_link_2"/>
+    <child link="dummy_5_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_5_1_dummy_5_2" type="revolute">
+    <parent link="dummy_5_1"/>
+    <child link="dummy_5_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_5_2_inner_chain_link_3" type="prismatic">
+        <parent link="dummy_5_2"/>
+        <child link="inner_chain_link_3"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_3_dummy_6_1" type="revolute">
+    <parent link="inner_chain_link_3"/>
+    <child link="dummy_6_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_6_1_dummy_6_2" type="revolute">
+    <parent link="dummy_6_1"/>
+    <child link="dummy_6_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_6_2_outer_chain_link_3" type="prismatic">
+    <parent link="dummy_6_2"/>
+    <child link="outer_chain_link_3"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_3_dummy_7_1" type="revolute">
+    <parent link="outer_chain_link_3"/>
+    <child link="dummy_7_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_7_1_dummy_7_2" type="revolute">
+    <parent link="dummy_7_1"/>
+    <child link="dummy_7_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_7_2_inner_chain_link_4" type="prismatic">
+        <parent link="dummy_7_2"/>
+        <child link="inner_chain_link_4"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_4_dummy_8_1" type="revolute">
+    <parent link="inner_chain_link_4"/>
+    <child link="dummy_8_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_8_1_dummy_8_2" type="revolute">
+    <parent link="dummy_8_1"/>
+    <child link="dummy_8_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_8_2_outer_chain_link_4" type="prismatic">
+    <parent link="dummy_8_2"/>
+    <child link="outer_chain_link_4"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_4_dummy_9_1" type="revolute">
+    <parent link="outer_chain_link_4"/>
+    <child link="dummy_9_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_9_1_dummy_9_2" type="revolute">
+    <parent link="dummy_9_1"/>
+    <child link="dummy_9_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_9_2_inner_chain_link_5" type="prismatic">
+        <parent link="dummy_9_2"/>
+        <child link="inner_chain_link_5"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_5_dummy_10_1" type="revolute">
+    <parent link="inner_chain_link_5"/>
+    <child link="dummy_10_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_10_1_dummy_10_2" type="revolute">
+    <parent link="dummy_10_1"/>
+    <child link="dummy_10_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_10_2_outer_chain_link_5" type="prismatic">
+    <parent link="dummy_10_2"/>
+    <child link="outer_chain_link_5"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_5_dummy_11_1" type="revolute">
+    <parent link="outer_chain_link_5"/>
+    <child link="dummy_11_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_11_1_dummy_11_2" type="revolute">
+    <parent link="dummy_11_1"/>
+    <child link="dummy_11_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_11_2_inner_chain_link_6" type="prismatic">
+        <parent link="dummy_11_2"/>
+        <child link="inner_chain_link_6"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_6_dummy_12_1" type="revolute">
+    <parent link="inner_chain_link_6"/>
+    <child link="dummy_12_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_12_1_dummy_12_2" type="revolute">
+    <parent link="dummy_12_1"/>
+    <child link="dummy_12_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_12_2_outer_chain_link_6" type="prismatic">
+    <parent link="dummy_12_2"/>
+    <child link="outer_chain_link_6"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_6_dummy_13_1" type="revolute">
+    <parent link="outer_chain_link_6"/>
+    <child link="dummy_13_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_13_1_dummy_13_2" type="revolute">
+    <parent link="dummy_13_1"/>
+    <child link="dummy_13_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_13_2_inner_chain_link_7" type="prismatic">
+        <parent link="dummy_13_2"/>
+        <child link="inner_chain_link_7"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_7_dummy_14_1" type="revolute">
+    <parent link="inner_chain_link_7"/>
+    <child link="dummy_14_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_14_1_dummy_14_2" type="revolute">
+    <parent link="dummy_14_1"/>
+    <child link="dummy_14_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_14_2_outer_chain_link_7" type="prismatic">
+    <parent link="dummy_14_2"/>
+    <child link="outer_chain_link_7"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_7_dummy_15_1" type="revolute">
+    <parent link="outer_chain_link_7"/>
+    <child link="dummy_15_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_15_1_dummy_15_2" type="revolute">
+    <parent link="dummy_15_1"/>
+    <child link="dummy_15_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_15_2_inner_chain_link_8" type="prismatic">
+        <parent link="dummy_15_2"/>
+        <child link="inner_chain_link_8"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_8_dummy_16_1" type="revolute">
+    <parent link="inner_chain_link_8"/>
+    <child link="dummy_16_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_16_1_dummy_16_2" type="revolute">
+    <parent link="dummy_16_1"/>
+    <child link="dummy_16_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_16_2_outer_chain_link_8" type="prismatic">
+    <parent link="dummy_16_2"/>
+    <child link="outer_chain_link_8"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_8_dummy_17_1" type="revolute">
+    <parent link="outer_chain_link_8"/>
+    <child link="dummy_17_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_17_1_dummy_17_2" type="revolute">
+    <parent link="dummy_17_1"/>
+    <child link="dummy_17_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_17_2_inner_chain_link_9" type="prismatic">
+        <parent link="dummy_17_2"/>
+        <child link="inner_chain_link_9"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_9_dummy_18_1" type="revolute">
+    <parent link="inner_chain_link_9"/>
+    <child link="dummy_18_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_18_1_dummy_18_2" type="revolute">
+    <parent link="dummy_18_1"/>
+    <child link="dummy_18_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_18_2_outer_chain_link_9" type="prismatic">
+    <parent link="dummy_18_2"/>
+    <child link="outer_chain_link_9"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_9_dummy_19_1" type="revolute">
+    <parent link="outer_chain_link_9"/>
+    <child link="dummy_19_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_19_1_dummy_19_2" type="revolute">
+    <parent link="dummy_19_1"/>
+    <child link="dummy_19_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_19_2_inner_chain_link_10" type="prismatic">
+        <parent link="dummy_19_2"/>
+        <child link="inner_chain_link_10"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_10_dummy_20_1" type="revolute">
+    <parent link="inner_chain_link_10"/>
+    <child link="dummy_20_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_20_1_dummy_20_2" type="revolute">
+    <parent link="dummy_20_1"/>
+    <child link="dummy_20_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_20_2_outer_chain_link_10" type="prismatic">
+    <parent link="dummy_20_2"/>
+    <child link="outer_chain_link_10"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_10_dummy_21_1" type="revolute">
+    <parent link="outer_chain_link_10"/>
+    <child link="dummy_21_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_21_1_dummy_21_2" type="revolute">
+    <parent link="dummy_21_1"/>
+    <child link="dummy_21_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_21_2_inner_chain_link_11" type="prismatic">
+        <parent link="dummy_21_2"/>
+        <child link="inner_chain_link_11"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_11_dummy_22_1" type="revolute">
+    <parent link="inner_chain_link_11"/>
+    <child link="dummy_22_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_22_1_dummy_22_2" type="revolute">
+    <parent link="dummy_22_1"/>
+    <child link="dummy_22_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_22_2_outer_chain_link_11" type="prismatic">
+    <parent link="dummy_22_2"/>
+    <child link="outer_chain_link_11"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_11_dummy_23_1" type="revolute">
+    <parent link="outer_chain_link_11"/>
+    <child link="dummy_23_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_23_1_dummy_23_2" type="revolute">
+    <parent link="dummy_23_1"/>
+    <child link="dummy_23_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_23_2_inner_chain_link_12" type="prismatic">
+        <parent link="dummy_23_2"/>
+        <child link="inner_chain_link_12"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_12_dummy_24_1" type="revolute">
+    <parent link="inner_chain_link_12"/>
+    <child link="dummy_24_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_24_1_dummy_24_2" type="revolute">
+    <parent link="dummy_24_1"/>
+    <child link="dummy_24_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_24_2_outer_chain_link_12" type="prismatic">
+    <parent link="dummy_24_2"/>
+    <child link="outer_chain_link_12"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_12_dummy_25_1" type="revolute">
+    <parent link="outer_chain_link_12"/>
+    <child link="dummy_25_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_25_1_dummy_25_2" type="revolute">
+    <parent link="dummy_25_1"/>
+    <child link="dummy_25_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_25_2_inner_chain_link_13" type="prismatic">
+        <parent link="dummy_25_2"/>
+        <child link="inner_chain_link_13"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_13_dummy_26_1" type="revolute">
+    <parent link="inner_chain_link_13"/>
+    <child link="dummy_26_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_26_1_dummy_26_2" type="revolute">
+    <parent link="dummy_26_1"/>
+    <child link="dummy_26_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_26_2_outer_chain_link_13" type="prismatic">
+    <parent link="dummy_26_2"/>
+    <child link="outer_chain_link_13"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_13_dummy_27_1" type="revolute">
+    <parent link="outer_chain_link_13"/>
+    <child link="dummy_27_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_27_1_dummy_27_2" type="revolute">
+    <parent link="dummy_27_1"/>
+    <child link="dummy_27_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_27_2_inner_chain_link_14" type="prismatic">
+        <parent link="dummy_27_2"/>
+        <child link="inner_chain_link_14"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_14_dummy_28_1" type="revolute">
+    <parent link="inner_chain_link_14"/>
+    <child link="dummy_28_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_28_1_dummy_28_2" type="revolute">
+    <parent link="dummy_28_1"/>
+    <child link="dummy_28_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_28_2_outer_chain_link_14" type="prismatic">
+    <parent link="dummy_28_2"/>
+    <child link="outer_chain_link_14"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_14_dummy_29_1" type="revolute">
+    <parent link="outer_chain_link_14"/>
+    <child link="dummy_29_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_29_1_dummy_29_2" type="revolute">
+    <parent link="dummy_29_1"/>
+    <child link="dummy_29_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_29_2_inner_chain_link_15" type="prismatic">
+        <parent link="dummy_29_2"/>
+        <child link="inner_chain_link_15"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_15_dummy_30_1" type="revolute">
+    <parent link="inner_chain_link_15"/>
+    <child link="dummy_30_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_30_1_dummy_30_2" type="revolute">
+    <parent link="dummy_30_1"/>
+    <child link="dummy_30_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_30_2_outer_chain_link_15" type="prismatic">
+    <parent link="dummy_30_2"/>
+    <child link="outer_chain_link_15"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_15_dummy_31_1" type="revolute">
+    <parent link="outer_chain_link_15"/>
+    <child link="dummy_31_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_31_1_dummy_31_2" type="revolute">
+    <parent link="dummy_31_1"/>
+    <child link="dummy_31_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_31_2_inner_chain_link_16" type="prismatic">
+        <parent link="dummy_31_2"/>
+        <child link="inner_chain_link_16"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_16_dummy_32_1" type="revolute">
+    <parent link="inner_chain_link_16"/>
+    <child link="dummy_32_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_32_1_dummy_32_2" type="revolute">
+    <parent link="dummy_32_1"/>
+    <child link="dummy_32_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_32_2_outer_chain_link_16" type="prismatic">
+    <parent link="dummy_32_2"/>
+    <child link="outer_chain_link_16"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_16_dummy_33_1" type="revolute">
+    <parent link="outer_chain_link_16"/>
+    <child link="dummy_33_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_33_1_dummy_33_2" type="revolute">
+    <parent link="dummy_33_1"/>
+    <child link="dummy_33_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_33_2_inner_chain_link_17" type="prismatic">
+        <parent link="dummy_33_2"/>
+        <child link="inner_chain_link_17"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_17_dummy_34_1" type="revolute">
+    <parent link="inner_chain_link_17"/>
+    <child link="dummy_34_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_34_1_dummy_34_2" type="revolute">
+    <parent link="dummy_34_1"/>
+    <child link="dummy_34_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_34_2_outer_chain_link_17" type="prismatic">
+    <parent link="dummy_34_2"/>
+    <child link="outer_chain_link_17"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_17_dummy_35_1" type="revolute">
+    <parent link="outer_chain_link_17"/>
+    <child link="dummy_35_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_35_1_dummy_35_2" type="revolute">
+    <parent link="dummy_35_1"/>
+    <child link="dummy_35_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_35_2_inner_chain_link_18" type="prismatic">
+        <parent link="dummy_35_2"/>
+        <child link="inner_chain_link_18"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_18_dummy_36_1" type="revolute">
+    <parent link="inner_chain_link_18"/>
+    <child link="dummy_36_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_36_1_dummy_36_2" type="revolute">
+    <parent link="dummy_36_1"/>
+    <child link="dummy_36_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_36_2_outer_chain_link_18" type="prismatic">
+    <parent link="dummy_36_2"/>
+    <child link="outer_chain_link_18"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_18_dummy_37_1" type="revolute">
+    <parent link="outer_chain_link_18"/>
+    <child link="dummy_37_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_37_1_dummy_37_2" type="revolute">
+    <parent link="dummy_37_1"/>
+    <child link="dummy_37_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_37_2_inner_chain_link_19" type="prismatic">
+        <parent link="dummy_37_2"/>
+        <child link="inner_chain_link_19"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_19_dummy_38_1" type="revolute">
+    <parent link="inner_chain_link_19"/>
+    <child link="dummy_38_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_38_1_dummy_38_2" type="revolute">
+    <parent link="dummy_38_1"/>
+    <child link="dummy_38_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_38_2_outer_chain_link_19" type="prismatic">
+    <parent link="dummy_38_2"/>
+    <child link="outer_chain_link_19"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_19_dummy_39_1" type="revolute">
+    <parent link="outer_chain_link_19"/>
+    <child link="dummy_39_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_39_1_dummy_39_2" type="revolute">
+    <parent link="dummy_39_1"/>
+    <child link="dummy_39_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_39_2_inner_chain_link_20" type="prismatic">
+        <parent link="dummy_39_2"/>
+        <child link="inner_chain_link_20"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_20_dummy_40_1" type="revolute">
+    <parent link="inner_chain_link_20"/>
+    <child link="dummy_40_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_40_1_dummy_40_2" type="revolute">
+    <parent link="dummy_40_1"/>
+    <child link="dummy_40_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_40_2_outer_chain_link_20" type="prismatic">
+    <parent link="dummy_40_2"/>
+    <child link="outer_chain_link_20"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_20_dummy_41_1" type="revolute">
+    <parent link="outer_chain_link_20"/>
+    <child link="dummy_41_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_41_1_dummy_41_2" type="revolute">
+    <parent link="dummy_41_1"/>
+    <child link="dummy_41_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_41_2_inner_chain_link_21" type="prismatic">
+        <parent link="dummy_41_2"/>
+        <child link="inner_chain_link_21"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_21_dummy_42_1" type="revolute">
+    <parent link="inner_chain_link_21"/>
+    <child link="dummy_42_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_42_1_dummy_42_2" type="revolute">
+    <parent link="dummy_42_1"/>
+    <child link="dummy_42_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_42_2_outer_chain_link_21" type="prismatic">
+    <parent link="dummy_42_2"/>
+    <child link="outer_chain_link_21"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_21_dummy_43_1" type="revolute">
+    <parent link="outer_chain_link_21"/>
+    <child link="dummy_43_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_43_1_dummy_43_2" type="revolute">
+    <parent link="dummy_43_1"/>
+    <child link="dummy_43_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_43_2_inner_chain_link_22" type="prismatic">
+        <parent link="dummy_43_2"/>
+        <child link="inner_chain_link_22"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_22_dummy_44_1" type="revolute">
+    <parent link="inner_chain_link_22"/>
+    <child link="dummy_44_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_44_1_dummy_44_2" type="revolute">
+    <parent link="dummy_44_1"/>
+    <child link="dummy_44_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_44_2_outer_chain_link_22" type="prismatic">
+    <parent link="dummy_44_2"/>
+    <child link="outer_chain_link_22"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_22_dummy_45_1" type="revolute">
+    <parent link="outer_chain_link_22"/>
+    <child link="dummy_45_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_45_1_dummy_45_2" type="revolute">
+    <parent link="dummy_45_1"/>
+    <child link="dummy_45_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_45_2_inner_chain_link_23" type="prismatic">
+        <parent link="dummy_45_2"/>
+        <child link="inner_chain_link_23"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_23_dummy_46_1" type="revolute">
+    <parent link="inner_chain_link_23"/>
+    <child link="dummy_46_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_46_1_dummy_46_2" type="revolute">
+    <parent link="dummy_46_1"/>
+    <child link="dummy_46_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_46_2_outer_chain_link_23" type="prismatic">
+    <parent link="dummy_46_2"/>
+    <child link="outer_chain_link_23"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_23_dummy_47_1" type="revolute">
+    <parent link="outer_chain_link_23"/>
+    <child link="dummy_47_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_47_1_dummy_47_2" type="revolute">
+    <parent link="dummy_47_1"/>
+    <child link="dummy_47_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_47_2_inner_chain_link_24" type="prismatic">
+        <parent link="dummy_47_2"/>
+        <child link="inner_chain_link_24"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_24_dummy_48_1" type="revolute">
+    <parent link="inner_chain_link_24"/>
+    <child link="dummy_48_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_48_1_dummy_48_2" type="revolute">
+    <parent link="dummy_48_1"/>
+    <child link="dummy_48_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_48_2_outer_chain_link_24" type="prismatic">
+    <parent link="dummy_48_2"/>
+    <child link="outer_chain_link_24"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_24_dummy_49_1" type="revolute">
+    <parent link="outer_chain_link_24"/>
+    <child link="dummy_49_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_49_1_dummy_49_2" type="revolute">
+    <parent link="dummy_49_1"/>
+    <child link="dummy_49_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_49_2_inner_chain_link_25" type="prismatic">
+        <parent link="dummy_49_2"/>
+        <child link="inner_chain_link_25"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_25_dummy_50_1" type="revolute">
+    <parent link="inner_chain_link_25"/>
+    <child link="dummy_50_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_50_1_dummy_50_2" type="revolute">
+    <parent link="dummy_50_1"/>
+    <child link="dummy_50_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_50_2_outer_chain_link_25" type="prismatic">
+    <parent link="dummy_50_2"/>
+    <child link="outer_chain_link_25"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_25_dummy_51_1" type="revolute">
+    <parent link="outer_chain_link_25"/>
+    <child link="dummy_51_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_51_1_dummy_51_2" type="revolute">
+    <parent link="dummy_51_1"/>
+    <child link="dummy_51_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_51_2_inner_chain_link_26" type="prismatic">
+        <parent link="dummy_51_2"/>
+        <child link="inner_chain_link_26"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_26_dummy_52_1" type="revolute">
+    <parent link="inner_chain_link_26"/>
+    <child link="dummy_52_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_52_1_dummy_52_2" type="revolute">
+    <parent link="dummy_52_1"/>
+    <child link="dummy_52_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_52_2_outer_chain_link_26" type="prismatic">
+    <parent link="dummy_52_2"/>
+    <child link="outer_chain_link_26"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_26_dummy_53_1" type="revolute">
+    <parent link="outer_chain_link_26"/>
+    <child link="dummy_53_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_53_1_dummy_53_2" type="revolute">
+    <parent link="dummy_53_1"/>
+    <child link="dummy_53_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_53_2_inner_chain_link_27" type="prismatic">
+        <parent link="dummy_53_2"/>
+        <child link="inner_chain_link_27"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_27_dummy_54_1" type="revolute">
+    <parent link="inner_chain_link_27"/>
+    <child link="dummy_54_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_54_1_dummy_54_2" type="revolute">
+    <parent link="dummy_54_1"/>
+    <child link="dummy_54_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_54_2_outer_chain_link_27" type="prismatic">
+    <parent link="dummy_54_2"/>
+    <child link="outer_chain_link_27"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_27_dummy_55_1" type="revolute">
+    <parent link="outer_chain_link_27"/>
+    <child link="dummy_55_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_55_1_dummy_55_2" type="revolute">
+    <parent link="dummy_55_1"/>
+    <child link="dummy_55_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_55_2_inner_chain_link_28" type="prismatic">
+        <parent link="dummy_55_2"/>
+        <child link="inner_chain_link_28"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_28_dummy_56_1" type="revolute">
+    <parent link="inner_chain_link_28"/>
+    <child link="dummy_56_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_56_1_dummy_56_2" type="revolute">
+    <parent link="dummy_56_1"/>
+    <child link="dummy_56_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_56_2_outer_chain_link_28" type="prismatic">
+    <parent link="dummy_56_2"/>
+    <child link="outer_chain_link_28"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_28_dummy_57_1" type="revolute">
+    <parent link="outer_chain_link_28"/>
+    <child link="dummy_57_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_57_1_dummy_57_2" type="revolute">
+    <parent link="dummy_57_1"/>
+    <child link="dummy_57_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_57_2_inner_chain_link_29" type="prismatic">
+        <parent link="dummy_57_2"/>
+        <child link="inner_chain_link_29"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_29_dummy_58_1" type="revolute">
+    <parent link="inner_chain_link_29"/>
+    <child link="dummy_58_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_58_1_dummy_58_2" type="revolute">
+    <parent link="dummy_58_1"/>
+    <child link="dummy_58_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_58_2_outer_chain_link_29" type="prismatic">
+    <parent link="dummy_58_2"/>
+    <child link="outer_chain_link_29"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_29_dummy_59_1" type="revolute">
+    <parent link="outer_chain_link_29"/>
+    <child link="dummy_59_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_59_1_dummy_59_2" type="revolute">
+    <parent link="dummy_59_1"/>
+    <child link="dummy_59_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_59_2_inner_chain_link_30" type="prismatic">
+        <parent link="dummy_59_2"/>
+        <child link="inner_chain_link_30"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_30_dummy_60_1" type="revolute">
+    <parent link="inner_chain_link_30"/>
+    <child link="dummy_60_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_60_1_dummy_60_2" type="revolute">
+    <parent link="dummy_60_1"/>
+    <child link="dummy_60_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_60_2_outer_chain_link_30" type="prismatic">
+    <parent link="dummy_60_2"/>
+    <child link="outer_chain_link_30"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_30_dummy_61_1" type="revolute">
+    <parent link="outer_chain_link_30"/>
+    <child link="dummy_61_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_61_1_dummy_61_2" type="revolute">
+    <parent link="dummy_61_1"/>
+    <child link="dummy_61_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+      <joint name="joint_dummy_61_2_inner_chain_link_31" type="prismatic">
+        <parent link="dummy_61_2"/>
+        <child link="inner_chain_link_31"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <axis xyz="0 0 1"/>
+        <limit effort="1" velocity="1" lower="0" upper="0.0005"/>
+        <dynamics damping="0.5" />
+      </joint>
+    
+  <joint name="joint_inner_chain_link_31_dummy_62_1" type="revolute">
+    <parent link="inner_chain_link_31"/>
+    <child link="dummy_62_1"/>
+    <origin xyz="0 0.009525 -0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_62_1_dummy_62_2" type="revolute">
+    <parent link="dummy_62_1"/>
+    <child link="dummy_62_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_62_2_outer_chain_link_31" type="prismatic">
+    <parent link="dummy_62_2"/>
+    <child link="outer_chain_link_31"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="1" velocity="1" lower="-0.0005" upper="0"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_outer_chain_link_31_dummy_63_1" type="revolute">
+    <parent link="outer_chain_link_31"/>
+    <child link="dummy_63_1"/>
+    <origin xyz="0 0.009525 0.00125" rpy="0 0 0.09817477042468103"/>
+    <axis xyz="0 0 1"/>
+    <dynamics damping="0.5" />
+  </joint>
+
+  <joint name="joint_dummy_63_1_dummy_63_2" type="revolute">
+    <parent link="dummy_63_1"/>
+    <child link="dummy_63_2"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis xyz="1 0 0"/>
+    <limit effort="1" velocity="1" lower="-0.02" upper="0.02"/>
+    <dynamics damping="0.5" />
+  </joint>
+</robot>

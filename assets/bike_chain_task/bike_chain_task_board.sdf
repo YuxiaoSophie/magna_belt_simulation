@@ -1,0 +1,1427 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<sdf version="1.7">
+  <model name="bike_chain_task_board">
+    <link name="board">
+      <visual name="board">
+        <pose>0 0 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>bike_chain_task_board_no_sprockets.obj</uri>
+            <scale>0.001 0.001 0.001</scale>
+          </mesh>
+        </geometry>
+      </visual>
+      <collision name="board_collision">
+        <pose>0.192 0.192 -0.005 0 0 0</pose>
+        <geometry>
+          <box>
+            <size>0.384 0.384 0.01</size>
+          </box>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+        </drake:proximity_properties>
+      </collision>
+    </link>
+    <link name="small_sprocket">
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.3</mass>
+        <inertia>
+          <ixx>3.06677e-05</ixx>
+          <iyy>3.0667375e-05</iyy>
+          <izz>6.0454911e-05</izz>
+          <ixy>5.7518697e-14</ixy>
+          <ixz>1.6724428e-11</ixz>
+          <iyz>-1.9003215e-11</iyz>
+        </inertia>
+      </inertial>
+      <visual name="small_sprocket">
+        <pose>0.054 0.073 0.020 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>small_sprocket.obj</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.7 0.7 0.7 1</diffuse>
+        </material>
+      </visual>
+      <collision name="small_sprocket_rim">
+        <pose>0.054 0.073 0.02215 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.0043</length>
+            <radius>0.02224</radius>
+          </cylinder>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_0">
+        <pose>0.076240 0.073000 0.022150 0.000000 1.570790 0.000000</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_1">
+        <pose>0.074547 0.081511 0.022150 0.000000 1.570790 0.392699</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_2">
+        <pose>0.069726 0.088726 0.022150 0.000000 1.570790 0.785398</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_3">
+        <pose>0.062511 0.093547 0.022150 0.000000 1.570790 1.178097</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_4">
+        <pose>0.054000 0.095240 0.022150 0.000000 1.570790 1.570796</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_5">
+        <pose>0.045489 0.093547 0.022150 0.000000 1.570790 1.963495</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_6">
+        <pose>0.038274 0.088726 0.022150 0.000000 1.570790 2.356194</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_7">
+        <pose>0.033453 0.081511 0.022150 0.000000 1.570790 2.748894</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_8">
+        <pose>0.031760 0.073000 0.022150 0.000000 1.570790 3.141593</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_9">
+        <pose>0.033453 0.064489 0.022150 0.000000 1.570790 3.534292</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_10">
+        <pose>0.038274 0.057274 0.022150 0.000000 1.570790 3.926991</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_11">
+        <pose>0.045489 0.052453 0.022150 0.000000 1.570790 4.319690</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_12">
+        <pose>0.054000 0.050760 0.022150 0.000000 1.570790 4.712389</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_13">
+        <pose>0.062511 0.052453 0.022150 0.000000 1.570790 5.105088</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_14">
+        <pose>0.069726 0.057274 0.022150 0.000000 1.570790 5.497787</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_tooth_15">
+        <pose>0.074547 0.064489 0.022150 0.000000 1.570790 5.890486</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="small_sprocket_hub">
+        <pose>0.054 0.073 0.03215 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.0157</length>
+            <radius>0.0185</radius>
+          </cylinder>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+      <collision name="screw_head">
+        <pose>0.054 0.073 0.043 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.006</length>
+            <radius>0.005</radius>
+          </cylinder>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+    </link>
+    <link name="large_sprocket">
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.5</mass>
+        <inertia>
+          <ixx>3.06677e-05</ixx>
+          <iyy>3.0667375e-05</iyy>
+          <izz>6.0454911e-05</izz>
+          <ixy>5.7518697e-14</ixy>
+          <ixz>1.6724428e-11</ixz>
+          <iyz>-1.9003215e-11</iyz>
+        </inertia>
+      </inertial>
+      <visual name="large_sprocket">
+        <pose>0.234 0.073 0.023 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>large_sprocket.obj</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.7 0.7 0.7 1</diffuse>
+        </material>
+      </visual>
+      <collision name="large_sprocket_rim">
+        <pose>0.234 0.073 0.02515 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.0043</length>
+            <radius>0.046237</radius>
+          </cylinder>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+      <collision name="large_sprocket_hub">
+        <pose>0.234 0.073 0.03615 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.0177</length>
+            <radius>0.0265</radius>
+          </cylinder>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+      <collision name="screw_head">
+        <pose>0.234 0.073 0.048 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.006</length>
+            <radius>0.005</radius>
+          </cylinder>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+      <collision name="large_sprocket_tooth_0">
+        <pose>0.280237 0.073000 0.025150 0.000000 1.570790 0.000000</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_1">
+        <pose>0.279349 0.082020 0.025150 0.000000 1.570790 0.196350</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_2">
+        <pose>0.276717 0.090694 0.025150 0.000000 1.570790 0.392699</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_3">
+        <pose>0.272445 0.098688 0.025150 0.000000 1.570790 0.589049</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_4">
+        <pose>0.266694 0.105694 0.025150 0.000000 1.570790 0.785398</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_5">
+        <pose>0.259688 0.111445 0.025150 0.000000 1.570790 0.981748</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_6">
+        <pose>0.251694 0.115717 0.025150 0.000000 1.570790 1.178097</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_7">
+        <pose>0.243020 0.118349 0.025150 0.000000 1.570790 1.374447</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_8">
+        <pose>0.234000 0.119237 0.025150 0.000000 1.570790 1.570796</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_9">
+        <pose>0.224980 0.118349 0.025150 0.000000 1.570790 1.767146</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_10">
+        <pose>0.216306 0.115717 0.025150 0.000000 1.570790 1.963495</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_11">
+        <pose>0.208312 0.111445 0.025150 0.000000 1.570790 2.159845</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_12">
+        <pose>0.201306 0.105694 0.025150 0.000000 1.570790 2.356194</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_13">
+        <pose>0.195555 0.098688 0.025150 0.000000 1.570790 2.552544</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_14">
+        <pose>0.191283 0.090694 0.025150 0.000000 1.570790 2.748894</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_15">
+        <pose>0.188651 0.082020 0.025150 0.000000 1.570790 2.945243</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_16">
+        <pose>0.187763 0.073000 0.025150 0.000000 1.570790 3.141593</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_17">
+        <pose>0.188651 0.063980 0.025150 0.000000 1.570790 3.337942</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_18">
+        <pose>0.191283 0.055306 0.025150 0.000000 1.570790 3.534292</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_19">
+        <pose>0.195555 0.047312 0.025150 0.000000 1.570790 3.730641</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_20">
+        <pose>0.201306 0.040306 0.025150 0.000000 1.570790 3.926991</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_21">
+        <pose>0.208312 0.034555 0.025150 0.000000 1.570790 4.123340</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_22">
+        <pose>0.216306 0.030283 0.025150 0.000000 1.570790 4.319690</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_23">
+        <pose>0.224980 0.027651 0.025150 0.000000 1.570790 4.516039</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_24">
+        <pose>0.234000 0.026763 0.025150 0.000000 1.570790 4.712389</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_25">
+        <pose>0.243020 0.027651 0.025150 0.000000 1.570790 4.908739</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_26">
+        <pose>0.251694 0.030283 0.025150 0.000000 1.570790 5.105088</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_27">
+        <pose>0.259688 0.034555 0.025150 0.000000 1.570790 5.301438</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_28">
+        <pose>0.266694 0.040306 0.025150 0.000000 1.570790 5.497787</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_29">
+        <pose>0.272445 0.047312 0.025150 0.000000 1.570790 5.694137</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_30">
+        <pose>0.276717 0.055306 0.025150 0.000000 1.570790 5.890486</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="large_sprocket_tooth_31">
+        <pose>0.279349 0.063980 0.025150 0.000000 1.570790 6.086836</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+    </link>
+    <link name="tensioner_sprocket">
+      <inertial>
+        <pose>0 0 0 0 0 0</pose>
+        <mass>0.3</mass>
+        <inertia>
+          <ixx>3.06677e-05</ixx>
+          <iyy>3.0667375e-05</iyy>
+          <izz>6.0454911e-05</izz>
+          <ixy>5.7518697e-14</ixy>
+          <ixz>1.6724428e-11</ixz>
+          <iyz>-1.9003215e-11</iyz>
+        </inertia>
+      </inertial>
+      <visual name="tensioner_sprocket">
+        <pose>0.1445 0.027 0.018 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>tensioner_sprocket.obj</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.3 0.3 0.3 1</diffuse>
+        </material>
+      </visual>
+      <collision name="tensioner_sprocket_bottom_hub">
+        <pose>0.1445 0.027 0.020425 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.00485</length>
+            <radius>0.019</radius>
+          </cylinder>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+      <collision name="tensioner_sprocket_rim">
+        <pose>0.1445 0.027 0.025 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.0043</length>
+            <radius>0.02224</radius>
+          </cylinder>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+      <collision name="tensioner_sprocket_top_hub">
+        <pose>0.1445 0.027 0.029575 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.00485</length>
+            <radius>0.019</radius>
+          </cylinder>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+            <collision name="tensioner_sprocket_tooth_0">
+        <pose>0.166740 0.027000 0.025000 0.000000 1.570790 0.000000</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_1">
+        <pose>0.165047 0.035511 0.025000 0.000000 1.570790 0.392699</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_2">
+        <pose>0.160226 0.042726 0.025000 0.000000 1.570790 0.785398</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_3">
+        <pose>0.153011 0.047547 0.025000 0.000000 1.570790 1.178097</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_4">
+        <pose>0.144500 0.049240 0.025000 0.000000 1.570790 1.570796</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_5">
+        <pose>0.135989 0.047547 0.025000 0.000000 1.570790 1.963495</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_6">
+        <pose>0.128774 0.042726 0.025000 0.000000 1.570790 2.356194</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_7">
+        <pose>0.123953 0.035511 0.025000 0.000000 1.570790 2.748894</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_8">
+        <pose>0.122260 0.027000 0.025000 0.000000 1.570790 3.141593</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_9">
+        <pose>0.123953 0.018489 0.025000 0.000000 1.570790 3.534292</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_10">
+        <pose>0.128774 0.011274 0.025000 0.000000 1.570790 3.926991</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_11">
+        <pose>0.135989 0.006453 0.025000 0.000000 1.570790 4.319690</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_12">
+        <pose>0.144500 0.004760 0.025000 0.000000 1.570790 4.712389</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_13">
+        <pose>0.153011 0.006453 0.025000 0.000000 1.570790 5.105088</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_14">
+        <pose>0.160226 0.011274 0.025000 0.000000 1.570790 5.497787</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="tensioner_sprocket_tooth_15">
+        <pose>0.165047 0.018489 0.025000 0.000000 1.570790 5.890486</pose>
+        <geometry>
+          <mesh>
+            <uri>sprocket_tooth.obj</uri>
+          </mesh>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+
+      <collision name="hex_nut">
+        <pose>0.1448 0.027 0.034455 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.0051</length>
+            <radius>0.0075</radius>
+          </cylinder>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+      <collision name="screw_head">
+        <pose>0.1448 0.027 0.04065 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.0071</length>
+            <radius>0.004</radius>
+          </cylinder>
+        </geometry>
+        <drake:proximity_properties>
+          <drake:mu_dynamic>1.5</drake:mu_dynamic>
+          <drake:mu_static>1.5</drake:mu_static>
+          <drake:hydroelastic_modulus>1e6</drake:hydroelastic_modulus>
+          <drake:hunt_crossley_dissipation>5</drake:hunt_crossley_dissipation>
+          <drake:compliant_hydroelastic/>
+          <drake:mesh_resolution_hint>0.02</drake:mesh_resolution_hint>
+        </drake:proximity_properties>
+      </collision>
+    </link>
+    <joint name="small_sprocket_joint" type="revolute">
+      <parent>board</parent>
+      <child>small_sprocket</child>
+      <pose>0 0 0 0 0 0</pose>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <!-- An effort of 0 is parsed as an unactuated joint. -->
+          <effort>0</effort>
+        </limit>
+        <dynamics>
+          <damping>0.0</damping>
+        </dynamics>
+      </axis>
+    </joint>
+    <joint name="large_sprocket_joint" type="revolute">
+      <parent>board</parent>
+      <child>large_sprocket</child>
+      <pose>0 0 0 0 0 0</pose>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <!-- An effort of 0 is parsed as an unactuated joint. -->
+          <effort>0</effort>
+        </limit>
+        <dynamics>
+          <damping>0.0</damping>
+        </dynamics>
+      </axis>
+    </joint>
+    <joint name="tensioner_sprocket_joint" type="revolute">
+      <parent>board</parent>
+      <child>tensioner_sprocket</child>
+      <pose>0 0 0 0 0 0</pose>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <!-- An effort of 0 is parsed as an unactuated joint. -->
+          <effort>0</effort>
+        </limit>
+        <dynamics>
+          <damping>0.0</damping>
+        </dynamics>
+      </axis>
+    </joint>
+  </model>
+</sdf>

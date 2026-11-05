@@ -1,0 +1,97 @@
+# Bike-chain task scene; port of magna bike-chain-scene.dmd.yaml (hien/timing_belt_task 1046e6c).
+# Schema: docs/scene-directives.md. Facts: handoffs/research/bike-chain-facts.md.
+# World frame is Drake's (origin at panda_link0, table top z = -0.02858).
+# Order fixes body/shape indices; keep the tabletop collider between table and board.
+directives:
+  - add_model:
+      name: table
+      file: ../common/scene.urdf
+      static: true
+      color: [0.55, 0.35, 0.14]
+  - add_weld: {parent: world, child: table::scene}
+  - add_tabletop_collision:            # not in Drake (its table is visual-only); keeps the chain up
+      name: tabletop_collision
+      table_visual: table/scene/visual0
+      top_z: -0.02858
+      thickness: 0.04
+      color: [0.55, 0.35, 0.14]
+  - add_model:
+      name: board                       # Drake: nist_board
+      file: bike_chain_task_board_aligned.urdf  # tooth planes coplanar (gen_bike_chain_board_urdf.py)
+      static: true
+      color: [0.80, 0.80, 0.80]
+      link_colors:                      # magna SDF diffuse
+        small_sprocket: [0.70, 0.70, 0.70]
+        large_sprocket: [0.70, 0.70, 0.70]
+        tensioner_sprocket: [0.30, 0.30, 0.30]
+  - add_weld:
+      parent: world
+      child: board::board
+      X_PC:
+        translation: [0.67206688, -0.19727797, 0.01063954]
+        rotation: !Rpy { deg: [-0.69055534, -0.44629307, 89.58609652] }
+  # Not in magna's bike-chain scene; kept so the hardware demo's holder pick has its holder.
+  - add_model:
+      name: belt_chain_holder           # Drake: belt_holder
+      file: ../common/belt_chain_holder/belt_chain_holder.urdf
+      static: true
+      color: [0.20, 0.60, 1.00]
+  - add_weld:
+      parent: world
+      child: belt_chain_holder::belt_chain_holder_first_half
+      X_PC:
+        translation: [0.4736603358808432, 0.3520562100563749, -0.02858]
+        rotation: !Rpy { deg: [0.0, 0.0, 90.0] }
+  # Drake adds the cameras last; here they must stay in the contiguous static shape range.
+  - add_directives: {file: ../common/directives/zed_cameras.yaml}
+  # magna's point_cloud_* sim params (POINT_CLOUD_CROPPED).
+  - add_cropped_point_cloud:
+      name: cropped_point_cloud
+      cameras: [zed_camera_franka_side, zed_camera_ur_side]
+      crop_lower_xyz: [0.2, -0.25, 0.015]
+      crop_upper_xyz: [0.7, 0.25, 0.11]
+      voxel_size: 0.005
+  # Joint defaults are q_init_franka / q_init_franka_hand (bike_chain_simulation_params.yaml).
+  - add_model:
+      name: panda_arm                   # Drake: panda
+      file: ../common/franka/urdf/panda_arm.urdf
+      default_joint_positions:
+        panda_joint1: [1.71717]
+        panda_joint2: [1.10002]
+        panda_joint3: [-1.4548]
+        panda_joint4: [-2.25837]
+        panda_joint5: [1.259265]
+        panda_joint6: [1.94719]
+        panda_joint7: [0.331838]
+      gravity_compensation: true
+      importer_options: {enable_self_collisions: false, collapse_fixed_joints: false}
+  - add_weld: {parent: world, child: panda_arm::panda_link0}
+  - add_model:
+      name: panda_hand
+      file: ../common/franka/urdf/panda_hand_with_long_fingers.urdf
+      default_joint_positions: {panda_finger_joint1: [-0.004], panda_finger_joint2: [0.004]}
+      gravity_compensation: true
+      importer_options: {enable_self_collisions: false, collapse_fixed_joints: false}
+  - add_weld:
+      parent: panda_arm::panda_link8
+      child: panda_hand::panda_hand
+      X_PC: {translation: [0.0, 0.0, 0.0], rotation: !Rpy { deg: [0.0, 0.0, -45.0] }}
+  - add_directives: {file: ../common/directives/ur10_2f85.yaml}
+  - add_weld:
+      parent: world
+      child: ur10::base_link
+      X_PC:
+        translation: [1.3256854, -0.17264792, 0.02969374]
+        rotation: !Rpy { deg: [-0.91339513, 0.81993092, 179.09576213] }
+  # bike_chain_task.directives.add_roller_chain (SolverMuJoCo). Start (V13-02b
+  # --fit-holder): a flat 64-gon chord-walked round the round belt's holder ellipse
+  # x0.9345 (long axis along y) on the holder's 15 mm tier, bottom plate
+  # 0.5 mm above it; 16 pins bridge the holder's finger channels. center z is the
+  # inner-link frame z (outer links 1.25 mm lower).
+  - add_roller_chain:
+      name: bike_chain
+      center: [0.47366, 0.35206, -0.01183]
+      semi_axes: [0.07998, 0.11276]
+      num_links: 64
+      pitch: 0.009525
+  - add_ground_plane: {name: ground, height_from_aabb_min_z_of: table/scene/visual0}

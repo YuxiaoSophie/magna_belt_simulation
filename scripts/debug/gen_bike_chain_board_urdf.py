@@ -1,0 +1,147 @@
+"""Port magna's bike_chain_task_board.sdf to bike_chain_task_board.urdf (deterministic).
+
+Each sprocket becomes a ``continuous`` joint at its centre with every shape re-expressed in
+that frame; the SDF puts all three joints at the board origin, which is the axis we fix.
+Rims keep the SDF's radii.  Opt-in deviations from the SDF, each adding a file-name suffix:
+``--align-tooth-planes`` (``_aligned``) moves the small and tensioner sprockets along their axes
+so all three rim (tooth) mid-planes match the large sprocket's (the SDF's 3 mm offset is a
+modelling error: the real board's sprockets are coplanar); ``--root-rims`` (``_root_rims``)
+shrinks each rim to pitch radius - 2.5 mm roller - 0.05 mm (magna's rims reach 0.33 mm (16T) /
+0.15 mm (32T) into a seated roller).
+
+Run:
+    uv run --frozen python scripts/debug/gen_bike_chain_board_urdf.py \
+        [--align-tooth-planes] [--root-rims [--rim-clearance MM]]
+"""
+
+from __future__ import annotations
+
+import math
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+ASSET_DIR = Path(__file__).resolve().parents[2] / "assets/bike_chain_task"
+SDF = ASSET_DIR / "bike_chain_task_board.sdf"
+URDF = ASSET_DIR / "bike_chain_task_board.urdf"
+SPROCKETS = ("small_sprocket", "large_sprocket", "tensioner_sprocket")
+DAMPING = 0.01
+TEETH = {"small_sprocket": 16, "large_sprocket": 32, "tensioner_sprocket": 16}
+PITCH, ROLLER_R, RIM_CLEARANCE = 0.009525, 0.0025, 0.00005  # #35 chain, magna's roller
+
+
+def fmt(v: float) -> str:
+    s = f"{v:.6f}".rstrip("0").rstrip(".")
+    return "0" if s in ("", "-0") else s
+
+
+def vec(values) -> str:
+    return " ".join(fmt(v) for v in values)
+
+
+def pose(elem: ET.Element) -> list[float]:
+    p = elem.find("pose")
+    return [0.0] * 6 if p is None else [float(v) for v in p.text.split()]
+
+
+def geometry(geom: ET.Element) -> str:
+    mesh, box, cyl = geom.find("mesh"), geom.find("box"), geom.find("cylinder")
+    if mesh is not None:
+        scale = mesh.find("scale")
+        attr = "" if scale is None else f' scale="{scale.text.strip()}"'
+        return f'<mesh filename="{mesh.find("uri").text.strip()}"{attr}/>'
+    if box is not None:
+        return f'<box size="{box.find("size").text.strip()}"/>'
+    return (f'<cylinder radius="{cyl.find("radius").text.strip()}" '
+            f'length="{cyl.find("length").text.strip()}"/>')
+
+
+def shapes(link: ET.Element, centre: tuple[float, float], rim_r: float | None = None) -> list[str]:
+    out = []
+    for kind in ("visual", "collision"):
+        for elem in link.findall(kind):
+            x, y, z, *rpy = pose(elem)
+            lines = [
+                f'    <{kind} name="{elem.get("name")}">',
+                f'      <origin xyz="{vec((x - centre[0], y - centre[1], z))}" rpy="{vec(rpy)}"/>',
+                f"      <geometry>{geometry(elem.find('geometry'))}</geometry>",
+            ]
+            if rim_r is not None and elem.get("name").endswith("_rim"):
+                cyl = elem.find("geometry/cylinder")
+                lines[2] = (f'      <geometry><cylinder radius="{fmt(rim_r)}" '
+                            f'length="{cyl.find("length").text.strip()}"/></geometry>')
+            diffuse = elem.find("material/diffuse")
+            if diffuse is not None:
+                lines.append(f'      <material name="{link.get("name")}">'
+                             f'<color rgba="{diffuse.text.strip()}"/></material>')
+            out += lines + [f"    </{kind}>"]
+    return out
+
+
+def sprocket_centre(link: ET.Element) -> tuple[float, float]:
+    x, y = pose(link.find("visual"))[:2]
+    rim = next(c for c in link.findall("collision") if c.get("name").endswith("_rim"))
+    rim_r = float(rim.find("geometry/cylinder/radius").text)
+    assert math.dist(pose(rim)[:2], (x, y)) < 1e-9, link.get("name")
+    teeth = [c for c in link.findall("collision") if "_tooth_" in c.get("name")]
+    assert len(teeth) == TEETH[link.get("name")], (link.get("name"), len(teeth))
+    for tooth in teeth:
+        assert abs(math.dist(pose(tooth)[:2], (x, y)) - rim_r) < 2e-6, tooth.get("name")
+    return x, y
+
+
+def root_radius(name: str, clearance: float = RIM_CLEARANCE) -> float:
+    """Pitch radius - roller - clearance: a seated 2.5 mm roller clears the rim."""
+    return PITCH / (2.0 * math.sin(math.pi / TEETH[name])) - ROLLER_R - clearance
+
+
+def rim_z(link: ET.Element) -> float:
+    """Board-frame z of the sprocket's rim (tooth) mid-plane."""
+    return pose(next(c for c in link.findall("collision") if c.get("name").endswith("_rim")))[2]
+
+
+def build(root_rims: bool = False, align: bool = False, clearance: float = RIM_CLEARANCE) -> str:
+    # The SDF never declares the drake: namespace; rename it so ElementTree parses.
+    root = ET.fromstring(SDF.read_text().replace("drake:", "drake_"))
+    links = {link.get("name"): link for link in root.iter("link")}
+    lines = ['<?xml version="1.0"?>',
+             ("<!-- Generated by scripts/debug/gen_bike_chain_board_urdf.py from "
+              "bike_chain_task_board.sdf; do not edit. -->"),
+             *([(f"<!-- rims: pitch radius - 2.5 mm roller - {clearance * 1e3:g} mm (deviation "
+                 "from the SDF) -->")] if root_rims else []),
+             '<robot name="board">', '  <link name="board">']
+    lines += shapes(links["board"], (0.0, 0.0)) + ["  </link>"]
+    joints = []
+    ref = rim_z(links["large_sprocket"])
+    shift = {name: ref - rim_z(links[name]) if align else 0.0 for name in SPROCKETS}
+    if align:
+        lines.insert(2, "<!-- tooth planes aligned to the large sprocket (deviation from the SDF): "
+                     + ", ".join(f"{n} {shift[n] * 1e3:+.2f} mm" for n in SPROCKETS) + " -->")
+    for name in SPROCKETS:
+        link = links[name]
+        centre = sprocket_centre(link)
+        inertia = link.find("inertial/inertia")
+        tensor = " ".join(f'{k}="{inertia.find(k).text.strip()}"'
+                          for k in ("ixx", "iyy", "izz", "ixy", "ixz", "iyz"))
+        lines += [f'  <link name="{name}">', "    <inertial>",
+                  '      <origin xyz="0 0 0" rpy="0 0 0"/>',
+                  f'      <mass value="{link.find("inertial/mass").text.strip()}"/>',
+                  f"      <inertia {tensor}/>", "    </inertial>"]
+        rim_r = root_radius(name, clearance) if root_rims else None
+        lines += shapes(link, centre, rim_r) + ["  </link>"]
+        joints += [f'  <joint name="{name}_joint" type="continuous">',
+                   '    <parent link="board"/>', f'    <child link="{name}"/>',
+                   f'    <origin xyz="{vec((*centre, shift[name]))}" rpy="0 0 0"/>',
+                   '    <axis xyz="0 0 1"/>', f'    <dynamics damping="{DAMPING}"/>',
+                   '    <limit effort="0" velocity="100"/>', "  </joint>"]
+    return "\n".join(lines + joints + ["</robot>", ""])
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    align, root = "--align-tooth-planes" in args, "--root-rims" in args
+    clear = float(args[args.index("--rim-clearance") + 1]) if "--rim-clearance" in args else None
+    out = URDF.with_name(URDF.stem + "_aligned" * align + "_root_rims" * root
+                         + (f"_c{clear:g}" if clear is not None else "") + ".urdf")
+    out.write_text(build(root, align, RIM_CLEARANCE if clear is None else clear * 1e-3))
+    print(f"wrote {out}")

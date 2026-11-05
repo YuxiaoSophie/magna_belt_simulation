@@ -1,0 +1,85 @@
+franka_arm_hand_model: "package://drake_models/franka_description/urdf/panda_arm_hand_with_long_fingers.urdf"
+ur_arm_hand_model: "package://drake-ur-driver/models/ur10.urdf"
+task_board_model: "models/bike_chain_task/bike_chain_task_board.sdf"
+ee_model: "models/common/end_effector_simple_model.urdf"
+bike_chain_model: "models/bike_chain_task/bike_chain.urdf"
+task_board_position: [0.67826, -0.192, 0.00543]
+task_board_orientation: [0.0, 0.0, 1.57079]
+bike_chain_start_body_name: "inner_chain_link_0"
+bike_chain_end_body_name: "dummy_63_2"
+num_vel_in_lcs_state: 197
+
+# Define target LCS states for CI-MPC
+target_lcs_positions: []
+
+# Define target poses for OSC (before MPC)
+osc_target_poses_pre_mpc:
+  - franka_position: [0.45, -0.035, 0.07]
+    franka_orientation: [1, 0, 0, 0]
+    franka_gripper_pos_command: 0.03
+    dwell_seconds: 0.5
+    center: [0, 0, 0]
+    radius: -1
+  - franka_position: [0.45, -0.035, 0.005]
+    franka_orientation: [1, 0, 0, 0]
+    franka_gripper_pos_command: 0.03
+    dwell_seconds: 0.5
+    center: [0, 0, 0]
+    radius: -1
+  - franka_position: [0.45, -0.035, 0.005]
+    franka_orientation: [1, 0, 0, 0]
+    franka_gripper_pos_command: -0.05
+    dwell_seconds: 0.5
+    center: [0, 0, 0]
+    radius: -1
+  - franka_position: [0.45, -0.035, 0.005]
+    franka_orientation: [1, 0, 0, 0]
+    franka_gripper_pos_command: -0.1
+    dwell_seconds: 0.5
+    center: [0, 0, 0]
+    radius: -1
+  - franka_position: [0.45, -0.035, 0.005]
+    franka_orientation: [1, 0, 0, 0]
+    franka_gripper_pos_command: -0.2
+    dwell_seconds: 0.5
+    center: [0, 0, 0]
+    radius: -1
+  - franka_position: [0.45, -0.035, 0.07]
+    franka_orientation: [1, 0, 0, 0]
+    franka_gripper_pos_command: -0.05
+    dwell_seconds: 0.5
+    center: [0, 0, 0]
+    radius: -1
+
+# Define target poses for OSC (after MPC)
+osc_target_poses_post_mpc:
+  - franka_position: [0.612, 0.18, 0.1]
+    franka_orientation: [1, 0, 0, 0]
+    franka_gripper_pos_command: 0.0
+    dwell_seconds: 0.5
+    center: [0, 0, 0]
+    radius: -1
+  - franka_position: [0.612, 0.182, 0.05]
+    franka_orientation: [1, 0, 0, 0]
+    franka_gripper_pos_command: 0.0
+    dwell_seconds: 0.5
+    center: [0, 0, 0]
+    radius: -1
+  - franka_position: [0.612, 0.182, 0.1]
+    franka_orientation: [1, 0, 0, 0]
+    franka_gripper_pos_command: 0.0
+    dwell_seconds: 0.5
+    center: [0, 0, 0]
+    radius: -1
+
+# Tolerances for reaching targets in predefined motion and MPC.
+predefined_motion_position_tolerance: 0.005 # m
+predefined_motion_orientation_tolerance: 0.1 # rad
+mpc_position_tolerance: 0.012
+mpc_orientation_tolerance: 0.3 # rad (0.2 radians = 11.5 degrees)
+mpc_warmup_iterations: 5 # Number of C3+ solve iterations before outputting trajectory (0 = no warm-up)
+verbose: true # Enable verbose debug printing
+
+assembly_c3_options_file: "systems/parameters/bike_chain_c3_options_generated.yaml"
+lcm_channels_file: "systems/parameters/lcm_channels.yaml"
+visualizer_params_file: "systems/parameters/bike_chain_visualization_params.yaml"

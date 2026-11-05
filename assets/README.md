@@ -222,3 +222,21 @@ uses the copies already present in `external/task_board_urdf/` (`common/scene.ur
 at the pulley centres (link frames and geometry re-expressed there) with a thin
 `rotation_marker_strip` visual each, as magna commit `2d9b0ca` does to the SDF; unlike that
 commit the axles carry `damping="0.001"` (N m s/rad) so a kicked pulley does not spin forever.
+
+## Bike-chain task (`assets/bike_chain_task/`)
+
+- **Source:** `magna` branch `hien/timing_belt_task` @ `1046e6c`: `models/bike_chain_task/`
+  (`bike_chain.urdf`, `bike_chain_task_board.sdf`, `bike_chain_task_board_no_sprockets.obj`,
+  `chain_link_collision.obj`, `inner_chain_link.obj`, `outer_chain_link.obj`,
+  `small_sprocket.obj`, `large_sprocket.obj`, `tensioner_sprocket.obj`, `sprocket_tooth.obj`) and
+  `systems/parameters/` (`bike_chain_simulation_params.yaml`,
+  `bike_chain_controller_params_sim.yaml`, `bike_chain_controller_params_hw.yaml`).
+  `bike_chain_controller_params.yaml` (the recorded `pre_mpc_motion` demo) is not on that branch;
+  it comes from magna `hien/speed_up_belt_tasks` @ `0966b5b`.
+- **License:** none provided upstream (project-internal asset).
+- **Edits applied:** none to the copied files (verbatim; `bike_chain.urdf`, the `.sdf` and the
+  yamls are reference only, not loaded). One new file: `bike_chain_task_board.urdf`, generated
+  from the SDF by `scripts/debug/gen_bike_chain_board_urdf.py`: each sprocket is a `continuous`
+  joint at its centre (the SDF puts all three at the board origin) with shapes re-expressed there,
+  COM on the axis, `damping="0.01"`; Drake proximity properties dropped. Numbers:
+  `handoffs/research/bike-chain-facts.md`.

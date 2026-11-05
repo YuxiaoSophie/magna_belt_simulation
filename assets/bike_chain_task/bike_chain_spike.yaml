@@ -1,0 +1,50 @@
+# Chain-only spike scene (V13-02b, SolverMuJoCo): bike_chain_scene.yaml minus robots and cameras.
+# Loaded by scripts/debug/bike_chain_spike.py with load_directives directly. The chain pose here is
+# the rest test's: a flat ring on the board's free corner (clear of the sprockets, 1 mm above the
+# highest board point under it); the spike re-poses the chain through joint_q for the other tests.
+directives:
+  - add_model:
+      name: table
+      file: ../common/scene.urdf
+      static: true
+      color: [0.55, 0.35, 0.14]
+  - add_weld: {parent: world, child: table::scene}
+  - add_tabletop_collision:
+      name: tabletop_collision
+      table_visual: table/scene/visual0
+      top_z: -0.02858
+      thickness: 0.04
+      color: [0.55, 0.35, 0.14]
+  - add_model:
+      name: board
+      file: bike_chain_task_board_aligned.urdf  # tooth planes coplanar (gen_bike_chain_board_urdf.py)
+      static: true
+      color: [0.80, 0.80, 0.80]
+      link_colors:
+        small_sprocket: [0.70, 0.70, 0.70]
+        large_sprocket: [0.70, 0.70, 0.70]
+        tensioner_sprocket: [0.30, 0.30, 0.30]
+  - add_weld:
+      parent: world
+      child: board::board
+      X_PC:
+        translation: [0.67206688, -0.19727797, 0.01063954]
+        rotation: !Rpy { deg: [-0.69055534, -0.44629307, 89.58609652] }
+  - add_model:
+      name: belt_chain_holder
+      file: ../common/belt_chain_holder/belt_chain_holder.urdf
+      static: true
+      color: [0.20, 0.60, 1.00]
+  - add_weld:
+      parent: world
+      child: belt_chain_holder::belt_chain_holder_first_half
+      X_PC:
+        translation: [0.4736603358808432, 0.3520562100563749, -0.02858]
+        rotation: !Rpy { deg: [0.0, 0.0, 90.0] }
+  - add_roller_chain:
+      name: bike_chain
+      center: [0.393, -0.090, 0.012]
+      radius: 0.09705983
+      num_links: 64
+      pitch: 0.009525
+  - add_ground_plane: {name: ground, height_from_aabb_min_z_of: table/scene/visual0}

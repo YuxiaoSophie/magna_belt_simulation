@@ -4,6 +4,7 @@ trigger of Drake's ``magna_simulation.cc``."""
 from __future__ import annotations
 
 import argparse
+import dataclasses
 
 import newton
 import numpy as np
@@ -58,6 +59,20 @@ def _fmt(v: np.ndarray) -> str:
     return "(" + ", ".join(f"{float(x):.5f}" for x in v) + ")"
 
 
+# V12-132 --franka-grip-n: a stiff finger drive whose effort limit binds on the ~7 mm belt, so the
+# squeeze is the force limit (libfranka grasp()); the bike chain's ke / kd (35 N would not bind at
+# 1000 N/m: ~3.4 mm x 1000 = 3.4 N per finger).
+FRANKA_GRIP_KE, FRANKA_GRIP_KD = 25000.0, 160.0
+
+
+def franka_grip_drive(drive: HandDrive, squeeze_n: float) -> HandDrive:
+    """``drive`` with ke / kd FRANKA_GRIP_* and an effort limit of half the total squeeze."""
+    if not squeeze_n > 0.0:
+        raise ValueError(f"--franka-grip-n must be > 0, got {squeeze_n}")
+    return dataclasses.replace(drive, ke=FRANKA_GRIP_KE, kd=FRANKA_GRIP_KD,
+                               effort_limit=0.5 * float(squeeze_n))
+
+
 class RoundBeltLcmSimulation(LcmBeltTaskSimulation):
     """Drake round-belt scene over LCM; places the belt once the Franka reaches the trigger."""
 
@@ -81,6 +96,9 @@ class RoundBeltLcmSimulation(LcmBeltTaskSimulation):
     pulley_state_object_name = LCM_PULLEY_STATE_OBJECT_NAME
 
     def __init__(self, viewer: newton.viewer.ViewerBase, args: argparse.Namespace) -> None:
+        grip = getattr(args, "franka_grip_n", None)
+        if grip is not None:
+            self.hand_drive = franka_grip_drive(self.hand_drive, grip)
         self.belt_trigger_point = np.asarray(BELT_TRIGGER_POINT, dtype=np.float64)
         self.belt_trigger_tolerance = BELT_TRIGGER_TOLERANCE
         self.grasp_depth = BELT_TRIGGER_GRASP_DEPTH
@@ -89,6 +107,16 @@ class RoundBeltLcmSimulation(LcmBeltTaskSimulation):
         logger.info(
             f"[BELT] anchor target = finger_tip - {BELT_TRIGGER_GRASP_DEPTH:g} m along the hand z"
         )
+
+    @classmethod
+    def create_parser(cls) -> argparse.ArgumentParser:
+        parser = super().create_parser()
+        parser.add_argument(
+            "--franka-grip-n", type=float, default=None, metavar="N",
+            help="Franka squeeze force [N, both fingers]: finger drive ke "
+                 f"{FRANKA_GRIP_KE:g} kd {FRANKA_GRIP_KD:g}, effort limit N / 2 per finger "
+                 "(default: the yaml hand_drive)")
+        return parser
 
     def _resolve_task_bodies(self) -> None:
         body_labels = list(self.model.body_label)
@@ -107,6 +135,9 @@ class RoundBeltLcmSimulation(LcmBeltTaskSimulation):
             "ur_wrist_body": int(self._ur_wrist_body),
             "ur_tip_in_wrist": [float(v) for v in self._ur_tip_in_wrist],
             "belt_trigger_point": [float(v) for v in self.belt_trigger_point],
+            **({"franka_grip_n": float(self.args.franka_grip_n),
+                "hand_drive": dataclasses.asdict(self.hand_drive)}
+               if getattr(self.args, "franka_grip_n", None) is not None else {}),
         }
 
     def _build_scene(self, builder: newton.ModelBuilder) -> SceneInfo:

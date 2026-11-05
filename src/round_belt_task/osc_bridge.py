@@ -17,13 +17,19 @@ from loguru import logger
 
 from dairlib import lcmt_robot_input
 from round_belt_task.offline_simulation import OfflineBridge
-from task_common.lcm_contract import CONTROL_DT, LcmChannels, efforts_by_name
+from task_common.lcm_contract import (
+    CONTROL_DT,
+    VIEWER_DRAW_CHANNEL,
+    LcmChannels,
+    efforts_by_name,
+)
 from task_common.osc_process import check_private_url
 
 UTIME_PER_STEP = round(CONTROL_DT * 1e6)
 # RobotCommandSender echoes the context time cast back to µs: +-1 µs float rounding.
 UTIME_MATCH_US = 2
-HANDLE_MS = 50
+# Short: a long select() here can miss an already-queued reply until the next message (<=50 ms).
+HANDLE_MS = 1
 WARM_UP_REPUBLISH_S = 0.1
 WARM_UP_QUIET_S = 0.3
 
@@ -131,9 +137,9 @@ class OscBridge(OfflineBridge):
             if utime != self.last_sent_utime:  # warm-up republishes repeat the utime
                 self.sent_utimes.append(utime)
             self.last_sent_utime = utime
-        elif channel == self._traj_channel:
+        elif channel == self._traj_channel or channel == VIEWER_DRAW_CHANNEL:
             self.lc.publish(channel, msg.encode())
-        # every other channel (hand, UR, Robotiq, pulley state) has no consumer: dropped
+        # every other channel (hand, UR, Robotiq, pulley state, ...) has no consumer: dropped
 
     def _handle_all(self, timeout_ms: int) -> None:
         if self.lc.handle_timeout(timeout_ms) > 0:

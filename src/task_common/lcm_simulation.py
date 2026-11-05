@@ -38,6 +38,7 @@ from task_common.lcm_contract import (
     ROBOTIQ_POSITION_NAMES,
     ROBOTIQ_PRISMATIC_RANGE,
     ROBOTIQ_VELOCITY_NAMES,
+    VIEWER_DRAW_CHANNEL,
     HandDrive,
     LcmChannels,
     RobotIoSpec,
@@ -46,6 +47,7 @@ from task_common.lcm_contract import (
     robot_output_msg,
     robotiq_status_msg,
     schunk_status_msg,
+    viewer_draw_msg,
 )
 from task_common.perception_lcm import (
     TASKBOARD_FRAME,
@@ -157,8 +159,12 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         if self.publish_point_cloud and not getattr(args, "cameras", False):
             raise ValueError("--publish-point-cloud requires --cameras")
         self._perception_render_s = 0.0
+        self.publish_body_poses = bool(getattr(args, "publish_body_poses", False))
+        self.body_poses_every = int(getattr(args, "body_poses_every", 3))
 
         super().__init__(viewer, args)
+
+        self._body_labels = [str(x) for x in self.model.body_label]
 
         self._utime_per_step = round(1e6 * self.frame_dt)
         self._grasp_log_every = max(1, round(GRASP_LOG_PERIOD / self.frame_dt))
@@ -650,8 +656,13 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
 
     def control_step(self) -> None:
         """One control step: drain inputs, apply torques/targets, step physics, publish."""
-        t_start = time.perf_counter()
-        handled = self.bridge.drain(self.sim_time)
+        self.control_step_begin()
+        self.control_step_end()
+
+    def control_step_begin(self) -> None:
+        """Drain inputs, apply torques/targets and launch the physics step (no host sync)."""
+        self._step_t0 = time.perf_counter()
+        self._step_handled = self.bridge.drain(self.sim_time)
         self._event_step = self.step_index + 1
 
         joint_f = self._joint_f_host
@@ -680,6 +691,11 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
             self.control.joint_target_q.assign(self._target_q_host)
 
         self._step_physics()
+
+    def control_step_end(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Finish the step :meth:`control_step_begin` launched: read back, check, publish, record.
+        Returns the new host ``(joint_q, joint_qd, body_q)``."""
+        t_start, handled = self._step_t0, self._step_handled
         self.step_index += 1
         self.frame_id = self.step_index
         self.sim_time = self.step_index * self.frame_dt
@@ -701,6 +717,10 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
             self._publish_perception(body_q)
         if self.publish_belt_mesh and self.step_index % BELT_MESH_PUBLISH_EVERY == 0:
             self._publish_belt_mesh(body_q)
+        if self.publish_body_poses and self.step_index % self.body_poses_every == 0:
+            utime = self.step_index * self._utime_per_step
+            self.bridge.publish(VIEWER_DRAW_CHANNEL,
+                                viewer_draw_msg(utime, self._body_labels, body_q))
         self._after_control_step(body_q)
         if self.step_index % self._grasp_log_every == 0:
             self._log_grasp(body_q, joint_q)
@@ -712,6 +732,7 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         self._stats_steps += 1
         self._stats_compute_sum += compute
         self._stats_compute_max = max(self._stats_compute_max, compute)
+        return joint_q, joint_qd, body_q
 
     def _apply_robotiq_command(self) -> bool:
         """Write the newest Robotiq target into the host target buffer; True if it changed."""
@@ -1001,6 +1022,15 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
             help="control steps between perception messages (default 15 = 0.075 s)",
         )
         parser.add_argument(
+            "--publish-body-poses", action="store_true",
+            help="publish every body pose (drake::lcmt_viewer_draw, Newton body labels) on "
+                 "NEWTON_VIEWER_DRAW every --body-poses-every steps, for scripts/lcm_viewer.py",
+        )
+        parser.add_argument(
+            "--body-poses-every", type=_positive_int, default=3, metavar="N",
+            help="control steps between body-pose messages (default 3 = 66.7 Hz)",
+        )
+        parser.add_argument(
             "--board-params", default=None, metavar="PATH",
             help="controller params yaml whose task_board_position/orientation define the "
                  "taskboard frame (default: magna round_belt_controller_params_sim.yaml)",
@@ -1029,6 +1059,7 @@ class LcmBeltTaskSimulation(BeltTaskSimulation):
         # Newton's own --realtime (benchmark priority) shares the dest; this default wins.
         parser.set_defaults(
             viewer="null", realtime=True, cameras=False, publish_belt_mesh=False,
+            publish_body_poses=False,
             substeps=cls.solver_substeps, vbd_iterations=cls.solver_vbd_iterations,
         )
         return parser

@@ -7,6 +7,7 @@ The grasp gaps and hold rules match ``LcmBeltTaskSimulation._log_grasp`` and
 from __future__ import annotations
 
 import itertools
+import math
 import weakref
 from dataclasses import dataclass
 
@@ -29,6 +30,13 @@ PULLEY_SEAT_RADIUS_MM = (17.38, 50.73)
 GROOVE_AXIAL_MM = 6.0
 GROOVE_RADIAL_MM = 5.0
 WRAP_MERGE_DEG = 30.0
+# Neighbouring belt bodies are ~45 deg apart on the small seat, so 30 deg never merges them there.
+BELT_BODY_SPACING_MM = 13.6
+
+
+def wrap_merge_deg(seat_mm: float) -> float:
+    """Merge gap for a seat radius: 1.6 body spacings of arc, never below ``WRAP_MERGE_DEG``."""
+    return max(WRAP_MERGE_DEG, math.degrees(1.6 * BELT_BODY_SPACING_MM / seat_mm))
 TARGET_CLOCK_TOLERANCE_S = 0.5
 FRANKA_BASE_BODY = "panda_arm/panda_link0"
 UR_BASE_BODY = "/ur10/base_link"
@@ -90,20 +98,20 @@ def _min_gap_mm(belt: np.ndarray, points: np.ndarray) -> np.ndarray:
     return np.linalg.norm(belt - points[:, None, :], axis=2).min(axis=1) * 1e3
 
 
-def _largest_arc_deg(azimuth_deg: np.ndarray) -> float:
+def _largest_arc_deg(azimuth_deg: np.ndarray, merge_deg: float = WRAP_MERGE_DEG) -> float:
     """Angular extent of the largest run of azimuths whose neighbour gaps are <= the merge gap."""
     if azimuth_deg.size == 0:
         return 0.0
     a = np.sort(np.mod(azimuth_deg, 360.0))
     gaps = np.append(np.diff(a), a[0] + 360.0 - a[-1])
-    breaks = np.flatnonzero(gaps > WRAP_MERGE_DEG)
+    breaks = np.flatnonzero(gaps > merge_deg)
     if breaks.size == 0:
         return 360.0
     # Start right after a break so every run is contiguous in the rolled order.
     gaps = np.roll(gaps, -(int(breaks[0]) + 1))
     best = run = 0.0
     for g in gaps:
-        if g > WRAP_MERGE_DEG:
+        if g > merge_deg:
             best, run = max(best, run), 0.0
         else:
             run += g
@@ -128,7 +136,8 @@ def _pulley_wrap_deg(rec: Recording, belt: np.ndarray) -> np.ndarray:
         azimuth = np.degrees(np.arctan2(np.einsum("fbi,fi->fb", radial, y_dir),
                                         np.einsum("fbi,fi->fb", radial, x_dir)))
         for f in np.flatnonzero(in_groove.any(axis=1)):
-            wrap[f, k] = _largest_arc_deg(azimuth[f, in_groove[f]])
+            wrap[f, k] = _largest_arc_deg(azimuth[f, in_groove[f]],
+                                          wrap_merge_deg(PULLEY_SEAT_RADIUS_MM[k]))
     return wrap
 
 

@@ -12,11 +12,13 @@ from dataclasses import asdict, dataclass
 
 import numpy as np
 
-from task_common.replay_metrics import PULLEY_SEAT_RADIUS_MM, quat_rotate
+from task_common.replay_metrics import PULLEY_SEAT_RADIUS_MM, quat_rotate, wrap_merge_deg
 from task_common.replay_metrics import _largest_arc_deg as largest_arc_deg
 
 LABELS = ("engaged", "over", "under", "slanted", "outside", "other")
 LARGE_SEAT_MM = PULLEY_SEAT_RADIUS_MM[1]
+SMALL_SEAT_MM = PULLEY_SEAT_RADIUS_MM[0]
+SEAT_MM = {"large": LARGE_SEAT_MM, "small": SMALL_SEAT_MM}
 EPISODE_METRIC_KEYS = ("wrap_deg", "h_median_mm", "h_min_mm", "h_max_mm", "n_neighbour")
 
 
@@ -76,7 +78,7 @@ def frame_metrics(belt_xyz: np.ndarray, pulley_pose7: np.ndarray, seat_mm: float
         r_med = float(np.median(r[near]))
     else:
         h_med = h_min = h_max = r_med = float("nan")
-    return FrameMetrics(wrap_deg=largest_arc_deg(azimuth[seated]),
+    return FrameMetrics(wrap_deg=largest_arc_deg(azimuth[seated], wrap_merge_deg(seat_mm)),
                         n_neighbour=int(near.sum()), h_median_mm=h_med, h_min_mm=h_min,
                         h_max_mm=h_max, r_median_mm=r_med, seated_bodies=int(seated.sum()))
 
@@ -94,6 +96,13 @@ def classify(fm: FrameMetrics, th: OutcomeThresholds = DEFAULT_THRESHOLDS) -> st
     if fm.h_median_mm < -th.over_under_h_mm:
         return "under"
     return "other"
+
+
+def success_both(fm_large: FrameMetrics, fm_small: FrameMetrics,
+                 th_large: OutcomeThresholds = DEFAULT_THRESHOLDS,
+                 th_small: OutcomeThresholds = DEFAULT_THRESHOLDS) -> bool:
+    """Both pulleys ``engaged``, each classified with its own thresholds."""
+    return classify(fm_large, th_large) == "engaged" and classify(fm_small, th_small) == "engaged"
 
 
 def classify_episode(belt_xyz_T: np.ndarray, pulley_pose7_T: np.ndarray,

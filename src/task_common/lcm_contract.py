@@ -16,7 +16,7 @@ import numpy as np
 import yaml
 
 from dairlib import lcmt_object_state, lcmt_robot_input, lcmt_robot_output
-from drake import lcmt_schunk_wsg_status
+from drake import lcmt_schunk_wsg_status, lcmt_viewer_draw
 from robotiq import lcmt_robotiq_status
 
 DEFAULT_LCM_URL = "udpm://239.255.76.67:7667?ttl=0"
@@ -222,6 +222,31 @@ def robotiq_status_msg(
     msg.speed = round(speed * 255)
     msg.force = int(force) & 0xFF
     return msg
+
+
+# Body poses for scripts/lcm_viewer.py; opt-in (--publish-body-poses). Not in LcmChannels:
+# recording meta stores asdict(LcmChannels).
+VIEWER_DRAW_CHANNEL = "NEWTON_VIEWER_DRAW"
+
+
+def viewer_draw_msg(utime: int, link_names: Sequence[str], body_q) -> lcmt_viewer_draw:
+    """Every body pose; ``body_q`` (n, 7) Newton xyz + quaternion xyzw -> Drake w,x,y,z."""
+    q = np.asarray(body_q, dtype=np.float32).reshape(-1, 7)
+    msg = lcmt_viewer_draw()
+    msg.timestamp = int(utime)
+    msg.num_links = len(q)
+    msg.link_name = [str(n) for n in link_names]
+    msg.robot_num = [0] * len(q)
+    msg.position = q[:, :3].tolist()
+    msg.quaternion = q[:, [6, 3, 4, 5]].tolist()
+    return msg
+
+
+def viewer_draw_body_q(msg: lcmt_viewer_draw) -> tuple[list[str], np.ndarray]:
+    """Inverse of :func:`viewer_draw_msg`: (names, (n, 7) float32 Newton layout)."""
+    pos = np.asarray(msg.position, dtype=np.float32).reshape(-1, 3)
+    wxyz = np.asarray(msg.quaternion, dtype=np.float32).reshape(-1, 4)
+    return list(msg.link_name), np.concatenate([pos, wxyz[:, [1, 2, 3, 0]]], axis=1)
 
 
 def efforts_by_name(msg: lcmt_robot_input) -> dict[str, float]:

@@ -40,6 +40,8 @@ from replay_viewer import (
 from round_belt_task import BELT_COLOR
 from task_common.recording import Recording
 from task_common.replay_app import ReplayApp
+from task_common.replay_episode import EpisodeReplayApp, list_episodes
+from task_common.replay_ghost import GHOST, GHOST_ALPHA, RUN_EE, DemoGhost
 from task_common.replay_learned_mpc import (
     ACTION_SCALE_DEFAULT,
     LAYERS,
@@ -57,6 +59,7 @@ from task_common.replay_video import (
     HeadlessBrowser,
     Inset,
     InsetLayout,
+    LegendEntry,
     Overlay,
     RenderFailed,
     VideoLearnedMpcPanel,
@@ -86,6 +89,9 @@ def create_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--recordings", type=Path, default=REPO_ROOT / "recordings",
                         help="directory holding the run directories")
+    parser.add_argument("--episodes", type=Path, default=None,
+                        help="render episode_*.npz under this directory instead (--run = file name; "
+                             "no learned-MPC layers)")
     parser.add_argument("--run", default=None, help="run directory name (default: newest)")
     parser.add_argument("--compare", default=None,
                         help="second run: rendered from the same camera, stacked to the right")
@@ -119,6 +125,8 @@ def create_parser() -> argparse.ArgumentParser:
     learned.add_argument("--learned-layers", default="",
                          help=f"comma list from {','.join(LAYERS)}")
     learned.add_argument("--action-scale", type=float, default=ACTION_SCALE_DEFAULT)
+    learned.add_argument("--ghost", type=Path, default=None,
+                         help="demo ghost dir from scripts/lcs/demo_ghost.py (<run dir name>.npz)")
     learned.add_argument("--tube-stride", type=int, default=VIDEO_TUBE_STRIDE,
                          help="draw every n-th belt point (viewer: 3)")
     learned.add_argument("--tube-sides", type=int, default=VIDEO_TUBE_SIDES,
@@ -147,12 +155,14 @@ def main(args: argparse.Namespace) -> int:
     if args.width % 2 or args.height % 2:
         logger.error("--width and --height must be even (yuv420p)")
         return 2
-    names = [p.name for p in Recording.list_runs(args.recordings)]
+    root = args.episodes or args.recordings
+    names = (list_episodes(root) if args.episodes
+             else [p.name for p in Recording.list_runs(args.recordings)])
     run = args.run or (names[0] if names else None)
     runs = [run] + ([args.compare] if args.compare else [])
     missing = [r for r in runs if r not in names]
     if missing:
-        logger.error(f"no run(s) {missing} under {args.recordings}")
+        logger.error(f"no run(s) {missing} under {root}")
         return 2
     camera = CameraPose.load(args.camera) if args.camera else DEFAULT_CAMERA
     try:
@@ -163,13 +173,16 @@ def main(args: argparse.Namespace) -> int:
     overlay = not args.no_overlay and has_drawtext()
     if not args.no_overlay and not overlay:
         logger.warning("ffmpeg has no drawtext filter: rendering without text")
-    hooks = video_hooks(args)
+    hooks = [] if args.episodes else video_hooks(args)
+    ghost = [DemoGhost(args.ghost, args.tube_sides)] if args.ghost else []
     quiet_websockets()
     patch_viewer_shape_names()
     patch_viser_texture_material()
-    app = ReplayApp(args.recordings, build_model, port=args.port, run=run, hooks=hooks,
-                    verbose=False, analysis=False, show_collision=args.show_collision,
-                    build_point_clouds=build_point_clouds, show_point_cloud=args.point_cloud)
+    common = {"port": args.port, "hooks": hooks + ghost, "verbose": False,
+              "show_collision": args.show_collision, "build_point_clouds": build_point_clouds,
+              "show_point_cloud": args.point_cloud}
+    app = (EpisodeReplayApp(root, build_model, **common) if args.episodes
+           else ReplayApp(args.recordings, build_model, run=run, analysis=False, **common))
     args.out.parent.mkdir(parents=True, exist_ok=True)
     start = time.perf_counter()
     try:
@@ -239,6 +252,10 @@ def legend_overlay(hooks: list[VideoLearnedMpcPanel],
                    args: argparse.Namespace) -> Overlay | None:
     """The colour legend for the loaded run, or None if it has no learned solves."""
     entries = legend_entries(hooks[0], belt_rgb(BELT_COLOR)) if hooks else []
+    if args.ghost:
+        entries += [LegendEntry("reference belt (DTW-aligned by belt shape)", "fade", (GHOST,),
+                                (GHOST_ALPHA,)),
+                    LegendEntry("EE: reference, run (Franka + UR)", "dots", (GHOST, RUN_EE))]
     if not entries:
         return None
     logger.info(f"[VIDEO] legend: {[e.label for e in entries]}")

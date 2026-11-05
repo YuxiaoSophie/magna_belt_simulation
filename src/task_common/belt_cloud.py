@@ -32,6 +32,7 @@ SCENE_YAML = (REPO_ROOT / os.environ["ROUND_BELT_SCENE"] if os.environ.get("ROUN
               else REPO_ROOT / "assets" / "round_belt_task" / "round_belt_scene.yaml")
 BOARD_WELD_CHILD = "board::board"
 PULLEY_JOINT = "large_round_pulley_joint"
+SMALL_PULLEY_JOINT = "small_round_pulley_joint"
 POINT_CLOUD_NAME = "cropped_point_cloud"
 CAMERA_FRAME = "zed_camera"
 
@@ -134,14 +135,18 @@ def _cloud_params(directives) -> dict:
 def _scene() -> dict:
     d = _directives(SCENE_YAML)
     board_file = next(p["file"] for k, p in d if k == "add_model" and p["name"] == "board")
-    joints = ET.parse(SCENE_YAML.parent / board_file).getroot().iter("joint")
-    origin = next(j for j in joints if j.get("name") == PULLEY_JOINT).find("origin")
-    p_bj = np.array([float(v) for v in origin.get("xyz").split()])
-    R_bj = rpy_matrix([float(v) for v in (origin.get("rpy") or "0 0 0").split()])
+    joints = list(ET.parse(SCENE_YAML.parent / board_file).getroot().iter("joint"))
     p_wb, R_wb = _weld(d, BOARD_WELD_CHILD)
+
+    def pose7(name: str) -> np.ndarray:
+        origin = next(j for j in joints if j.get("name") == name).find("origin")
+        p_bj = np.array([float(v) for v in origin.get("xyz").split()])
+        R_bj = rpy_matrix([float(v) for v in (origin.get("rpy") or "0 0 0").split()])
+        return np.concatenate([p_wb + R_wb @ p_bj, matrix_quat_wxyz(R_wb @ R_bj)])
+
     cloud = _cloud_params(d)
     cams = np.stack([_weld(d, f"{c}::{CAMERA_FRAME}")[0] for c in cloud["cameras"]])
-    return {"pulley": np.concatenate([p_wb + R_wb @ p_bj, matrix_quat_wxyz(R_wb @ R_bj)]),
+    return {"pulley": pose7(PULLEY_JOINT), "small_pulley": pose7(SMALL_PULLEY_JOINT),
             "cameras": cams,
             "crop": (np.asarray(cloud["crop_lower_xyz"], dtype=np.float64),
                      np.asarray(cloud["crop_upper_xyz"], dtype=np.float64))}
@@ -150,6 +155,11 @@ def _scene() -> dict:
 def known_large_pulley_pose7() -> np.ndarray:
     """World pose ``xyz_wxyz`` of the large pulley body at joint angle 0 (module docstring)."""
     return _scene()["pulley"].copy()
+
+
+def known_small_pulley_pose7() -> np.ndarray:
+    """World pose ``xyz_wxyz`` of the small pulley body at joint angle 0."""
+    return _scene()["small_pulley"].copy()
 
 
 def scene_camera_origins() -> np.ndarray:
@@ -419,3 +429,44 @@ def jaw_centres_from_poses(ee_franka7, ee_ur7) -> np.ndarray:
     """``(2, 3)`` jaw centres = the EE positions (Franka ``finger_tip``, UR tracking frame)."""
     return np.stack([np.asarray(ee_franka7, dtype=np.float64)[:3],
                      np.asarray(ee_ur7, dtype=np.float64)[:3]])
+
+
+ANCHOR_R, ANCHOR_SRC_R, ANCHOR_K = 0.010, 0.030, 8  # m; the src radius bridges the finger gap
+
+
+def anchor_g(pts, tip, fold: float = 0.0) -> np.ndarray:
+    """(n,) float32 along-belt distance (m) of each board-frame belt point from the anchor (the
+    Franka finger tip, which grasps the belt marker): Dijkstra from the tip over the radius-
+    ANCHOR_R graph + the kNN MST (bridges occlusion gaps); unreached points take their nearest
+    reached point's g + the gap. ``fold`` (loop length, m; 0 = off): g > fold / 2 went the long way
+    around the ring -> fold - g. Same function as lcs_learning ``ctx_features.anchor_g``."""
+    from scipy.sparse import coo_matrix
+    from scipy.sparse.csgraph import dijkstra, minimum_spanning_tree
+    from scipy.spatial import cKDTree
+
+    p = np.asarray(pts, np.float64).reshape(-1, 3)
+    n = len(p)
+    if n < 2:
+        return np.zeros(n, np.float32)
+    tree = cKDTree(p)
+    pr = tree.query_pairs(ANCHOR_R, output_type="ndarray")
+    dk, jk = tree.query(p, k=min(ANCHOR_K + 1, n))
+    mst = minimum_spanning_tree(coo_matrix(
+        (dk[:, 1:].ravel() + 1e-9, (np.repeat(np.arange(n), jk.shape[1] - 1), jk[:, 1:].ravel())),
+        shape=(n, n))).tocoo()
+    d_tip = np.linalg.norm(p - np.asarray(tip, np.float64), axis=1)
+    src = np.flatnonzero(d_tip <= ANCHOR_SRC_R)
+    if len(src) == 0:
+        src = np.array([int(d_tip.argmin())])
+    rows = np.r_[pr[:, 0], mst.row, np.full(len(src), n)]
+    cols = np.r_[pr[:, 1], mst.col, src]
+    w = np.r_[np.linalg.norm(p[pr[:, 0]] - p[pr[:, 1]], axis=1), mst.data, d_tip[src]] + 1e-9
+    g = dijkstra(coo_matrix((w, (rows, cols)), shape=(n + 1, n + 1)), directed=False,
+                 indices=n)[:n]
+    bad = ~np.isfinite(g)
+    if bad.any():
+        dd, jj = cKDTree(p[~bad]).query(p[bad])
+        g[bad] = g[~bad][jj] + dd
+    if fold:
+        g = np.where(g > fold / 2, np.maximum(fold - g, 0.0), g)
+    return g.astype(np.float32)

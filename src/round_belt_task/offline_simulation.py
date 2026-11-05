@@ -163,12 +163,24 @@ class GraspState:
         return (lo <= self.franka_width_mm <= hi and self.franka_tip_gap_mm <= GRASP_GAP_MM,
                 self.ur_status >= ROBOTIQ_HOLD_STATUS and self.ur_tip_gap_mm <= GRASP_GAP_MM)
 
+    def held_for(self, arms: str = "both") -> bool:
+        return held_for(self.held(), arms)
+
     def describe(self) -> str:
         pads = "/".join(f"{g:.1f}" for g in self.ur_pad_gaps_mm)
         return (f"hand width {self.franka_width_mm:.1f} mm, belt->finger_tip "
                 f"{self.franka_tip_gap_mm:.1f} mm, robotiq byte {self.ur_byte} (status "
                 f"{self.ur_status}), belt->2f85 tip {self.ur_tip_gap_mm:.1f} mm, pads {pads} mm, "
                 f"belt min z {self.belt_min_z:.4f}")
+
+
+def held_for(held, arms: str = "both") -> bool:
+    """``held`` = ``GraspState.held()``; ``arms`` "both" or "franka" (phase 2: UR released)."""
+    if arms == "both":
+        return all(held)
+    if arms == "franka":
+        return bool(held[0])
+    raise ValueError(f"arms {arms!r} not in ('both', 'franka')")
 
 
 class RoundBeltOfflineSimulation(RoundBeltLcmSimulation):

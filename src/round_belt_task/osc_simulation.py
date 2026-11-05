@@ -198,8 +198,9 @@ class RoundBeltOscSimulation(RoundBeltOfflineSimulation):
 
     @classmethod
     def build(cls, args: argparse.Namespace | None = None, *, lcm_url: str,
-              **kw) -> RoundBeltOscSimulation:
-        """Headless instance (null viewer, not realtime, no cameras); ``lcm_url`` is required.
+              viewer: newton.viewer.ViewerBase | None = None, **kw) -> RoundBeltOscSimulation:
+        """Headless instance (null viewer unless ``viewer``, not realtime, no cameras); ``lcm_url``
+        is required.
 
         Constructor options: ``osc_timeout_s``, ``arm_ke``, ``arm_kd``, ``bridge_cls``; other
         ``kw`` override parsed arguments.
@@ -213,7 +214,8 @@ class RoundBeltOscSimulation(RoundBeltOfflineSimulation):
         for key, value in kw.items():
             setattr(args, key, value)
         args.lcm_url = lcm_url
-        viewer = newton.viewer.ViewerNull(num_frames=getattr(args, "num_frames", 100))
+        if viewer is None:
+            viewer = newton.viewer.ViewerNull(num_frames=getattr(args, "num_frames", 100))
         t0 = time.perf_counter()
         sim = cls(viewer, args, lcm_url=lcm_url, **options)
         logger.debug(f"[OSC] built in {time.perf_counter() - t0:.1f} s")

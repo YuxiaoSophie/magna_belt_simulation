@@ -1,0 +1,10 @@
+package spacemouse;
+
+struct lcmt_spacemouse_state
+{
+  int64_t utime;
+  int64_t n_buttons;
+  double linear[3];
+  double angular[3];
+  boolean button_pressed[n_buttons];
+}

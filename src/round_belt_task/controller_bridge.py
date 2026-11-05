@@ -88,6 +88,7 @@ class ControllerBridge(OscBridge):
             self.subscribed.append(channel)
         self._held_state = None
         self._latent = None
+        self.plan_recv_utime: dict[int, int] | None = None  # opt-in: plan utime -> state utime at receipt
         self.reset_controller_io()
 
     def reset_controller_io(self) -> None:
@@ -104,6 +105,8 @@ class ControllerBridge(OscBridge):
         self.empty_trajs = 0
         self.debug_msgs: list[tuple[float, object]] = []  # (wall, LEARNED_MPC_DEBUG msg)
         self._targets = []
+        if self.plan_recv_utime is not None:
+            self.plan_recv_utime = {}
 
     # --- out ---------------------------------------------------------------------------------
 
@@ -189,6 +192,8 @@ class ControllerBridge(OscBridge):
         got = self._decode_traj(data, channel)
         if got is not None:
             msg, pos, quat, times = got
+            if self.plan_recv_utime is not None and self.last_sent_utime is not None:
+                self.plan_recv_utime.setdefault(int(msg.utime), self.last_sent_utime)  # first receipt
             self.franka_trajs.append(FrankaTraj(time.perf_counter(), int(msg.utime), pos, quat,
                                                 times))
 

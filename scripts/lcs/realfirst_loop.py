@@ -267,7 +267,9 @@ SMOKE = {"new_per_iter": 2, "refit": {"seed_epochs": 2, "epochs": 2},
 
 
 def url(port: int) -> str:
-    return f"udpm://239.255.76.{port - 7600}:{port}?ttl=0"
+    # 239.255.76.<octet> runs out at 7855 (octet 255)
+    return (f"udpm://239.255.76.{port - 7600}:{port}?ttl=0" if port <= 7855
+            else f"udpm://239.255.78.{port - 7800}:{port}?ttl=0")
 
 
 def now() -> str:
@@ -1039,7 +1041,7 @@ def behaviour_cmds(ctx: Ctx, ck: str) -> list[list]:
     gd, ld = ctx.it() / "behaviour_gate", ctx.lout() / "behaviour_gate"
     pd = prev_it / "deploy.json"
     pdep = jload(pd) if pd.is_file() else {"deploy": "<deploy_{i-1}>", "box_json": "<box>"}
-    gf = goal_frames(REPO / ctx.cfg["goal_episode"])
+    gf = cfg_goal_frames(ctx.cfg)
     dep = ld / "deploy_cand"
     exp = [PY_LCS, "scripts/export_learned_lcs_deploy.py", "--checkpoint", ck, "--data-files",
            gd / "export_files.txt", "--goal-episode", gf["episode"],
@@ -1296,9 +1298,13 @@ def sbox_line(sb: dict) -> str:
 # ---------------------------------------------------------------- export / goal
 
 
-def goal_frames(ep: Path) -> dict:
-    """Stage 1 = the first frame after move:pre_place_2 (V2 demo_goals convention), stage 2 =
-    the final (done) frame of the seed demo."""
+# latent_stage_tols.LATCH_AFTER; not imported, it would pull dairlib into the loop
+LATCH_AFTER = "move:pre_place_2"
+
+
+def goal_frames(ep: Path, latch_after: str = LATCH_AFTER, final_label: str = "done") -> dict:
+    """Stage 1 = the first frame after the last ``latch_after`` (V2 demo_goals convention),
+    stage 2 = the final (``final_label``) frame of the seed demo."""
     with np.load(ep, allow_pickle=True) as d:
         meta = json.loads(str(d["sim_meta"]))
         phase = np.asarray(d["sim_phase"], dtype=np.int64)
@@ -1306,13 +1312,20 @@ def goal_frames(ep: Path) -> dict:
                                                "sim_cloud_r_mm", "sim_cloud_n_pts",
                                                "sim_cloud_success") if k in d.files}
     labels = [meta["phase_labels"][p] for p in phase]
-    mv = [t for t, lab in enumerate(labels) if lab == "move:pre_place_2"]
-    if not mv or mv[-1] + 1 >= len(labels) or labels[-1] != "done":
-        raise SystemExit(f"{ep}: no move:pre_place_2 -> ... -> done phase sequence")
+    mv = [t for t, lab in enumerate(labels) if lab == latch_after]
+    if not mv or mv[-1] + 1 >= len(labels) or labels[-1] != final_label:
+        raise SystemExit(f"{ep}: no {latch_after} -> ... -> {final_label} phase sequence")
     i, j = mv[-1] + 1, len(labels) - 1
+    names = (["pre_place_2", "seated"] if (latch_after, final_label) == (LATCH_AFTER, "done")
+             else [latch_after.split(":")[-1], final_label])
     return {"episode": str(ep), "frames": [i, j], "labels": [labels[i], labels[j]],
-            "n_frames": len(labels), "stage_names": ["pre_place_2", "seated"],
+            "n_frames": len(labels), "stage_names": names,
             "cloud_features": {k: [v[i].item(), v[j].item()] for k, v in feats.items()}}
+
+
+def cfg_goal_frames(cfg: dict) -> dict:
+    return goal_frames(REPO / cfg["goal_episode"], cfg.get("goal_latch_after", LATCH_AFTER),
+                       cfg.get("goal_final_label", "done"))
 
 
 def export_cmds(ctx: Ctx, model: dict, dep: Path, files_txt: Path, box: Path, gf: dict):
@@ -1347,7 +1360,14 @@ def stage_tol_cmd(ctx: Ctx, deploy) -> list:
     return [sys.executable, "scripts/lcs/latent_stage_tols.py", "--deploy", deploy,
             "--demos", *stage_demos(ctx), "--out", rel(ctx.it() / "stage_tols.json"),
             "--window", str(st["window"]), "--floor", str(st["floor"]), "--percentile",
-            str(st["percentile"])]
+            str(st["percentile"]), *mark_args(ctx.cfg, first_hold=False)]
+
+
+def mark_args(cfg: dict, first_hold: bool = True) -> list[str]:
+    """``--latch-after`` / ``--first-hold`` only when the cfg sets them (stage 1: none)."""
+    out = ["--latch-after", cfg["goal_latch_after"]] if cfg.get("goal_latch_after") else []
+    return out + (["--first-hold", cfg["goal_first_hold"]]
+                  if first_hold and cfg.get("goal_first_hold") else [])
 
 
 def wp_min_frame(cfg: dict) -> int | None:
@@ -1364,8 +1384,8 @@ def waypoints_cmd(ctx: Ctx, deploy, out=None) -> list:
             "--demos", *stage_demos(ctx), "--goal-demo", ctx.cfg["goal_episode"],
             "--stride", str(w["stride"]), "--window", str(w["window"]), "--percentile",
             str(w["percentile"]), "--floor", str(w["floor"]),
-            *(["--min-frame", str(mf)] if mf is not None else []), "--out",
-            rel(out or ctx.it() / "latent_waypoints.npz")]
+            *(["--min-frame", str(mf)] if mf is not None else []), *mark_args(ctx.cfg),
+            "--out", rel(out or ctx.it() / "latent_waypoints.npz")]
 
 
 def bank_demos(ctx: Ctx) -> list[str]:
@@ -1434,7 +1454,7 @@ def st_export(ctx: Ctx, dry: bool, model: dict | None = None):
     if keep_best(ctx.cfg) and model is None and not isinstance(ctx, CandCtx):
         return export_candidate(ctx, dry)
     gep = REPO / ctx.cfg["goal_episode"]
-    gf = goal_frames(gep)
+    gf = cfg_goal_frames(ctx.cfg)
     box = ctx.it() / f"box_{ctx.i}.json"
     files_txt = ctx.it() / "export_files.txt"
     if dry:
@@ -2658,7 +2678,7 @@ def policy_screen(ctx: Ctx, deploy: Path, buf: dict, cfg: Path, clear_npz=None) 
         c = params.z_ceiling_above_start_m
         prm = dataclasses.replace(params, z_max_franka=min(params.z_max_franka, p0[2] + c),
                                   z_max_ur=min(params.z_max_ur, p0[5] + c))
-        kw = {"q_now": q} if prm.clearance is not None else {}
+        kw = {"q_now": q} if prm.needs_q_now else {}
         U, _ = mppi_plan(lcs, prm, z, p0, np.zeros((2, 3)), goal, None, gen, **kw)
         us.append(U[0])
         kinds.append(kind)

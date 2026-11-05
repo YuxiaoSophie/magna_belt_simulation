@@ -74,8 +74,11 @@ def s1(pre, tree) -> tuple[bool, str]:
         if "value" in doc:  # later key (V12-39): tree only
             continue
         a, b = pre.MppiParams.from_yaml(y).to_dict(), tree.MppiParams.from_yaml(y).to_dict()
-        for k in ("value", "latent_support", "ee_support"):  # later keys at defaults
-            if k in b and b[k] is None and k not in a:
+        for k, v in (("value", None), ("latent_support", None), ("ee_support", None),
+                     ("tilt_max_deg", None), ("constraint_mode", "penalty"),
+                     ("exec_guard", None), ("stage_min_dwell", None), ("noise_beta", 0.0),
+                     ("du_max", None), ("goal_blend_s", None), ("knot0_chain", None)):  # later, defaults
+            if k in b and b[k] == v and k not in a:
                 b.pop(k)
         if b.pop("stage_start", "missing") is not None \
                 or a.pop("stage_start", None) is not None or a != b:  # pre may have it

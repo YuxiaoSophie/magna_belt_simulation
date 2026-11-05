@@ -39,6 +39,9 @@ def main() -> int:
                    help="derive the Franka threshold from these demos (report; --franka-min-mm "
                         "still sets the model's value)")
     p.add_argument("--threshold-out", type=Path, default=None)
+    p.add_argument("--threshold-frames", type=int, default=cm.SEATED_FRAMES,
+                   help="the demos' last N frames for the threshold (0 = every frame: stage 2, "
+                        "whose closest approach is the wrap / arc)")
     args = p.parse_args()
     if args.out.exists():
         p.error(f"{args.out} exists (new files only)")
@@ -63,8 +66,10 @@ def main() -> int:
           f"the start UR {d_ur * 1e3:.2f} / Franka {d_f * 1e3:.2f} mm; FK vs model "
           f"{model.source['fk_vs_model_max_abs']}", flush=True)
     if args.franka_threshold:
-        res = cm.franka_threshold(model, args.franka_threshold)
+        res = cm.franka_threshold(model, args.franka_threshold, frames=args.threshold_frames)
         res["model"] = str(path)
+        if args.threshold_frames == 0:
+            res["rule"] = res["rule"].replace("last 0 frames", "frames (all)")
         out = args.threshold_out or path.with_name("franka_threshold.json")
         out.write_text(json.dumps(res, indent=1))
         print(f"[clearance] Franka threshold {res['franka_min_m'] * 1e3:.3f} mm (min d_f "

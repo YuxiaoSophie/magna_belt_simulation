@@ -45,7 +45,7 @@ for _p in (REPO_ROOT / "src", REPO_ROOT / "scripts", REPO_ROOT / "scripts" / "lc
 import collect_lcs_dataset as cli
 import eval_learned_mpc as harness
 import scripted_reset as sr
-from latent_stage_tols import latch_frame
+from latent_stage_tols import FIRST_HOLD, LATCH_AFTER, latch_frame
 from loguru import logger
 
 from round_belt_task.arm_kinematics import UrTracking, ik, rot_axis_angle
@@ -75,6 +75,8 @@ PHASE_LABEL = "prefix:demo"
 class PrefixSpec:
     episode: str
     frac: float
+    latch_after: str = LATCH_AFTER
+    first_hold: str = FIRST_HOLD
 
 
 @dataclasses.dataclass
@@ -105,16 +107,17 @@ class PrefixReport:
 
 # --- demo --------------------------------------------------------------------------------------
 
-def demo_marks(labels: list[str]) -> dict:
-    """``move0`` (first ``move:`` frame), ``latch``, ``first_hold`` (first ``hold:place_3``)."""
+def demo_marks(labels: list[str], latch_after: str = LATCH_AFTER,
+               first_hold: str = FIRST_HOLD) -> dict:
+    """``move0`` (first ``move:`` frame), ``latch``, ``first_hold`` (first ``first_hold``)."""
     move0 = next((t for t, lab in enumerate(labels) if lab.startswith("move:")), None)
-    if move0 is None or "hold:place_3" not in labels:
-        raise ValueError("demo needs move:* and hold:place_3 phases")
-    return {"move0": int(move0), "latch": int(latch_frame(labels)),
-            "first_hold": int(labels.index("hold:place_3"))}
+    if move0 is None or first_hold not in labels:
+        raise ValueError(f"demo needs move:* and {first_hold} phases")
+    return {"move0": int(move0), "latch": int(latch_frame(labels, latch_after)),
+            "first_hold": int(labels.index(first_hold))}
 
 
-def load_demo(episode) -> dict:
+def load_demo(episode, latch_after: str = LATCH_AFTER, first_hold: str = FIRST_HOLD) -> dict:
     path = harness._resolve(REPO_ROOT, str(episode))
     with np.load(path, allow_pickle=True) as d:
         meta = json.loads(str(d["sim_meta"]))
@@ -124,8 +127,11 @@ def load_demo(episode) -> dict:
         dt = float(np.median(np.diff(np.asarray(d["sim_time"], np.float64))))
     if abs(dt - FRAME_DT_S) > 1e-6:
         raise ValueError(f"{path}: frame period {dt} != {FRAME_DT_S}")
-    return {"path": str(path), "ee_f": ee_f, "ee_u": ee_u, "labels": labels,
-            **demo_marks(labels)}
+    try:
+        marks = demo_marks(labels, latch_after, first_hold)
+    except ValueError as e:
+        raise ValueError(f"{path}: {e}") from None
+    return {"path": str(path), "ee_f": ee_f, "ee_u": ee_u, "labels": labels, **marks}
 
 
 def frac_frame(marks: dict, frac: float) -> int:
@@ -139,11 +145,12 @@ def frac_frame(marks: dict, frac: float) -> int:
     return math.floor(x + 0.5)
 
 
-def prefix_end_frame(episode, frac: float) -> int:
+def prefix_end_frame(episode, frac: float, latch_after: str = LATCH_AFTER,
+                     first_hold: str = FIRST_HOLD) -> int:
     """End frame of a ``frac`` prefix of ``episode`` (0 = no prefix)."""
     if frac <= 0:
         return 0
-    marks = demo_marks(load_demo(episode)["labels"])
+    marks = load_demo(episode, latch_after, first_hold)
     end = frac_frame(marks, frac)
     return end if end > marks["move0"] else 0
 
@@ -208,7 +215,7 @@ def replay_prefix(sim, ctx, spec: PrefixSpec, home_f7, home_u7,
     caller's next frame). ``ctx`` needs ``board``, ``gripper``, ``plate_top_z``. Leaves the
     Franka on a fresh hold hook and the UR at its last target.
     """
-    demo = load_demo(spec.episode)
+    demo = load_demo(spec.episode, spec.latch_after, spec.first_hold)
     marks = {k: demo[k] for k in ("move0", "latch", "first_hold")}
     start = marks["move0"]
     end = frac_frame(marks, spec.frac) if spec.frac > 0 else start
@@ -338,11 +345,17 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--out", type=Path, required=True, help="new dir (must not hold report.json)")
     p.add_argument("--osc-binary", type=Path, default=None)
     p.add_argument("--osc-timeout-s", type=float, default=5.0)
+    p.add_argument("--latch-after", default=LATCH_AFTER, help="latch = first frame after its last")
+    p.add_argument("--first-hold", default=FIRST_HOLD, help="first frame of this label")
     return p
 
 
 def run_cli(args: argparse.Namespace) -> dict:
     harness.check_private_url(args.lcm_url)
+    try:  # fail on missing phase labels before the sim starts
+        load_demo(args.episode, args.latch_after, args.first_hold)
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
     out = Path(args.out)
     if (out / "report.json").exists():
         raise FileExistsError(f"{out / 'report.json'} exists: pick a new --out")
@@ -382,7 +395,8 @@ def run_cli(args: argparse.Namespace) -> dict:
             home_u = pose7_mat(UrTracking.fk(joint_q[sim.arm_coords()[1]]))
             frames: list[int] = []
             try:
-                rep = replay_prefix(sim, ctx, PrefixSpec(str(args.episode), frac), home_f, home_u,
+                spec = PrefixSpec(str(args.episode), frac, args.latch_after, args.first_hold)
+                rep = replay_prefix(sim, ctx, spec, home_f, home_u,
                                     on_frame=lambda k, cmd, acc=frames: acc.append(k))
             except OscTimeout as exc:
                 if not exc.process_alive:

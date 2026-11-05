@@ -131,7 +131,10 @@ def b1(pre, tree) -> tuple[bool, str]:
         for k, v in (("stage_skip_ahead", False), ("stage_no_timeout_into", None),
                      ("prior_mode", "demo"), ("bc_prior", None),
                      ("goal_set", None), ("goal_set_tau", 0.0), ("stage_start", None),
-                     ("value", None), ("latent_support", None), ("ee_support", None)):  # later
+                     ("value", None), ("latent_support", None), ("ee_support", None),
+                     ("tilt_max_deg", None), ("constraint_mode", "penalty"),
+                     ("exec_guard", None), ("stage_min_dwell", None), ("noise_beta", 0.0),
+                     ("du_max", None), ("goal_blend_s", None), ("knot0_chain", None)):  # later
             if k in b and b[k] == v and k not in a:
                 b.pop(k)
         if b.pop("support_box", "missing") is not None or a.pop("support_box", None) is not None \

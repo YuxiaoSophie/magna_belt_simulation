@@ -107,7 +107,7 @@ DEMOS = {"gv_00": (V11 / "seed" / "demo" / "episode_0000.npz", "set2", "gv_00"),
 
 def demo_start_file(name: str) -> Path:
     """Start snapshot of a registered demo (``--extra-demo`` entries carry their own)."""
-    ep, set_name, vid, *start = DEMOS[name]
+    _, set_name, vid, *start = DEMOS[name]
     return Path(start[0]) if start else GV / set_name / f"{vid}_osc.npz"
 
 
@@ -265,10 +265,12 @@ class CyclePath:
         return np.concatenate(self(tau))
 
 
-def drive(sim, ctx, path_f, path_u, steps: int, on_frame=None) -> dict:
+def drive(sim, ctx, path_f, path_u, steps: int, on_frame=None,
+          grasp_arms: str | None = "both") -> dict:
     """``demo_prefix.replay_prefix``'s step loop on given paths (same aborts: grasp ``held()``
     every sample, Franka tip floor, 2F-85 board clearance, UR IK miss); ``on_frame(k, cmd, tau)``
-    at every sample tick before the step. Leaves the Franka on a fresh hold hook."""
+    at every sample tick before the step. ``grasp_arms``: ``held_for`` arms ("franka" once the UR
+    has released; None = no grasp abort). Leaves the Franka on a fresh hold hook."""
     dt, n = sim.frame_dt, harness.SAMPLE_STEPS
     knot_t = CommanderParams().dt * np.arange(harness.N_KNOTS)
     u_coords = sim.arm_coords()[1]
@@ -294,7 +296,7 @@ def drive(sim, ctx, path_f, path_u, steps: int, on_frame=None) -> dict:
                 t = sim.osc_time_s(sim.step_index)
                 tau = t - t0
                 grasp = sim.grasp_state()
-                if not all(grasp.held()):
+                if grasp_arms is not None and not grasp.held_for(grasp_arms):
                     abort, kind = f"grasp lost at step {k} ({grasp.describe()})", "grasp_lost"
                     break
                 if on_frame is not None:
@@ -941,6 +943,7 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--cloud-noise", default="off", metavar="PRESET|JSON",
                    help="belt-seg cloud noise (belt_cloud presets: off, mild, real_like, harsh)")
     p.add_argument("--osc-timeout-s", type=float, default=5.0)
+    p.add_argument("--franka-grip-n", type=float, default=None, help="Franka squeeze force N (default the yaml's)")
     p.add_argument("--no-loader-check", dest="loader_check", action="store_false")
     p.add_argument("--dry-run", action="store_true")
     return p
@@ -1002,7 +1005,8 @@ def main() -> int:
 
     nominal = load_pre_mpc_segment(MAGNA_PARAMS_SIM_YAML, first=cli.FIRST, last=cli.LAST)
     osc_binary, osc_root = harness.default_osc_binary()
-    sim = RoundBeltOscSimulation.build(lcm_url=args.lcm_url, osc_timeout_s=args.osc_timeout_s)
+    grip_kw = {} if args.franka_grip_n is None else {"franka_grip_n": args.franka_grip_n}
+    sim = RoundBeltOscSimulation.build(lcm_url=args.lcm_url, osc_timeout_s=args.osc_timeout_s, **grip_kw)
     t_run = time.perf_counter()
     col = None
     index = {"args": {k: (str(v) if isinstance(v, Path) else v) for k, v in vars(args).items()},

@@ -118,7 +118,7 @@ def run_model(deploy: Path, wp_path: Path | None, base: MppiParams, demos, succ,
         else:
             gz = wp.z_wp if wp is not None else lcs.stage_goals
             goal = gz[min(f["goal_index"], len(gz) - 1)]
-        kw = {"q_now": q} if prm.clearance is not None else {}
+        kw = {"q_now": q} if prm.needs_q_now else {}
         if prior and f["clock"] is not None:
             kw["u_demo"] = wp.u_seq(int(f["clock"]), prm.H)
         U, info = mppi_plan(lcs, prm, cache[key], p_t, rot0, goal, None, gen, **kw)

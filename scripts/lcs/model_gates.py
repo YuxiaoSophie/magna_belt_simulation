@@ -295,7 +295,7 @@ def m3_deploy(label: str, lcs: TorchLcs, Zs: list, demos: list, base: MppiParams
         for t in range(0, demo["done0"], STRIDE):
             q = np.stack([demo["ee_f"][t, 3:7], demo["ee_u"][t, 3:7]])
             rot0 = np.stack([delta_rotvec(qs[0], q[0]), delta_rotvec(qs[1], q[1])])
-            kw = {"q_now": q} if prm.clearance is not None else {}
+            kw = {"q_now": q} if prm.needs_q_now else {}
             U, info = mppi_plan(lcs, prm, Z[t], demo["P"][t], rot0, goal, None, gen, **kw)
             u0s.append(U[0])
             uds.append(demo_next_mean(demo["u"], t))

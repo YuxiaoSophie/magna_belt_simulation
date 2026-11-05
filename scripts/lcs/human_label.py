@@ -10,6 +10,9 @@ Rules (majority = more than half of the last ``last_n`` frames, 13 ~ 1 s at 75 m
     engaged  ``outcome.classify == "engaged"`` (wrap >= 60 deg in the groove); the default
              (user decision Q1, 2026-10-05)
     strict   wrap >= 90 deg and |h_median| <= 1 mm
+    small    ``classify == "engaged"`` on the small pulley (``--small-thresholds``; provisional
+             default = the large pulley's); pose from ``sim_pulley_small_pose`` else the URDF
+    both     ``small`` and ``engaged``; ``wrap_deg`` / ``h_mm`` of small / both are the small's
 
     uv run --frozen python scripts/lcs/human_label.py \\
         --episodes data/lcs/approach/v1_heldout/episode_00*.npz \\
@@ -19,6 +22,7 @@ Rules (majority = more than half of the last ``last_n`` frames, 13 ~ 1 s at 75 m
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import sys
 import time
@@ -31,40 +35,77 @@ if str(REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(REPO_ROOT / "src"))
 
 from round_belt_task import outcome as oc
+from task_common.belt_cloud import known_small_pulley_pose7
 
-RULES = ("engaged", "strict")
+BASE_RULES = ("engaged", "strict")
+SMALL_RULES = ("small", "both")
+RULES = BASE_RULES + SMALL_RULES
 DEFAULT_RULE = "engaged"
 LAST_N = 13
 SOURCE = "sim_ground_truth_final_frames"
 STRICT_WRAP_DEG, STRICT_H_MM = 90.0, 1.0
 
 
-def frame_passes(belt_xyz, pose_xyz_wxyz, rule: str) -> tuple[bool, oc.FrameMetrics]:
-    """One frame under ``rule`` (``sim_pulley_large_pose`` is xyz_wxyz; outcome wants xyzw)."""
+def _xyzw(pose_xyz_wxyz) -> np.ndarray:
     p = np.asarray(pose_xyz_wxyz, dtype=np.float64)
-    fm = oc.frame_metrics(np.asarray(belt_xyz, dtype=np.float64),
-                          np.concatenate([p[:3], p[4:7], p[3:4]]))
+    return np.concatenate([p[:3], p[4:7], p[3:4]])
+
+
+def frame_passes(belt_xyz, pose_xyz_wxyz, rule: str, small_pose_xyz_wxyz=None,
+                 small_th: oc.OutcomeThresholds = oc.DEFAULT_THRESHOLDS
+                 ) -> tuple[bool, oc.FrameMetrics]:
+    """One frame under ``rule`` (npz poses are xyz_wxyz; outcome wants xyzw). ``small`` /
+    ``both`` need ``small_pose_xyz_wxyz`` and return the small pulley's metrics."""
+    belt = np.asarray(belt_xyz, dtype=np.float64)
+    if rule in SMALL_RULES:
+        fs = oc.frame_metrics(belt, _xyzw(small_pose_xyz_wxyz), oc.SMALL_SEAT_MM, small_th)
+        if rule == "small":
+            return oc.classify(fs, small_th) == "engaged", fs
+        fm = oc.frame_metrics(belt, _xyzw(pose_xyz_wxyz))
+        return oc.success_both(fm, fs, th_small=small_th), fs
+    fm = oc.frame_metrics(belt, _xyzw(pose_xyz_wxyz))
     if rule == "engaged":
         return oc.classify(fm) == "engaged", fm
     return bool(fm.wrap_deg >= STRICT_WRAP_DEG and abs(fm.h_median_mm) <= STRICT_H_MM), fm
 
 
-def emulated_human_label(episode_npz, rule: str = DEFAULT_RULE, last_n: int = LAST_N) -> dict:
+# mirrors collect_lcs_dataset.parse_thresholds; local to avoid its sim imports
+def parse_thresholds(pairs: list[str]) -> oc.OutcomeThresholds:
+    """``KEY=VALUE`` overrides of ``DEFAULT_THRESHOLDS``."""
+    d, kw = oc.DEFAULT_THRESHOLDS, {}
+    for pair in pairs:
+        key, sep, value = pair.partition("=")
+        if not sep or not hasattr(d, key):
+            raise ValueError(f"{pair!r}: expected KEY=VALUE, KEY an OutcomeThresholds field")
+        kw[key] = type(getattr(d, key))(value)
+    return dataclasses.replace(d, **kw)
+
+
+def emulated_human_label(episode_npz, rule: str = DEFAULT_RULE, last_n: int = LAST_N,
+                         small_th: oc.OutcomeThresholds = oc.DEFAULT_THRESHOLDS) -> dict:
     """``{success, rule, source, wrap_deg, h_mm, frames_used, n_pass, last_n}``; ``wrap_deg`` /
     ``h_mm`` = medians over the frames used. ``episode_npz``: a path or a loaded mapping."""
     if rule not in RULES:
         raise ValueError(f"rule {rule!r} not in {RULES}")
+    small = None
     if isinstance(episode_npz, (str, Path)):
         with np.load(episode_npz, allow_pickle=True) as d:
             belt, pose = d["sim_belt_xyz"], d["sim_pulley_large_pose"]
+            if rule in SMALL_RULES and "sim_pulley_small_pose" in d.files:
+                small = d["sim_pulley_small_pose"]
     else:
         belt, pose = episode_npz["sim_belt_xyz"], episode_npz["sim_pulley_large_pose"]
+        if rule in SMALL_RULES and "sim_pulley_small_pose" in episode_npz:
+            small = episode_npz["sim_pulley_small_pose"]
     T = len(belt)
     if T == 0:
         raise ValueError("emulated_human_label: empty episode")
+    if rule in SMALL_RULES and small is None:
+        small = np.broadcast_to(known_small_pulley_pose7(), (T, 7))
     passes, wraps, hs = [], [], []
     for t in range(max(0, T - max(1, last_n)), T):
-        ok, fm = frame_passes(belt[t], pose[t], rule)
+        ok, fm = frame_passes(belt[t], pose[t], rule,
+                              None if small is None else small[t], small_th)
         passes.append(ok)
         wraps.append(fm.wrap_deg)
         hs.append(fm.h_median_mm)
@@ -98,14 +139,18 @@ def main() -> int:
     p.add_argument("--episodes", type=Path, nargs="+", required=True)
     p.add_argument("--rule", choices=RULES, default=DEFAULT_RULE)
     p.add_argument("--last-n", type=int, default=LAST_N)
+    p.add_argument("--small-thresholds", nargs="*", default=[], metavar="KEY=VALUE",
+                   help="OutcomeThresholds overrides for the small pulley (rules small / both)")
     p.add_argument("--out", type=Path, required=True)
     args = p.parse_args()
     if args.out.exists():
         raise SystemExit(f"--out {args.out} exists; refusing to overwrite")
 
+    small_th = parse_thresholds(args.small_thresholds)
+    rules = RULES if args.rule in SMALL_RULES else BASE_RULES
     rows = []
     for path in sorted(args.episodes):
-        labels = {r: emulated_human_label(path, r, args.last_n) for r in RULES}
+        labels = {r: emulated_human_label(path, r, args.last_n, small_th) for r in rules}
         ref = _reference(path)
         rows.append({"episode": str(path), **labels[args.rule], "labels": labels,
                      "reference": ref,
@@ -129,6 +174,8 @@ def main() -> int:
     out = {"created": time.strftime("%Y-%m-%d %H:%M:%S"), "rule": args.rule,
            "last_n": args.last_n, "source": SOURCE, "script": "scripts/lcs/human_label.py",
            "summary": summary, "episodes": rows}
+    if args.rule in SMALL_RULES:
+        out["small_thresholds"] = dataclasses.asdict(small_th)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(out, indent=2) + "\n")
     for rule, s in summary.items():
@@ -136,6 +183,8 @@ def main() -> int:
               f"{s['reference']} on {s['agree']}/{s['n']}")
         for dis in s["disagree"]:
             print(f"  differs: {dis}")
+    if args.rule in SMALL_RULES:
+        print(f"[LABEL] {args.rule}: {sum(r['success'] for r in rows)}/{len(rows)} success")
     print(f"[LABEL] wrote {args.out}")
     return 0
 

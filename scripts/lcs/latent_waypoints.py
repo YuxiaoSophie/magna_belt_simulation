@@ -47,22 +47,39 @@ for _p in (REPO_ROOT / "src", Path(__file__).resolve().parent):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from latent_stage_tols import encode_obs, latch_frame, load_episode, sha256
+from latent_stage_tols import (
+    FIRST_HOLD,
+    LATCH_AFTER,
+    encode_obs,
+    latch_frame,
+    load_episode,
+    sha256,
+)
 
-from task_common.latent_encoder import LatentEncoder, LearnedLcs, episode_input_keys
+from task_common.latent_encoder import (
+    LatentEncoder,
+    LearnedLcs,
+    SceneRvEncoder,
+    episode_input_keys,
+)
 
-FIRST_HOLD = "hold:place_3"
 MIN_DURATION_S = 3.0
 LAST_DURATION_S = 30.0
 ZIP_DATE = (1980, 1, 1, 0, 0, 0)
 BANK_VERSION = 1
 
 
-def first_hold_frame(labels: list[str]) -> int:
-    hold = [t for t, lab in enumerate(labels) if lab == FIRST_HOLD]
+def first_hold_frame(labels: list[str], label: str = FIRST_HOLD) -> int:
+    hold = [t for t, lab in enumerate(labels) if lab == label]
     if not hold:
-        raise ValueError(f"no {FIRST_HOLD} frame")
+        raise ValueError(f"no {label} frame")
     return hold[0]
+
+
+def label_meta(latch_after: str, first_hold: str) -> dict:
+    """Non-default phase marks only, so default artifacts stay byte-identical."""
+    return {k: v for k, v, d in (("latch_after", latch_after, LATCH_AFTER),
+                                 ("first_hold_label", first_hold, FIRST_HOLD)) if v != d}
 
 
 def waypoint_frames(latch: int, first_hold: int, n: int, stride: int) -> list[int]:
@@ -119,7 +136,8 @@ def tol_frames(t: int, latch: int, window: int, n: int, is_latch: bool) -> list[
 
 
 def derive(deploy: Path, demos: list[Path], goal_demo: Path, stride: int, window: int,
-           pct: float, floor: float, memo: dict | None = None, min_frame: int = 0) -> dict:
+           pct: float, floor: float, memo: dict | None = None, min_frame: int = 0,
+           latch_after: str = LATCH_AFTER, first_hold: str = FIRST_HOLD) -> dict:
     """``memo``: episodes / encoded frames shared across calls (bank); same output."""
     memo = {} if memo is None else memo
     eps, cache = memo.setdefault("ep", {}), memo.setdefault("z", {})
@@ -132,6 +150,13 @@ def derive(deploy: Path, demos: list[Path], goal_demo: Path, stride: int, window
             eps[str(path)] = load_episode(path, episode_input_keys(enc))
         return eps[str(path)]
 
+    def key(path, ep):
+        try:
+            return (latch_frame(ep["labels"], latch_after),
+                    first_hold_frame(ep["labels"], first_hold), ep["n"])
+        except ValueError as e:
+            raise SystemExit(f"{path}: {e}") from None
+
     with np.load(deploy, allow_pickle=False) as d:
         dt = float(np.asarray(d["dt"]).item())
     goal = episode(goal_demo)
@@ -141,7 +166,7 @@ def derive(deploy: Path, demos: list[Path], goal_demo: Path, stride: int, window
     if abs(frame_dt - dt) > 1e-6:
         raise SystemExit(f"{goal_demo}: frame period {frame_dt} != deploy dt {dt}")
     n_g = goal["n"]
-    key_g = (latch_frame(goal["labels"]), first_hold_frame(goal["labels"]), n_g)
+    key_g = key(goal_demo, goal)
     frames = waypoint_frames(*key_g, stride)
     if not 0 <= min_frame <= key_g[0]:
         raise SystemExit(f"--min-frame {min_frame}: 0 .. the latch frame {key_g[0]}")
@@ -154,7 +179,7 @@ def derive(deploy: Path, demos: list[Path], goal_demo: Path, stride: int, window
     for path in demos:
         ep = episode(path)
         n_j = ep["n"]
-        key_j = (latch_frame(ep["labels"]), first_hold_frame(ep["labels"]), n_j)
+        key_j = key(path, ep)
         aligned = []
         for k, f in enumerate(frames):
             t_j = align(f, key_g, key_j)
@@ -172,7 +197,7 @@ def derive(deploy: Path, demos: list[Path], goal_demo: Path, stride: int, window
     dur = np.maximum(2.0 * seg, MIN_DURATION_S)
     dur[-1] = LAST_DURATION_S
     n_pool = np.array([len(v) for v in pooled])
-    out = {}
+    out = {k: np.str_(v) for k, v in label_meta(latch_after, first_hold).items()}
     if min_frame > 0:
         keep = np.asarray(frames) >= min_frame
         frames, z_wp, tol, p, n_pool, dur = (np.asarray(x)[keep] for x in
@@ -190,7 +215,9 @@ def derive(deploy: Path, demos: list[Path], goal_demo: Path, stride: int, window
             "demos": np.array([str(Path(x).resolve()) for x in demos]),
             "stride": np.int64(stride), "window": np.int64(window),
             "percentile": np.float64(pct), "floor": np.float64(floor),
-            "per_demo": np.str_(json.dumps(per_demo))}
+            "per_demo": np.str_(json.dumps(per_demo)),
+            # V61e: z_traj / z_wp are scene parts; the node adds the current robot part
+            **({"rv_free": np.bool_(True)} if isinstance(enc, SceneRvEncoder) else {})}
 
 
 def save_npz(path: Path, arrays: dict) -> None:
@@ -261,12 +288,14 @@ def demo_tag(path) -> str:
 
 
 def build_bank(deploy: Path, demos: list[Path], goal_demos: list[Path], out: Path, stride: int,
-               window: int, pct: float, floor: float) -> dict:
+               window: int, pct: float, floor: float, latch_after: str = LATCH_AFTER,
+               first_hold: str = FIRST_HOLD) -> dict:
     """One artifact per goal demo (+ ``move0``) -> ``out/wp_<j>.npz``; ``out/bank.json``."""
     memo: dict = {}
     entries = []
     for j, g in enumerate(goal_demos):
-        doc = derive(deploy, demos, g, stride, window, pct, floor, memo)
+        doc = derive(deploy, demos, g, stride, window, pct, floor, memo,
+                     latch_after=latch_after, first_hold=first_hold)
         doc["move0"] = np.int64(move0_frame(memo["ep"][str(g)]["labels"]))
         f = out / f"wp_{j:02d}.npz"
         save_npz(f, doc)
@@ -280,7 +309,8 @@ def build_bank(deploy: Path, demos: list[Path], goal_demos: list[Path], out: Pat
     bank = {"version": BANK_VERSION, "deploy": str(deploy.resolve()),
             "deploy_sha256": sha256(deploy), "key": "z_traj[0] (encoded first demo frame)",
             "demos": [str(Path(x).resolve()) for x in demos], "stride": stride,
-            "window": window, "percentile": pct, "floor": floor, "entries": entries}
+            "window": window, "percentile": pct, "floor": floor,
+            **label_meta(latch_after, first_hold), "entries": entries}
     (out / "bank.json").write_text(json.dumps(bank, indent=1) + "\n")
     return bank
 
@@ -298,12 +328,14 @@ def bank_summary(bank: dict) -> str:
     return "\n".join(lines)
 
 
-def episode_marks(path) -> tuple[int, int, int, int]:
+def episode_marks(path, latch_after: str = LATCH_AFTER, first_hold: str = FIRST_HOLD
+                  ) -> tuple[int, int, int, int]:
     """``(move0, latch, first_hold, n)`` from a recording's phase labels (no clouds read)."""
     with np.load(Path(path), allow_pickle=True) as f:
         names = json.loads(str(f["sim_meta"]))["phase_labels"]
         labels = [names[p] for p in np.asarray(f["sim_phase"], np.int64)]
-    return move0_frame(labels), latch_frame(labels), first_hold_frame(labels), len(labels)
+    return (move0_frame(labels), latch_frame(labels, latch_after),
+            first_hold_frame(labels, first_hold), len(labels))
 
 
 class WaypointBank:
@@ -410,7 +442,10 @@ def main() -> int:
                    help="dir: one artifact per --goal-demos episode + bank.json")
     p.add_argument("--goal-demos", type=Path, nargs="+", default=None,
                    help="bank entries (default: --demos)")
+    p.add_argument("--latch-after", default=LATCH_AFTER, help="latch = first frame after its last")
+    p.add_argument("--first-hold", default=FIRST_HOLD, help="first frame of this label")
     a = p.parse_args()
+    labels = {"latch_after": a.latch_after, "first_hold": a.first_hold}
     one = a.goal_demo is not None and a.out is not None
     if (a.bank_out is None) != one or (a.bank_out is not None and (a.goal_demo or a.out)):
         p.error("--goal-demo + --out (one artifact) or --bank-out (bank)")
@@ -419,14 +454,14 @@ def main() -> int:
     if a.bank_out is not None:
         a.bank_out.mkdir(parents=True, exist_ok=True)
         bank = build_bank(a.deploy, a.demos, a.goal_demos or a.demos, a.bank_out, a.stride,
-                          a.window, a.percentile, a.floor)
+                          a.window, a.percentile, a.floor, **labels)
         text = bank_summary(bank)
         (a.bank_out / "bank.md").write_text(text + "\n")
         print(text)
         print(f"wrote {a.bank_out / 'bank.json'}")
         return 0
     doc = derive(a.deploy, a.demos, a.goal_demo, a.stride, a.window, a.percentile, a.floor,
-                 min_frame=a.min_frame)
+                 min_frame=a.min_frame, **labels)
     save_npz(a.out, doc)
     text = summary(doc)
     a.out.with_suffix(".md").write_text(text + "\n")

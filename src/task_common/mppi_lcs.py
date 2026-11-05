@@ -9,11 +9,13 @@ One solve (``mppi_plan`` -> ``MppiSolver``):
 2. sample K input sequences around the mean (clipped to the input box; sample 0 = the mean);
 3. roll every sample out through the LCS (one Warp kernel, ``mppi_warp``);
 4. cost each rollout (``plan_cost``): latent goal distance + inputs + smoothness, plus the
-   safety knots (z bounds, rotation envelope) at ``safety_penalty`` each;
+   safety knots (z bounds, rotation envelope, tilt limit) at ``safety_penalty`` each;
+   ``constraint_mode: feasible_first`` instead ranks every feasible sample above every violator
+   and the violators by their graded violation (``violation_amount``, ``feasible_first_cost``);
 5. weight the samples ``exp(-cost / temperature)``, the temperature set so the effective sample
    size is ``ess_frac`` K, and move the mean to the weighted average;
 6. repeat 2-5 ``n_iter`` times; return the mean plan, or the best sample when the mean
-   violates more safety knots than it.
+   violates more safety knots (feasible_first: a larger violation) than it.
 On CUDA the whole solve is one captured CUDA graph.
 
 Optional cost terms live in ``mppi_costs``; the overshoot guard and the BC policy prior in
@@ -38,25 +40,30 @@ from task_common.mppi_costs import (
     _qmul_t,
     _quat_exp_t,
     check_ee_support,
+    check_latent_limit,
     check_latent_support,
     check_support_box,
     clearance_bad,
     ee_support_cost,
     goal_set_dist,
+    latent_limit_cost,
     latent_support_cost,
     load_cost_terms,
     nn_dist_np,
     softmin_sq,
     support_hinge,
 )
-from task_common.mppi_guards import check_overshoot
+from task_common.mppi_guards import check_exec_guard, check_knot0_chain, check_overshoot
 from task_common.mppi_warp import _FusedRollout
 
 ROT_SLICES = (slice(6, 9), slice(9, 12))
 ROT_CHANNELS = tuple(range(6, 12))
+UR_CHANNELS = (3, 4, 5, 9, 10, 11)  # trust_region.CHANNELS: ur_xyz, urr_xyz
 EPS = 1e-12
 PRIOR_SYNC = (None, "stage")
 PRIOR_MODES = ("demo", "policy")
+CONSTRAINT_MODES = ("penalty", "feasible_first")
+FF_COST_EQUIV = 0.1  # feasible_first: a violator's whole cost range counts as this much violation
 
 
 def _scalar(x):
@@ -107,9 +114,26 @@ class TorchLcs:
                                   device=self.device)
         self._sE, self._sH = self.step_size * self.E, self.step_size * self.H
         self._sc, self._sEp = self.step_size * self.c, self.step_size * self.E_p
+        # V12-131 grip gate: u~ = g * u in B u and H u (set_gate per latent); off = deploys without
+        self.grip_gate = bool(_scalar(d["grip_gate"])) if "grip_gate" in d else False
+        self._gate = None
         self.z_std_np = self.np["z_std"]
         self.u_lb_np, self.u_ub_np = self.np["u_lb"], self.np["u_ub"]
         self._fused = None
+
+    def set_gate(self, g) -> None:
+        """Input gate ``g`` (n_u,): B and H columns scaled in place (CUDA-graph safe; the fused
+        rollout's copies too), so every rollout sees ``g * u``; constant over the horizon."""
+        g = np.asarray(g, dtype=np.float64).reshape(self.n_u)
+        if self._gate is not None and np.array_equal(g, self._gate):
+            return
+        self._gate = g.copy()
+        gt = torch.as_tensor(g, dtype=self.dtype, device=self.device)
+        self.B.copy_(torch.as_tensor(self.np["B"], dtype=self.dtype, device=self.device) * gt)
+        self.H.copy_(torch.as_tensor(self.np["H"], dtype=self.dtype, device=self.device) * gt)
+        self._sH.copy_(self.step_size * self.H)
+        if self._fused is not None:
+            self._fused.set_gate(g)
 
     def _check_shapes(self) -> None:
         nx, nu, nl = self.n_x, self.n_u, self.n_lam
@@ -173,13 +197,14 @@ class TorchLcs:
             zn = torch.addmm(zn, P, self.A_p.T)
         return zn, lam
 
-    def rollout(self, z0, p0, U: torch.Tensor, rot0=None, iters: int = 25
+    def rollout(self, z0, p0, U: torch.Tensor, rot0=None, iters: int = 25, q_abs=None
                 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """``U (K, H, n_u)`` -> ``Z (K, H+1, n_x)``, ``P (K, H+1, 6)``, ``R (K, H+1, 2)``.
 
         ``R`` = per-arm geodesic angle away from the episode start: ``R_k = exp(w_k) R_{k-1}``,
         ``R_0 = exp(rot0[arm])`` (``rot0`` (2, 3) world rotation vectors of the measured
-        orientation relative to the start), angle ``|log R_k|``.
+        orientation relative to the start), angle ``|log R_k|``. With ``q_abs`` (2, 4) ``wxyz``
+        (the current absolute orientations) ``R`` is ``(K, H+1, 4)``: + ``tilt_angles``.
         """
         K, H, _ = U.shape
         z = self.tensor(z0).reshape(-1, self.n_x).expand(K, -1).contiguous()
@@ -192,7 +217,10 @@ class TorchLcs:
             p = p + u[:, :N_P]
             Z.append(z)
             P.append(p)
-        return torch.stack(Z, dim=1), torch.stack(P, dim=1), self.rotation_angles(U, rot0)
+        R = self.rotation_angles(U, rot0)
+        if q_abs is not None:
+            R = torch.cat([R, self.tilt_angles(U, q_abs)], dim=-1)
+        return torch.stack(Z, dim=1), torch.stack(P, dim=1), R
 
     def rotation_angles(self, U: torch.Tensor, rot0=None) -> torch.Tensor:
         """``(K, H+1, 2)`` composed geodesic angles per arm (see ``rollout``)."""
@@ -208,12 +236,29 @@ class TorchLcs:
             out.append(torch.stack(angles, dim=1))
         return torch.stack(out, dim=-1)
 
-    def rollout_fused(self, z0, p0, U: torch.Tensor, rot0=None, iters: int = 25
+    def tilt_angles(self, U: torch.Tensor, q_abs) -> torch.Tensor:
+        """``(K, H+1, 2)`` per-arm tilt (``quat_tilt_t``) of ``q_k = exp(w_k) q_{k-1}``,
+        ``q_0 = q_abs[arm]`` (``wxyz``, the current absolute orientation)."""
+        K, H, _ = U.shape
+        qa = self.tensor(q_abs).reshape(2, 4)
+        out = []
+        for a, sl in enumerate(ROT_SLICES):
+            q = qa[a].expand(K, 4)
+            tilts = [quat_tilt_t(q)]
+            for k in range(H):
+                q = _qmul_t(_quat_exp_t(U[:, k, sl]), q)
+                tilts.append(quat_tilt_t(q))
+            out.append(torch.stack(tilts, dim=1))
+        return torch.stack(out, dim=-1)
+
+    def rollout_fused(self, z0, p0, U: torch.Tensor, rot0=None, iters: int = 25, q_abs=None
                       ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """``rollout`` as one Warp kernel (``mppi_warp``): same maths, float32, CUDA only."""
         if self._fused is None:
             self._fused = _FusedRollout(self)
-        return self._fused(z0, p0, U, rot0, iters)
+            if self._gate is not None:
+                self._fused.set_gate(self._gate)
+        return self._fused(z0, p0, U, rot0, iters, q_abs)
 
     def whitened_dist(self, z, goal) -> float:
         """``LearnedLcs.whitened_dist`` (float64)."""
@@ -223,6 +268,14 @@ class TorchLcs:
 
 def _quat_angle_t(q: torch.Tensor) -> torch.Tensor:
     return 2.0 * torch.atan2(q[..., 1:].norm(dim=-1), q[..., 0].abs())
+
+
+def quat_tilt_t(q: torch.Tensor) -> torch.Tensor:
+    """Tilt ``acos(|R[:, 2] . e_z|)`` of ``wxyz`` quaternions (any norm): the body z axis' angle
+    from the world z line, so a hand pointing straight down is 0."""
+    a = q[..., 1].square() + q[..., 2].square()
+    b = q[..., 0].square() + q[..., 3].square()
+    return torch.atan2(2.0 * (a * b).sqrt(), (b - a).abs())
 
 
 # --- parameters ---------------------------------------------------------------------------------
@@ -248,7 +301,8 @@ class MppiParams:
     seed: int = 0
     u_lb: list[float] | None = None  # None: the deploy's
     u_ub: list[float] | None = None
-    # Symmetric outer box intersected with u_lb/u_ub: {trans_m, rot_deg} per step (None: off).
+    # Symmetric outer box intersected with u_lb/u_ub: {trans_m, rot_deg} per step (None: off);
+    # optional rot_deg_xyz [x, y, z] replaces rot_deg per rotation axis (both arms).
     u_box_outer: dict | None = None
     z_min_franka: float = -math.inf
     z_min_ur: float = -math.inf
@@ -257,12 +311,31 @@ class MppiParams:
     # Ceiling relative to the episode's first latent (the node folds it into z_max_*).
     z_ceiling_above_start_m: float = math.inf
     rot_envelope_deg: dict = field(default_factory=lambda: {"franka": 20.0, "ur": 20.0})
+    # Hard tilt limit {franka, ur} (deg; None / inf = off per arm): knots whose EE z axis is
+    # further than this from the world z line (from the current absolute orientation, needs
+    # q_now) violate, like the envelope. None = off.
+    tilt_max_deg: dict | None = None
+    # "penalty": + safety_penalty per violating knot; "feasible_first": every sample without a
+    # violation outranks every violator, violators ranked by the graded violation (deg / mm).
+    constraint_mode: str = "penalty"
+    # Node: project the plan about to be sent inside the tilt / envelope / z limits from the
+    # measured pose ({knots 6, margin_deg 0, margin_mm 0}, ``mppi_guards.guard_plan``). None = off.
+    exec_guard: dict | None = None
+    # Node: Franka knot 0 = the previous plan's command at t (capped {cap_mm, cap_deg} from the
+    # measured pose) instead of the measured pose; "shift" moves every knot with it (cmd_delta
+    # actions), "knot0" only knot 0 (knot1_minus_measured). None = off.
+    knot0_chain: dict | None = None
     action_noise_frac: float = 0.0
     u_translations_only: bool = False
+    # Stage 2: the UR is parked, its channels pinned to zero.
+    u_franka_only: bool = False
     stage_goal_tols: list[float] | None = None
     stage_max_durations_s: list[float] | None = None
     # Consecutive latents inside the tol to complete a stage before the last (1 = v1 rule).
     stage_reach_streak: int = 1
+    # Node, waypoint stages: a stage is reached no sooner than this x the goal demo's time from
+    # the previous waypoint to its own (since the stage started). None = off.
+    stage_min_dwell: float | None = None
     # Node: advance to the furthest later stage whose tol holds the latent (never back).
     stage_skip_ahead: bool = False
     # Node: this stage (int = node stage index; "latch" = the one after the waypoints' latch) is
@@ -305,11 +378,23 @@ class MppiParams:
     # relu(d_k - radius)^2, d_k = whitened distance of z_k to the nearest training latent,
     # k = 1..H (all) or H (terminal). None = off.
     latent_support: dict | None = None
+    # Latent readout limit: {file (npz w (n_x,), b: a linear readout of the raw latent, e.g. the belt
+    # loop length in mm), max, weight 1, scale 1, where all | terminal}; cost += weight sum_k
+    # relu((w z_k + b - max) / scale)^2, k = 1..H (all) or H. None = off.
+    latent_limit: dict | None = None
     # EE data support: {file (npz, ee_pos (N, 6) [Franka xyz, UR xyz] m in the pulley frame
     # R^T (x - t)), pulley_pose7 (xyz + wxyz of that frame), radius_mm 35, weight 1, max_points
     # 3000, where all | terminal}; cost += weight sum_k relu((d_k - radius_mm) / 10 mm)^2,
     # d_k = 6-D Euclidean distance (mm) of P_k to the nearest training EE position. None = off.
     ee_support: dict | None = None
+    # Sampling noise AR(1) along the horizon (marginal variance kept); 0 = white.
+    noise_beta: float = 0.0
+    # Hard per-step input change {trans_mm, rot_deg}: knot 0 vs the last sent input, knot k vs
+    # knot k-1 (samples and the initial mean). None = off.
+    du_max: dict | None = None
+    # Node, stage mode: after a stage switch the per-knot goal moves linearly from the previous
+    # stage's goal to the new one over this many seconds (reach test on the new goal). None = off.
+    goal_blend_s: float | None = None
 
     def __post_init__(self) -> None:
         if self.K < 2 or self.H < 1 or self.n_iter < 1 or self.pgd_iters < 1:
@@ -319,6 +404,9 @@ class MppiParams:
             raise ValueError("temperature must be > 0, sigma_frac/action_noise_frac >= 0")
         if int(self.stage_reach_streak) != self.stage_reach_streak or self.stage_reach_streak < 1:
             raise ValueError(f"stage_reach_streak {self.stage_reach_streak} must be an int >= 1")
+        if self.stage_min_dwell is not None and not (math.isfinite(float(self.stage_min_dwell))
+                                                     and float(self.stage_min_dwell) >= 0.0):
+            raise ValueError(f"stage_min_dwell {self.stage_min_dwell} must be finite >= 0 or None")
         if self.stage_skip_ahead is not True and self.stage_skip_ahead is not False:
             raise ValueError(f"stage_skip_ahead {self.stage_skip_ahead!r} must be a bool")
         nt = self.stage_no_timeout_into
@@ -331,6 +419,21 @@ class MppiParams:
             raise ValueError(f"ess_frac {self.ess_frac} outside (0, 1]")
         if set(self.rot_envelope_deg) != {"franka", "ur"}:
             raise ValueError(f"rot_envelope_deg keys {set(self.rot_envelope_deg)} != franka, ur")
+        if self.constraint_mode not in CONSTRAINT_MODES:
+            raise ValueError(f"constraint_mode {self.constraint_mode!r}: one of "
+                             f"{CONSTRAINT_MODES}")
+        if self.exec_guard is not None:
+            check_exec_guard(self.exec_guard)
+        if self.knot0_chain is not None:
+            check_knot0_chain(self.knot0_chain)
+        if self.tilt_max_deg is not None:
+            if set(self.tilt_max_deg) != {"franka", "ur"}:
+                raise ValueError(f"tilt_max_deg keys {set(self.tilt_max_deg)} != franka, ur")
+            if not all(v is None or float(v) > 0.0 for v in self.tilt_max_deg.values()):
+                raise ValueError(f"tilt_max_deg {self.tilt_max_deg}: > 0, inf or None per arm")
+        xyz = (self.u_box_outer or {}).get("rot_deg_xyz")
+        if xyz is not None and (len(xyz) != 3 or not all(float(v) > 0.0 for v in xyz)):
+            raise ValueError(f"u_box_outer.rot_deg_xyz {xyz}: 3 values > 0 (deg)")
         if self.clearance is not None and ("model" not in self.clearance
                                            or not set(self.clearance) <= CLEARANCE_KEYS):
             raise ValueError(f"clearance keys {sorted(self.clearance)}: need model, within "
@@ -361,8 +464,18 @@ class MppiParams:
             check_value(self.value)
         if self.latent_support is not None:
             check_latent_support(self.latent_support)
+        if self.latent_limit is not None:
+            check_latent_limit(self.latent_limit)
         if self.ee_support is not None:
             check_ee_support(self.ee_support)
+        if not 0.0 <= float(self.noise_beta) < 1.0:
+            raise ValueError(f"noise_beta {self.noise_beta} outside [0, 1)")
+        if self.du_max is not None and (set(self.du_max) != {"trans_mm", "rot_deg"} or not all(
+                math.isfinite(float(v)) and float(v) > 0.0 for v in self.du_max.values())):
+            raise ValueError(f"du_max {self.du_max}: {{trans_mm, rot_deg}} finite > 0")
+        if self.goal_blend_s is not None and not (math.isfinite(float(self.goal_blend_s))
+                                                  and float(self.goal_blend_s) > 0.0):
+            raise ValueError(f"goal_blend_s {self.goal_blend_s} must be finite > 0 or None")
 
     @classmethod
     def from_yaml(cls, path) -> "MppiParams":
@@ -383,18 +496,39 @@ class MppiParams:
         if lb.shape != (lcs.n_u,) or ub.shape != (lcs.n_u,) or np.any(lb > ub):
             raise ValueError(f"bounds {lb} / {ub} invalid for n_u {lcs.n_u}")
         if self.u_box_outer is not None:
-            half = np.r_[np.full(6, float(self.u_box_outer["trans_m"])),
-                         np.full(6, math.radians(float(self.u_box_outer["rot_deg"])))]
+            xyz = self.u_box_outer.get("rot_deg_xyz")
+            rot = (np.full(6, math.radians(float(self.u_box_outer["rot_deg"]))) if xyz is None
+                   else np.tile(np.radians(np.asarray(xyz, dtype=np.float64)), 2))
+            half = np.r_[np.full(6, float(self.u_box_outer["trans_m"])), rot]
             lb, ub = np.maximum(lb, -half), np.minimum(ub, half)
             if np.any(lb > ub):
                 raise ValueError("u_box_outer does not intersect the input bounds")
         if self.u_translations_only:
             lb[list(ROT_CHANNELS)] = ub[list(ROT_CHANNELS)] = 0.0
+        if self.u_franka_only:
+            lb[list(UR_CHANNELS)] = ub[list(UR_CHANNELS)] = 0.0
         return lb, ub
 
     def rot_envelope_rad(self) -> np.ndarray:
         return np.radians([float(self.rot_envelope_deg["franka"]),
                            float(self.rot_envelope_deg["ur"])])
+
+    def tilt_max_rad(self) -> np.ndarray:
+        t = self.tilt_max_deg or {}
+        return np.radians([math.inf if t.get(a) is None else float(t[a]) for a in ("franka", "ur")])
+
+    @property
+    def tilt_on(self) -> bool:
+        return bool(np.isfinite(self.tilt_max_rad()).any())
+
+    @property
+    def feasible_first(self) -> bool:
+        return self.constraint_mode == "feasible_first"
+
+    @property
+    def needs_q_now(self) -> bool:
+        """The solve needs the current absolute orientations (``q_now``)."""
+        return self.clearance is not None or self.tilt_on
 
 
 @dataclass
@@ -414,9 +548,60 @@ def _box(lcs: TorchLcs, params: MppiParams) -> _Box:
 
 
 def safety_limits(params: MppiParams) -> np.ndarray:
-    """``[z_min_f, z_max_f, z_min_ur, z_max_ur, env_f, env_ur]`` (m, rad)."""
-    return np.r_[params.z_min_franka, params.z_max_franka, params.z_min_ur, params.z_max_ur,
-                 params.rot_envelope_rad()]
+    """``[z_min_f, z_max_f, z_min_ur, z_max_ur, env_f, env_ur]`` (m, rad), + ``[tilt_f, tilt_ur]``
+    (rad) with ``params.tilt_on``."""
+    lim = np.r_[params.z_min_franka, params.z_max_franka, params.z_min_ur, params.z_max_ur,
+                params.rot_envelope_rad()]
+    return np.r_[lim, params.tilt_max_rad()] if params.tilt_on else lim
+
+
+def tilt_bad(R: torch.Tensor, lim: torch.Tensor) -> torch.Tensor:
+    """``(K, H)`` knots 1..H over the tilt limit (``R`` with the tilt columns 2, 3)."""
+    return (R[:, 1:, 2] > lim[6]) | (R[:, 1:, 3] > lim[7])
+
+
+def violation_amount(params: MppiParams, P: torch.Tensor, R: torch.Tensor, lim: torch.Tensor,
+                     C: torch.Tensor | None = None, terms: CostTerms | None = None
+                     ) -> torch.Tensor:
+    """``(K,)`` graded violation of the knots ``plan_cost`` flags, summed over knots 1..H: mm
+    outside the z bounds / under the clearance thresholds / beyond the support box's hard margin
+    + deg over the envelope / tilt limits; > 0 exactly where a knot is flagged."""
+    pz_f, pz_u = P[:, 1:, 2], P[:, 1:, 5]
+    m = ((lim[0] - pz_f).clamp_min(0.0) + (pz_f - lim[1]).clamp_min(0.0)
+         + (lim[2] - pz_u).clamp_min(0.0) + (pz_u - lim[3]).clamp_min(0.0))
+    a = (R[:, 1:, 0] - lim[4]).clamp_min(0.0) + (R[:, 1:, 1] - lim[5]).clamp_min(0.0)
+    if params.tilt_on:
+        a = a + (R[:, 1:, 2] - lim[6]).clamp_min(0.0) + (R[:, 1:, 3] - lim[7]).clamp_min(0.0)
+    if C is not None:
+        clim = terms.clear.lim
+        m = m + (clim[0] - C[:, 1:, 0]).clamp_min(0.0) + (clim[1] - C[:, 1:, 1]).clamp_min(0.0)
+    sb = params.support_box
+    if sb is not None and sb.get("hard_margin_m") is not None:
+        m = m + (support_hinge(P[:, 1:], terms.sbox) - float(sb["hard_margin_m"])).clamp_min(
+            0.0).sum(-1)
+    return (m * 1e3 + a * (180.0 / math.pi)).sum(1)
+
+
+def feasible_first_cost(cost: torch.Tensor, n_bad: torch.Tensor, viol: torch.Tensor,
+                        penalty: float) -> torch.Tensor:
+    """``(K,)`` weighting cost of ``constraint_mode: feasible_first`` (graph-safe, no host sync).
+
+    Feasible samples (``n_bad == 0``): their cost minus the best feasible one. Violators: the
+    worst feasible offset + ``S (viol + FF_COST_EQUIV x normalised cost)``, so any feasible
+    sample beats any violator and violators rank by violation; ``S`` = the feasible cost span
+    (else the whole span) keeps the scale near the costs'. ``penalty`` is taken back off.
+    """
+    raw = cost - penalty * n_bad
+    f = n_bad == 0
+    any_f = f.any()
+    lo = torch.where(f, raw, raw.amax()).amin()
+    hi = torch.where(f, raw, raw.amin()).amax()
+    span_all = (raw.amax() - raw.amin()).clamp_min(1e-6)
+    span_f = torch.where(any_f, hi - lo, torch.zeros_like(hi))
+    S = torch.where(span_f > 1e-6, span_f, span_all)
+    off = torch.where(any_f, hi - lo, torch.zeros_like(hi))
+    norm = (raw - raw.amin()) / span_all
+    return torch.where(f, raw - lo, off + S * (viol + FF_COST_EQUIV * norm))
 
 
 # --- cost ---------------------------------------------------------------------------------------
@@ -432,7 +617,7 @@ def plan_cost(lcs: TorchLcs, params: MppiParams, Z: torch.Tensor, P: torch.Tenso
     ``Z / P / R`` of inputs ``U`` (knots 1..H).
 
     ``z_goal`` ``(n_x,)`` or one row per knot ``(H, n_x)``. ``lim``: ``safety_limits`` as a tensor
-    (default: from ``params``). ``anchor_on`` / ``prior_on`` (0/1 tensors) gate the anchor and
+    (default: from ``params``). With ``params.tilt_on`` ``R`` carries the tilt (``q_abs``). ``anchor_on`` / ``prior_on`` (0/1 tensors) gate the anchor and
     prior terms without a branch (CUDA graphs). ``C``: the rollout's ``Clearance`` distances.
     ``terms``: the loaded optional terms (default: ``load_cost_terms``).
     """
@@ -446,6 +631,10 @@ def plan_cost(lcs: TorchLcs, params: MppiParams, Z: torch.Tensor, P: torch.Tenso
     env = (R[:, 1:, 0] > lim[4]) | (R[:, 1:, 1] > lim[5])  # rotation envelope
     pz_f, pz_u = P[:, 1:, 2], P[:, 1:, 5]
     bad = (pz_f < lim[0]) | (pz_f > lim[1]) | (pz_u < lim[2]) | (pz_u > lim[3]) | env
+    if params.tilt_on:
+        if R.shape[-1] != 4:
+            raise ValueError("tilt_max_deg needs the rollout's tilt (rollout(..., q_abs=q_now))")
+        bad = bad | tilt_bad(R, lim)
     if C is not None:
         clr = terms.clear
         bad = bad | clearance_bad(C, clr.lim)
@@ -486,6 +675,8 @@ def _add_learned_costs(cost, lcs, params, Z, P, terms) -> torch.Tensor:
         cost = cost + latent_support_cost(lcs, params.latent_support, Z, terms.lsup)
     if params.ee_support is not None:
         cost = cost + ee_support_cost(params.ee_support, P, terms.esup)
+    if params.latent_limit is not None:
+        cost = cost + latent_limit_cost(params.latent_limit, Z, terms.llim)
     return cost
 
 
@@ -536,6 +727,15 @@ N_STATS = len(STAT_NAMES)
 CLEAR_STAT_NAMES = ("frac_clear_penalised", "clear_min_ur_mm", "clear_min_f_mm",
                     "clear_violating", "clear_now_ur_mm", "clear_now_f_mm")
 N_CLEAR_STATS = len(CLEAR_STAT_NAMES)
+# With the tilt limit (after the clearance block; rad on the device, deg in the info): the plan's
+# max over knots 1..H and the current tilt per arm.
+TILT_STAT_NAMES = ("frac_tilt_penalised", "tilt_plan_max_f_deg", "tilt_plan_max_ur_deg",
+                   "tilt_now_f_deg", "tilt_now_ur_deg")
+N_TILT_STATS = len(TILT_STAT_NAMES)
+# With feasible_first (last block): the last pass's feasible fraction, its least violation and the
+# returned plan's (``violation_amount``, deg / mm).
+FF_STAT_NAMES = ("frac_feasible", "viol_min", "viol_plan")
+N_FF_STATS = len(FF_STAT_NAMES)
 
 
 class MppiSolver:
@@ -560,14 +760,18 @@ class MppiSolver:
         self.s_eps = t(np.zeros((params.n_iter, K, H, nu)))
         self.betas = lcs.nesterov_betas(params.pgd_iters)
         self.grid = t(ESS_GRID)
+        dm = params.du_max
+        self.du = None if dm is None else t(np.r_[np.full(6, float(dm["trans_mm"]) * 1e-3),
+                                                  np.full(6, math.radians(float(dm["rot_deg"])))])
         cuda = lcs.device.type == "cuda"
         self.use_graph = cuda and params.cuda_graph if use_graph is None else use_graph
         self.roll = lcs.rollout_fused if cuda and params.fused_rollout else lcs.rollout
         self.terms = load_cost_terms(lcs, params)
         self.clear = self.terms.clear
         self.clear_fused = cuda and params.fused_rollout
-        if self.clear is not None:
+        if params.needs_q_now:
             self.s_q0 = t(np.tile([1.0, 0.0, 0.0, 0.0], (2, 1)))
+        self.roll_kw = {"q_abs": self.s_q0} if params.tilt_on else {}
         self.graph = None
         if self.use_graph:
             self._capture()
@@ -596,24 +800,55 @@ class MppiSolver:
                          lim=self.s_lim, anchor_on=self.s_anchor_on, C=C, u_demo=self.s_udemo,
                          prior_on=self.s_prior_on, terms=self.terms)
 
+    def _viol(self, P, R, C):
+        return violation_amount(self.p, P, R, self.s_lim, C, self.terms)
+
+    def _rate_limit(self, U: torch.Tensor) -> torch.Tensor:
+        """``U`` ``(..., H, n_u)`` with ``du_max`` applied knot by knot (inside the box)."""
+        lb, ub, d = self.box.lb, self.box.ub, self.du
+        free = (1.0 - self.s_anchor_on) * 1e3  # no anchor (first solve): knot 0 free
+        rows = [torch.minimum(torch.maximum(U[..., 0, :], torch.maximum(
+            lb, self.s_anchor - d - free)), torch.minimum(ub, self.s_anchor + d + free))]
+        for k in range(1, U.shape[-2]):
+            ref = rows[-1]
+            rows.append(torch.minimum(torch.maximum(U[..., k, :], torch.maximum(lb, ref - d)),
+                                      torch.minimum(ub, ref + d)))
+        return torch.stack(rows, dim=-2)
+
     def _body(self) -> None:
         """The captured solve: sample, roll out, cost, reweight x ``n_iter``; then the mean plan."""
         p, box = self.p, self.box
         mean = torch.maximum(torch.minimum(self.s_mean0, box.ub), box.lb)
+        if self.du is not None:
+            mean = self._rate_limit(mean)
         for i in range(p.n_iter):
             U = torch.maximum(torch.minimum(mean + box.sigma * self.s_eps[i], box.ub), box.lb)
+            if self.du is not None:
+                U = self._rate_limit(U)
             U[0] = mean
-            Z, P, R = self.roll(self.s_z0, self.s_p0, U, self.s_rot0, p.pgd_iters)
+            Z, P, R = self.roll(self.s_z0, self.s_p0, U, self.s_rot0, p.pgd_iters,
+                                **self.roll_kw)
             C = self._clearance(P, U)
             cost, n_bad, env = self._cost(Z, P, R, U, C)
-            w, ess, temp = self._weights(cost)
+            if p.feasible_first:
+                viol = self._viol(P, R, C)
+                wc = feasible_first_cost(cost, n_bad, viol, p.safety_penalty)
+            else:
+                wc = cost
+            w, ess, temp = self._weights(wc)
             mean = (w[:, None, None] * U).sum(0)
-        Zm, Pm, Rm = self.roll(self.s_z0, self.s_p0, mean[None], self.s_rot0, p.pgd_iters)
+        Zm, Pm, Rm = self.roll(self.s_z0, self.s_p0, mean[None], self.s_rot0, p.pgd_iters,
+                               **self.roll_kw)
         Cm = self._clearance(Pm, mean[None])
         cost_m, bad_m, _ = self._cost(Zm, Pm, Rm, mean[None], Cm)
         # fall back to the last pass's best sample when it violates fewer knots than the mean
-        best = torch.argmin(cost)
-        fb = (bad_m[0] > 0) & (_pick(n_bad, best) < bad_m[0])
+        # (feasible_first: a smaller graded violation)
+        best = torch.argmin(wc)
+        if p.feasible_first:
+            viol_m = self._viol(Pm, Rm, Cm)[0]
+            fb = (viol_m > 0) & (_pick(viol, best) < viol_m)
+        else:
+            fb = (bad_m[0] > 0) & (_pick(n_bad, best) < bad_m[0])
         plan = torch.where(fb, _pick(U, best), mean)
         Zp = torch.where(fb, _pick(Z, best), Zm[0])
         Pp = torch.where(fb, _pick(P, best), Pm[0])
@@ -630,6 +865,15 @@ class MppiSolver:
                 Cp[1:, 0].min(), Cp[1:, 1].min(),
                 clearance_bad(Cp[None], self.clear.lim).sum().to(cost.dtype),
                 Cm[0, 0, 0], Cm[0, 0, 1]])]
+        if p.tilt_on:
+            Rp = torch.where(fb, _pick(R, best), Rm[0])
+            parts.append(torch.stack([  # TILT_STAT_NAMES
+                tilt_bad(R, self.s_lim).any(1).to(cost.dtype).mean(), Rp[1:, 2].max(),
+                Rp[1:, 3].max(), Rm[0, 0, 2], Rm[0, 0, 3]]))
+        if p.feasible_first:
+            parts.append(torch.stack([  # FF_STAT_NAMES
+                (n_bad == 0).to(cost.dtype).mean(), viol.min(),
+                torch.where(fb, _pick(viol, best), viol_m)]))
         self.out = torch.cat(parts)
 
     def _clearance(self, P: torch.Tensor, U: torch.Tensor) -> torch.Tensor | None:
@@ -656,6 +900,10 @@ class MppiSolver:
         sizes = [H * nu, (H + 1) * nx, (H + 1) * N_P, N_STATS]
         if self.clear is not None:
             sizes += [(H + 1) * 2, N_CLEAR_STATS]
+        if self.p.tilt_on:
+            sizes += [N_TILT_STATS]
+        if self.p.feasible_first:
+            sizes += [N_FF_STATS]
         parts = np.split(out, np.cumsum(sizes)[:-1])
         st = parts[3]
         stats = dict(zip(STAT_NAMES, st))
@@ -668,6 +916,13 @@ class MppiSolver:
                      "C": parts[4].reshape(H + 1, 2)}
         else:
             clear = {}
+        if self.p.feasible_first:
+            clear.update(zip(FF_STAT_NAMES, (float(v) for v in parts[-1])))
+            parts = parts[:-1]
+        if self.p.tilt_on:
+            ts = parts[-1]
+            clear.update({"frac_tilt_penalised": ts[0],
+                          **{k: math.degrees(v) for k, v in zip(TILT_STAT_NAMES[1:], ts[1:])}})
         return (parts[0].reshape(H, nu), parts[1].reshape(H + 1, nx),
                 parts[2].reshape(H + 1, N_P), stats, clear)
 
@@ -675,7 +930,7 @@ class MppiSolver:
               limits: np.ndarray | None = None, q_now=None, u_demo=None
               ) -> tuple[np.ndarray, dict]:
         """``q_now`` (2, 4) ``wxyz``: the current absolute Franka / UR orientations (needed
-        with ``clearance``). ``z_goal`` ``(n_x,)`` (every knot) or ``(H, n_x)`` (knots 1..H).
+        with ``clearance`` / ``tilt_max_deg``). ``z_goal`` ``(n_x,)`` (every knot) or ``(H, n_x)`` (knots 1..H).
         ``u_demo`` ``(H, n_u)``: demo actions for the prior (None: prior off this solve)."""
         t0 = time.perf_counter()
         lcs, p = self.lcs, self.p
@@ -698,12 +953,18 @@ class MppiSolver:
         if u_prev_plan is not None:
             self.s_anchor.copy_(lcs.tensor(np.asarray(u_prev_plan)[0]))
         self.s_lim.copy_(lcs.tensor(safety_limits(p) if limits is None else limits))
-        if self.clear is not None:
+        if p.needs_q_now:
             if q_now is None:
-                raise ValueError("clearance needs q_now (the current wxyz orientations)")
+                raise ValueError("clearance / tilt_max_deg need q_now (the current wxyz "
+                                 "orientations)")
             q = np.asarray(q_now, dtype=np.float64).reshape(2, 4)
             self.s_q0.copy_(lcs.tensor(q / np.linalg.norm(q, axis=1, keepdims=True)))
         self.s_eps.normal_(generator=gen)
+        b = float(p.noise_beta)
+        if b > 0.0:
+            c = math.sqrt(1.0 - b * b)
+            for k in range(1, H):
+                self.s_eps[:, :, k].mul_(c).add_(self.s_eps[:, :, k - 1], alpha=b)
         if self.graph is not None:
             self.graph.replay()
         else:
@@ -745,7 +1006,8 @@ def solver_for(lcs: TorchLcs, params: MppiParams) -> MppiSolver:
     skip = {"z_min_franka", "z_min_ur", "z_max_franka", "z_max_ur", "z_ceiling_above_start_m",
             "rot_envelope_deg", "seed", "action_noise_frac", "stage_goal_tols",
             "stage_max_durations_s", "prior_sync", "stage_skip_ahead", "stage_no_timeout_into",
-            "prior_mode", "bc_prior", "stage_start"}
+            "prior_mode", "bc_prior", "stage_start", "exec_guard", "stage_min_dwell",
+            "goal_blend_s", "knot0_chain"}
     key = (id(lcs), repr({k: v for k, v in params.to_dict().items() if k not in skip}))
     if key not in _SOLVERS:
         _SOLVERS[key] = MppiSolver(lcs, params)
@@ -756,7 +1018,7 @@ def mppi_plan(lcs: TorchLcs, params: MppiParams, z0, p0, rot0, z_goal, u_prev_pl
               gen: torch.Generator, q_now=None, u_demo=None) -> tuple[np.ndarray, dict]:
     """``(U (H, n_u) float64, info)``; ``u_prev_plan`` warm-starts and anchors smoothness.
 
-    ``q_now`` (2, 4) ``wxyz``: the current orientations, needed with ``params.clearance``.
+    ``q_now`` (2, 4) ``wxyz``: the current orientations, needed with ``params.needs_q_now``.
     ``z_goal`` ``(n_x,)`` or ``(H, n_x)``; ``u_demo`` ``(H, n_u)``: the demo action prior's inputs.
     """
     return solver_for(lcs, params).solve(z0, p0, rot0, z_goal, u_prev_plan, gen,
@@ -768,11 +1030,12 @@ def rollout_cost(lcs: TorchLcs, params: MppiParams, z0, p0, rot0, z_goal, U,
     """``(cost, violating knots, Z (H+1, n_x))`` of one plan ``U (H, n_u)`` under ``params``."""
     box = _box(lcs, params)
     Ut = lcs.tensor(np.asarray(U, dtype=np.float64))[None]
-    Z, P, R = lcs.rollout(z0, p0, Ut, rot0, params.pgd_iters)
+    if params.needs_q_now and q_now is None:
+        raise ValueError("clearance / tilt_max_deg need q_now (the current wxyz orientations)")
+    kw = {"q_abs": q_now} if params.tilt_on else {}
+    Z, P, R = lcs.rollout(z0, p0, Ut, rot0, params.pgd_iters, **kw)
     anchor = None if u_anchor is None else lcs.tensor(u_anchor)
     terms = load_cost_terms(lcs, params)
-    if terms.clear is not None and q_now is None:
-        raise ValueError("clearance needs q_now (the current wxyz orientations)")
     C = None if terms.clear is None else terms.clear.torch_path(P, Ut, lcs.tensor(q_now))
     ud = None if u_demo is None else lcs.tensor(np.asarray(u_demo, dtype=np.float64))
     cost, n_bad, _ = plan_cost(lcs, params, Z, P, R, Ut, lcs.tensor(z_goal), box.half, anchor,

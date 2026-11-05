@@ -92,6 +92,8 @@ class Variant:
     ur_roll_deg: float = 0.0
     ur_depth_mm: float = 0.0  # + = shallower: pick moved back along the UR tracking +z
     ur_pivot_deg: float = 0.0  # UR pick turned about the jaw axis: the belt crosses the pads slanted
+    franka_pivot_deg: float = 0.0  # the same for the Franka pick
+    franka_depth_mm: float = 0.0  # + = shallower: pick moved back along the finger_tip +z
 
     def commanded(self) -> dict:
         out = {k: float(getattr(self, k)) for k in KNOBS}
@@ -99,6 +101,10 @@ class Variant:
             out["ur_depth_mm"] = float(self.ur_depth_mm)
         if self.ur_pivot_deg:
             out["ur_pivot_deg"] = float(self.ur_pivot_deg)
+        if self.franka_pivot_deg:
+            out["franka_pivot_deg"] = float(self.franka_pivot_deg)
+        if self.franka_depth_mm:
+            out["franka_depth_mm"] = float(self.franka_depth_mm)
         return out
 
 
@@ -151,19 +157,25 @@ def variant_waypoints(nominal: list[Waypoint], frames: dict, v: Variant) -> list
                        v.franka_slide_mm, v.franka_roll_deg)
     T_u = grasp_offset(frames["ur"]["point"], frames["ur"]["tangent"],
                        v.ur_slide_mm, v.ur_roll_deg)
-    if v.ur_pivot_deg:  # about approach x tangent (the jaw's closing axis) through the grasp point
-        p, t = frames["ur"]["point"], frames["ur"]["tangent"]
-        pick = next(w for w in nominal if w.label == "pick")
-        axis = np.cross(pick.ur_mat()[:3, 2], t)
-        P = np.eye(4)
-        P[:3, :3] = rotation_about(axis, math.radians(v.ur_pivot_deg))
-        P[:3, 3] = p - P[:3, :3] @ p
-        T_u = P @ T_u
+    pick = next(w for w in nominal if w.label == "pick")
+    for arm, deg, slide, mat in (
+            ("franka", v.franka_pivot_deg, v.franka_slide_mm, pick.franka_mat()),
+            ("ur", v.ur_pivot_deg, v.ur_slide_mm, pick.ur_mat())):
+        if deg:  # about approach x tangent (the jaw's closing axis) through the slid grasp point
+            t = frames[arm]["tangent"]
+            p = frames[arm]["point"] + slide * 1e-3 * t
+            P = np.eye(4)
+            P[:3, :3] = rotation_about(np.cross(mat[:3, 2], t), math.radians(deg))
+            P[:3, 3] = p - P[:3, :3] @ p
+            T_f, T_u = (P @ T_f, T_u) if arm == "franka" else (T_f, P @ T_u)
     out = copy.deepcopy(nominal)
     for w in out:
         if w.label == "pick":
             w.franka_pos, w.franka_quat_xyzw = apply_pose(T_f, w.franka_pos, w.franka_quat_xyzw,
                                                           w.franka_mat())
+            if v.franka_depth_mm:
+                w.franka_pos = np.asarray(w.franka_pos, float) + (
+                    v.franka_depth_mm * 1e-3 * w.franka_mat()[:3, 2])
         if w.label in ("pre_pick_1", "pick"):
             w.ur_pos, w.ur_quat_xyzw = apply_pose(T_u, w.ur_pos, w.ur_quat_xyzw, w.ur_mat())
             if v.ur_depth_mm:

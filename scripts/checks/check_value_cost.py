@@ -59,7 +59,10 @@ N_LAT = 30
 LATER = (("stage_skip_ahead", False), ("stage_no_timeout_into", None), ("prior_mode", "demo"),
          ("bc_prior", None), ("goal_set", None), ("goal_set_tau", 0.0), ("stage_start", None),
          ("support_box", None), ("prior_sync", None), ("overshoot", None),
-         ("latent_support", None), ("ee_support", None))
+         ("latent_support", None), ("ee_support", None), ("tilt_max_deg", None),
+         ("constraint_mode", "penalty"), ("exec_guard", None),
+         ("stage_min_dwell", None), ("noise_beta", 0.0), ("du_max", None),
+         ("goal_blend_s", None), ("knot0_chain", None))
 
 
 def base_doc(device: str, small: bool = False) -> dict:
@@ -122,7 +125,7 @@ def v1(pre, tree, value: str, tmp: Path) -> tuple[bool, str]:
             if k in b and b[k] == v and k not in a:
                 b.pop(k)
         n += 1
-        if b.pop("value", "missing") is not None or a != b:
+        if b.pop("value", "missing") is not None or a.pop("value", None) is not None or a != b:
             ok = False
             notes.append(f"diff {y}")
     good = {"path": value, "weight": 1.0}

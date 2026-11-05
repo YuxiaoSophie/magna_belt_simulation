@@ -3,6 +3,8 @@
 - ``OvershootGuard`` (``MppiParams.overshoot``): fades the demo prior / changes the weights /
   holds near the seated goal, from the latent distance to it.
 - ``PolicyPrior`` (``prior_mode: policy``): a BC policy rolled through the LCS as the prior.
+- ``exec_guard`` (``MppiParams.exec_guard``): projects the plan about to be sent back inside the
+  tilt / rotation envelope / z limits from the measured pose.
 """
 
 import dataclasses
@@ -21,6 +23,11 @@ STALL_KEYS = frozenset({"latents", "eps", "k"})
 HOLD_GOALS = ("seat", "entry", "best")
 NEAR_KEYS = frozenset({"k", "w_T"})
 W_KEYS = ("w_q", "w_T", "w_r", "w_s")
+EXEC_GUARD_KEYS = frozenset({"knots", "margin_deg", "margin_mm"})
+EXEC_GUARD_DEFAULTS = {"knots": 6, "margin_deg": 0.0, "margin_mm": 0.0}
+KNOT0_CHAIN_KEYS = frozenset({"mode", "cap_mm", "cap_deg"})
+KNOT0_CHAIN_MODES = ("shift", "knot0")
+GUARD_BISECT = 30
 
 
 def check_overshoot(ov: dict) -> None:
@@ -209,3 +216,167 @@ class PolicyPrior:
         else:
             self._body()
         return self.out.double().cpu().numpy()
+
+
+# --- executed-command guard ---------------------------------------------------------------------
+
+def check_knot0_chain(c: dict) -> None:
+    """``MppiParams.knot0_chain`` keys and ranges."""
+    if not isinstance(c, dict) or set(c) != KNOT0_CHAIN_KEYS:
+        raise ValueError(f"knot0_chain {c!r}: keys {sorted(KNOT0_CHAIN_KEYS)}")
+    if c["mode"] not in KNOT0_CHAIN_MODES:
+        raise ValueError(f"knot0_chain.mode {c['mode']!r}: one of {KNOT0_CHAIN_MODES}")
+    for k in ("cap_mm", "cap_deg"):
+        if not (math.isfinite(float(c[k])) and float(c[k]) >= 0.0):
+            raise ValueError(f"knot0_chain.{k} {c[k]} must be finite >= 0")
+
+
+def _nlerp(a: np.ndarray, b: np.ndarray, f: float) -> np.ndarray:
+    b = b if float(np.dot(a, b)) >= 0.0 else -b
+    q = (1.0 - f) * a + f * b
+    return q / np.linalg.norm(q)
+
+
+def chain_pose(prev, t: float, dt: float, ee7, cfg: dict) -> tuple[np.ndarray, dict]:
+    """``knot0_chain``: the previous published Franka plan ``(t_p, pos (n, 3), quat wxyz (n, 4))``
+    evaluated at ``t`` (linear / nlerp between knots), pulled back to within ``cap_mm`` /
+    ``cap_deg`` of the measured pose ``ee7`` (xyz wxyz); the measured pose without a plan
+    covering ``t``. ``(pose7, {lead_mm, lead_deg, capped})``."""
+    ee7 = np.asarray(ee7, dtype=np.float64)
+    if prev is None:
+        return ee7.copy(), {"lead_mm": 0.0, "lead_deg": 0.0, "capped": False}
+    t_p, pos, quat = prev
+    s = (t - t_p) / dt
+    if not 0.0 <= s <= len(pos) - 1:
+        return ee7.copy(), {"lead_mm": 0.0, "lead_deg": 0.0, "capped": False}
+    i = min(math.floor(s), len(pos) - 2)
+    f = s - i
+    p = (1.0 - f) * pos[i] + f * pos[i + 1]
+    q = _nlerp(np.asarray(quat[i], np.float64), np.asarray(quat[i + 1], np.float64), f)
+    d = p - ee7[:3]
+    n = float(np.linalg.norm(d))
+    cap = float(cfg["cap_mm"]) * 1e-3
+    capped = n > cap
+    if capped:
+        p = ee7[:3] + d * (cap / n)
+    q0 = ee7[3:7] / np.linalg.norm(ee7[3:7])
+    ang = 2.0 * math.acos(min(1.0, abs(float(np.dot(q0, q)))))
+    cap_r = math.radians(float(cfg["cap_deg"]))
+    if ang > cap_r:
+        q = _nlerp(q0, q, cap_r / ang)
+        capped = True
+    return np.r_[p, q], {"lead_mm": n * 1e3, "lead_deg": math.degrees(ang), "capped": capped}
+
+
+def check_exec_guard(g: dict) -> None:
+    """``MppiParams.exec_guard`` keys and ranges."""
+    if not isinstance(g, dict) or not set(g) <= EXEC_GUARD_KEYS:
+        raise ValueError(f"exec_guard {g!r}: keys within {sorted(EXEC_GUARD_KEYS)}")
+    c = {**EXEC_GUARD_DEFAULTS, **g}
+    n = c["knots"]
+    if isinstance(n, bool) or int(n) != n or n < 1:
+        raise ValueError(f"exec_guard.knots {n} must be an int >= 1")
+    for k in ("margin_deg", "margin_mm"):
+        if not (math.isfinite(float(c[k])) and float(c[k]) >= 0.0):
+            raise ValueError(f"exec_guard.{k} {c[k]} must be finite >= 0")
+
+
+def _qmul(a, b) -> np.ndarray:
+    aw, av, bw, bv = a[0], a[1:], b[0], b[1:]
+    return np.r_[aw * bw - av @ bv, aw * bv + bw * av + np.cross(av, bv)]
+
+
+def _qexp(r) -> np.ndarray:
+    a = float(np.linalg.norm(r))
+    if a < 1e-12:
+        q = np.r_[1.0, 0.5 * np.asarray(r, np.float64)]
+        return q / np.linalg.norm(q)
+    return np.r_[math.cos(0.5 * a), math.sin(0.5 * a) / a * np.asarray(r, np.float64)]
+
+
+def _qinv(q) -> np.ndarray:
+    return np.r_[q[0], -np.asarray(q[1:])] / float(np.dot(q, q))
+
+
+def _angle(q) -> float:
+    return 2.0 * math.atan2(float(np.linalg.norm(q[1:])), abs(float(q[0])))
+
+
+def _tilt(q) -> float:
+    a, b = q[1] ** 2 + q[2] ** 2, q[0] ** 2 + q[3] ** 2
+    return math.atan2(2.0 * math.sqrt(a * b), abs(b - a))
+
+
+def _scale_max(ok, n: int = GUARD_BISECT) -> float:
+    """Largest ``s`` in [0, 1] found by bisection with ``ok(s)`` (``ok(0)`` holds)."""
+    if ok(1.0):
+        return 1.0
+    lo, hi = 0.0, 1.0
+    for _ in range(n):
+        mid = 0.5 * (lo + hi)
+        lo, hi = (mid, hi) if ok(mid) else (lo, mid)
+    return lo
+
+
+def _guard_rot(w, q, q0i, t_ok: float, e_ok: float) -> np.ndarray:
+    """Rotation increment ``w`` (world rotvec) cut so ``exp(w) q`` keeps tilt <= ``t_ok`` and
+    envelope angle (vs ``q0i`` = the start's inverse) <= ``e_ok``; both hold at ``w = 0``."""
+
+    def tilt_of(v):
+        return _tilt(_qmul(_qexp(v), q))
+
+    def env_of(v):
+        return _angle(_qmul(_qmul(_qexp(v), q), q0i))
+
+    if tilt_of(w) > t_ok:  # cut the world-xy part first: a yaw about world z keeps the tilt
+        wz = np.r_[0.0, 0.0, w[2]]
+        s = _scale_max(lambda s: tilt_of(wz + s * (w - wz)) <= t_ok)
+        w = wz + s * (w - wz)
+    if tilt_of(w) > t_ok or env_of(w) > e_ok:
+        w = _scale_max(lambda s: tilt_of(s * w) <= t_ok and env_of(s * w) <= e_ok) * w
+    return w
+
+
+def guard_plan(U, p_now, q_now, q_start, lim, cfg: dict) -> tuple[np.ndarray, dict]:
+    """``(U', info)``: the first ``cfg.knots`` inputs of ``U (H, 12)`` projected so the knots
+    ``p_k = p_{k-1} + u[:3]``, ``q_k = exp(w_k) q_{k-1}`` from the measured ``p_now (6,)`` /
+    ``q_now (2, 4)`` (wxyz) stay inside the limits ``lim`` (``mppi_lcs.safety_limits``) less the
+    margins, or no further outside than the knot before. Per arm and knot: z clamped; a tilt
+    over the limit cuts the world-xy part of the rotation increment (yaw kept); then an envelope
+    angle (from ``q_start``) or tilt still over cuts the whole increment.
+    """
+    c = {**EXEC_GUARD_DEFAULTS, **cfg}
+    U = np.array(U, dtype=np.float64)
+    lim = np.asarray(lim, dtype=np.float64)
+    md, mz = math.radians(float(c["margin_deg"])), float(c["margin_mm"]) * 1e-3
+    tilt_lim = lim[6:8] if len(lim) >= 8 else np.full(2, math.inf)
+    n_k = min(int(c["knots"]), len(U))
+    info = {"n_z": 0, "n_rot": 0, "first": -1, "z_cut_mm": 0.0, "rot_cut_deg": 0.0}
+    for a in range(2):
+        z = float(p_now[3 * a + 2])
+        q = np.asarray(q_now[a], np.float64) / np.linalg.norm(q_now[a])
+        q0i = _qinv(np.asarray(q_start[a], np.float64))
+        zl, zh = lim[2 * a] + mz, lim[2 * a + 1] - mz
+        env, tl = lim[4 + a] - md, tilt_lim[a] - md
+        rs = slice(6 + 3 * a, 9 + 3 * a)
+        for k in range(n_k):
+            u = U[k]
+            zn = z + u[3 * a + 2]
+            zc = min(max(zn, min(zl, z)), max(zh, z))
+            if zc != zn:
+                u[3 * a + 2] = zc - z
+                info["n_z"] += 1
+                info["z_cut_mm"] = max(info["z_cut_mm"], abs(zc - zn) * 1e3)
+                info["first"] = k if info["first"] < 0 else min(info["first"], k)
+            z = zc
+            w = _guard_rot(u[rs].copy(), q, q0i, max(tl, _tilt(q)),
+                           max(env, _angle(_qmul(q, q0i))))
+            if not np.array_equal(w, u[rs]):
+                info["n_rot"] += 1
+                info["rot_cut_deg"] = max(info["rot_cut_deg"],
+                                          math.degrees(float(np.linalg.norm(u[rs] - w))))
+                info["first"] = k if info["first"] < 0 else min(info["first"], k)
+                u[rs] = w
+            q = _qmul(_qexp(w), q)
+            q = q / np.linalg.norm(q)
+    return U, info

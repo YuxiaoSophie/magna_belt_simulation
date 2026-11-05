@@ -26,12 +26,14 @@ if str(REPO_ROOT / "src") not in sys.path:
 from round_belt_task.outcome import (
     LABELS,
     LARGE_SEAT_MM,
+    SMALL_SEAT_MM,
     OutcomeThresholds,
     classify,
     classify_episode,
     frame_metrics,
     slant_episode,
     slant_metrics,
+    success_both,
 )
 from task_common.replay_metrics import quat_rotate
 
@@ -223,6 +225,32 @@ def check_o6(ctx: SimpleNamespace) -> str:
     _require(ep["slant_deg_t"].shape == (2,) and ep["slant_deg"] == ep["slant_deg_t"][-1]
              and ep["slant_dir"] == "roll+", f"episode API: {ep}")
     return f"level/n/a/tilted 20 deg ok, {len(cases)} axes x (identity, rotated frame)"
+
+
+@check("O7 small-seat loop -> engaged only with the small seat")
+def check_o7(ctx: SimpleNamespace) -> str:
+    belt = ctx.base * (SMALL_SEAT_MM / LARGE_SEAT_MM)
+    fm = frame_metrics(belt, IDENTITY_POSE, SMALL_SEAT_MM, ctx.th)
+    _require(classify(fm, ctx.th) == "engaged", f"small seat: {classify(fm, ctx.th)!r} ({fm})")
+    fl = frame_metrics(belt, IDENTITY_POSE, LARGE_SEAT_MM, ctx.th)
+    _require(classify(fl, ctx.th) != "engaged", f"large seat: still engaged ({fl})")
+    return f"small wrap {fm.wrap_deg:.1f} deg; large seat {classify(fl, ctx.th)}"
+
+
+@check("O8 success_both only when both frames engaged")
+def check_o8(ctx: SimpleNamespace) -> str:
+    th = ctx.th
+    eng = frame_metrics(ctx.base, IDENTITY_POSE, th=th)
+    over = frame_metrics(ctx.scenarios["lifted"][0], IDENTITY_POSE, th=th)
+    _require(classify(eng, th) == "engaged" and classify(over, th) == "over", "bad fixtures")
+    for a, b, want in ((eng, eng, True), (eng, over, False), (over, eng, False),
+                       (over, over, False)):
+        got = success_both(a, b, th, th)
+        _require(got is want, f"{classify(a, th)}/{classify(b, th)}: {got} != {want}")
+    strict = OutcomeThresholds(engaged_arc_deg=200.0)  # per-pulley thresholds are honoured
+    _require(not success_both(eng, eng, th, strict), "th_small ignored")
+    _require(not success_both(eng, eng, strict, th), "th_large ignored")
+    return "2x2 truth table + per-pulley thresholds"
 
 
 def main() -> int:

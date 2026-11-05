@@ -29,12 +29,26 @@ def _wp_funcs():
     return quat_exp, quat_angle
 
 
+def _wp_quat_tilt():
+    import warp as wp
+
+    @wp.func
+    def quat_tilt(q: wp.quat):
+        # angle of the body z axis from the world z line (xyzw; ``mppi_lcs.quat_tilt_t``)
+        a = q[0] * q[0] + q[1] * q[1]
+        b = q[2] * q[2] + q[3] * q[3]
+        return wp.atan2(2.0 * wp.sqrt(a * b), wp.abs(b - a))
+
+    return quat_tilt
+
+
 # --- LCS rollout --------------------------------------------------------------------------------
 
 def _fused_kernel(nx: int, nl: int, nu: int):
     import warp as wp
 
     _wp_quat_exp, _wp_quat_angle = _wp_funcs()
+    _wp_tilt = _wp_quat_tilt()
 
     f32 = wp.float32
     vx, vl = wp.types.vector(nx, f32), wp.types.vector(nl, f32)
@@ -51,15 +65,21 @@ def _fused_kernel(nx: int, nl: int, nu: int):
                 d: wp.array(dtype=vx), Ap: wp.array(dtype=mx6), sE: wp.array(dtype=mlx),
                 sH: wp.array(dtype=mlu), sc: wp.array(dtype=vl), sEp: wp.array(dtype=ml6),
                 Ms: wp.array(dtype=mll), betas: wp.array(dtype=f32), n_pgd: int, H: int,
-                Z: wp.array2d(dtype=vx), P: wp.array2d(dtype=v6), R: wp.array2d(dtype=wp.vec2)):
+                qa: wp.array(dtype=wp.quat), tilt_on: int,
+                Z: wp.array2d(dtype=vx), P: wp.array2d(dtype=v6), R: wp.array2d(dtype=wp.vec2),
+                T: wp.array2d(dtype=wp.vec2)):
         k = wp.tid()
         z = z0[0]
         p = p0[0]
         qf = _wp_quat_exp(r0[0])
         qu = _wp_quat_exp(r0[1])
+        af = qa[0]
+        au = qa[1]
         Z[k, 0] = z
         P[k, 0] = p
         R[k, 0] = wp.vec2(_wp_quat_angle(qf), _wp_quat_angle(qu))
+        if tilt_on != 0:
+            T[k, 0] = wp.vec2(_wp_tilt(af), _wp_tilt(au))
         zero = vl()
         for h in range(H):
             u = U[k, h]
@@ -78,6 +98,10 @@ def _fused_kernel(nx: int, nl: int, nu: int):
             Z[k, h + 1] = z
             P[k, h + 1] = p
             R[k, h + 1] = wp.vec2(_wp_quat_angle(qf), _wp_quat_angle(qu))
+            if tilt_on != 0:
+                af = _wp_quat_exp(wp.vec3(u[6], u[7], u[8])) * af
+                au = _wp_quat_exp(wp.vec3(u[9], u[10], u[11])) * au
+                T[k, h + 1] = wp.vec2(_wp_tilt(af), _wp_tilt(au))
 
     types = {"vx": vx, "v6": v6, "vu": vu, "mxx": mxx, "mxu": mxu, "mxl": mxl, "mx6": mx6,
              "mlx": mlx, "mlu": mlu, "vl": vl, "ml6": ml6, "mll": mll}
@@ -108,8 +132,19 @@ class _FusedRollout:
                      arr(s * n["E_p"], ty["ml6"]),
                      arr(np.eye(lcs.n_lam) - s * f_pgd, ty["mll"])]
         self._betas: dict[int, object] = {}
+        self._qa_off = torch.tensor([[0.0, 0.0, 0.0, 1.0]] * 2, dtype=torch.float32,
+                                    device=lcs.device)
+        self._t_off = torch.zeros((1, 1, 2), dtype=torch.float32, device=lcs.device)
 
-    def __call__(self, z0, p0, U, rot0, iters):
+    def set_gate(self, g) -> None:
+        """``TorchLcs.set_gate``: B and s H columns times ``g``, written into the same arrays."""
+        n, s, ty = self.lcs.np, self.lcs.step_size, self.ty
+        for k, m, t in ((1, n["B"], "mxu"), (6, s * n["H"], "mlu")):
+            src = self.wp.array([np.asarray(m * np.asarray(g)[None, :], dtype=np.float32)],
+                                dtype=ty[t], device=self.dev)
+            self.wp.copy(self.mats[k], src)
+
+    def __call__(self, z0, p0, U, rot0, iters, q_abs=None):
         wp, lcs = self.wp, self.lcs
         K, H, _ = U.shape
         if int(iters) not in self._betas:
@@ -122,15 +157,22 @@ class _FusedRollout:
         Z = torch.empty((K, H + 1, lcs.n_x), dtype=torch.float32, device=lcs.device)
         P = torch.empty((K, H + 1, N_P), dtype=torch.float32, device=lcs.device)
         R = torch.empty((K, H + 1, 2), dtype=torch.float32, device=lcs.device)
+        on = q_abs is not None
+        if on:  # wxyz -> warp xyzw
+            qa = lcs.tensor(q_abs).reshape(2, 4).roll(-1, dims=-1).contiguous()
+            T = torch.empty((K, H + 1, 2), dtype=torch.float32, device=lcs.device)
+        else:
+            qa, T = self._qa_off, self._t_off
         ty = self.ty
         wp.launch(self.kernel, dim=K, device=self.dev,
                   stream=wp.stream_from_torch(torch.cuda.current_stream(lcs.device)),
                   inputs=[wp.from_torch(z0, dtype=ty["vx"]), wp.from_torch(p0, dtype=ty["v6"]),
                           wp.from_torch(r0, dtype=wp.vec3), wp.from_torch(U, dtype=ty["vu"]),
-                          *self.mats, self._betas[int(iters)], int(iters), int(H)],
+                          *self.mats, self._betas[int(iters)], int(iters), int(H),
+                          wp.from_torch(qa, dtype=wp.quat), int(on)],
                   outputs=[wp.from_torch(Z, dtype=ty["vx"]), wp.from_torch(P, dtype=ty["v6"]),
-                           wp.from_torch(R, dtype=wp.vec2)])
-        return Z, P, R
+                           wp.from_torch(R, dtype=wp.vec2), wp.from_torch(T, dtype=wp.vec2)])
+        return (Z, P, torch.cat([R, T], dim=-1)) if on else (Z, P, R)
 
 
 # --- clearance (gripper sets vs plate + pulleys) ------------------------------------------------

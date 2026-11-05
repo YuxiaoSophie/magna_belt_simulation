@@ -13,7 +13,8 @@ Sim (with ``round_belt_lcm_simulation.py --cameras --publish-point-cloud --publi
 Hardware mapping: ``--ur-state-channel UR_STATE --state-match nearest --belt-input points150``
 (the estimator's 150 vertices, resized like the loader; the model was trained on 48 bodies).
 A ``belt_cloud_pointnet`` deploy encodes the segmented pulley-frame belt cloud and needs
-``--belt-seg``.
+``--belt-seg``. A ``belt_cloud_pointnet_grip`` deploy also reads the gripper status/commands
+and publishes the 44-d proprio (40 + grip) for the MPPI node's grasp gate.
 """
 
 from __future__ import annotations
@@ -36,18 +37,23 @@ import lcm
 
 import task_common  # noqa: F401  (puts lcmtypes/ on sys.path)
 from dairlib import lcmt_robot_output
-from drake import lcmt_point_cloud
+from drake import lcmt_point_cloud, lcmt_schunk_wsg_command, lcmt_schunk_wsg_status
 from magna import lcmt_round_belt_state
+from robotiq import lcmt_robotiq_command, lcmt_robotiq_status
 from round_belt_task.arm_kinematics import FrankaTip, UrTracking
 from round_belt_task.episode_io import pose7_mat
 from round_belt_task.waypoints import MAGNA_PARAMS_SIM_YAML, board_pose
 from task_common import belt_cloud as bc
 from task_common import lcs_dataset as lcs
 from task_common.latent_encoder import (
+    FRANKA_CLOSED_MM,
     LATENT_STATE_CHANNEL,
+    UR_CLOSED_BYTE,
     BeltCloudPointNetEncoder,
+    BeltCtxEncoder,
     LatentEncoder,
     encoder_input,
+    grip_features,
     latent_state_message,
     resize_points_ordered,
 )
@@ -160,6 +166,8 @@ class LatentEncoderNode:
                                                                               False):
             raise SystemExit(f"{cli.deploy}: a belt_cloud_pointnet deploy needs --belt-seg")
         self.X_WB = board_pose(Path(cli.params))
+        if isinstance(self.encoder, BeltCtxEncoder):
+            self.encoder.set_board(self.X_WB)  # z_ctx inputs are in this board frame
         self.lc = lc or lcm.LCM(cli.lcm_url)
         self.franka, self.ur = StateRing(), StateRing()
         self.clouds: dict[int, tuple[np.ndarray, float]] = {}
@@ -175,6 +183,15 @@ class LatentEncoderNode:
         self.lc.subscribe(cli.ur_state_channel, self._on_ur)
         self.lc.subscribe(cli.point_cloud_channel, self._on_cloud)
         self.lc.subscribe(cli.belt_state_channel, self._on_belt)
+        # gripper [status gap mm, status byte, command mm, command byte]; None until seen
+        self.grip_raw: list[float | None] = [None] * 4
+        if getattr(self.encoder, "grip_dim", 0):
+            for i, (ch, typ, field) in enumerate((
+                    (cli.hand_status_channel, lcmt_schunk_wsg_status, "actual_position_mm"),
+                    (cli.robotiq_status_channel, lcmt_robotiq_status, "position"),
+                    (cli.hand_command_channel, lcmt_schunk_wsg_command, "target_position_mm"),
+                    (cli.robotiq_command_channel, lcmt_robotiq_command, "position"))):
+                self.lc.subscribe(ch, lambda _c, d, i=i, t=typ, f=field: self._on_grip(i, t, f, d))
 
     @staticmethod
     def _cloud_options(cli: argparse.Namespace) -> dict | None:
@@ -208,6 +225,18 @@ class LatentEncoderNode:
     def _on_ur(self, _ch: str, data: bytes) -> None:
         self.ur.add(arm_state(lcmt_robot_output.decode(data), UR_POSITION_NAMES))
         self._process()
+
+    def _on_grip(self, i: int, typ, field: str, data: bytes) -> None:
+        self.grip_raw[i] = float(getattr(typ.decode(data), field))
+
+    def grip(self) -> np.ndarray | None:
+        """The 4 grip features from the latest status; unseen commands are inferred as
+        in the recorded data (hand closed, Robotiq closed iff its status is)."""
+        gap, pos, hand_cmd, ur_cmd = self.grip_raw
+        if gap is None or pos is None:
+            return None
+        return grip_features(gap, pos, hand_cmd is None or hand_cmd < FRANKA_CLOSED_MM,
+                             (pos if ur_cmd is None else ur_cmd) >= UR_CLOSED_BYTE)
 
     def _on_cloud(self, _ch: str, data: bytes) -> None:
         wall = time.perf_counter()
@@ -257,6 +286,8 @@ class LatentEncoderNode:
                     self.misses += 1
                     self._discard(utime)
                 continue
+            if getattr(self.encoder, "grip_dim", 0) and self.grip() is None:
+                continue  # no gripper status yet
             self._publish(utime, franka, ur)
         newest = max(list(self.clouds) + list(self.belts), default=None)
         if newest is not None:
@@ -278,7 +309,13 @@ class LatentEncoderNode:
             frame["cloud"] = self._sensor_cloud(utime, cloud, ee_f, ee_u)
             if self.belt_seg is not None and self.belt_seg[0] == utime:
                 frame["pcd_belt_seg"] = self.belt_seg[1]
-        z = self.encoder.encode(encoder_input(self.encoder, frame), prop, belt)
+        if getattr(self.encoder, "grip_dim", 0):
+            grip = self.grip()
+            kw = {"scene": frame["cloud"]} if isinstance(self.encoder, BeltCtxEncoder) else {}
+            z = self.encoder.encode(encoder_input(self.encoder, frame), prop, belt, grip=grip, **kw)
+            prop = np.r_[prop, grip]
+        else:
+            z = self.encoder.encode(encoder_input(self.encoder, frame), prop, belt)
         msg = latent_state_message(utime, utime * 1e-6, z, ee_f, ee_u, prop)
         self.lc.publish(self.cli.latent_channel, msg.encode())
         self._discard(utime)
@@ -327,6 +364,10 @@ def create_parser() -> argparse.ArgumentParser:
     p.add_argument("--point-cloud-channel", default="POINT_CLOUD_CROPPED")
     p.add_argument("--belt-state-channel", default="RoundBeltState")
     p.add_argument("--latent-channel", default=LATENT_STATE_CHANNEL)
+    p.add_argument("--hand-status-channel", default="PANDA_HAND_STATUS", help="grip deploys")
+    p.add_argument("--robotiq-status-channel", default="ROBOTIQ_STATUS", help="grip deploys")
+    p.add_argument("--hand-command-channel", default="PANDA_HAND_COMMAND", help="grip deploys")
+    p.add_argument("--robotiq-command-channel", default="ROBOTIQ_COMMAND", help="grip deploys")
     p.add_argument("--params", type=Path, default=MAGNA_PARAMS_SIM_YAML,
                    help="params yaml with task_board_position/orientation (taskboard frame)")
     p.add_argument("--belt-input", choices=BELT_INPUTS, default="bodies48")

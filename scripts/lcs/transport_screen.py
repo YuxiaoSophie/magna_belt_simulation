@@ -109,7 +109,7 @@ def run_config(cfg: Config, base: MppiParams, lcs: TorchLcs, wp: Waypoints, demo
                 goal = wp.z_wp[active_waypoint(wp, t)]
             else:
                 goal = wp.goal_seq(t, H)
-            kw = {"q_now": q} if prm.clearance is not None else {}
+            kw = {"q_now": q} if prm.needs_q_now else {}
             if prior:
                 kw["u_demo"] = wp.u_seq(t, H)
             U, info = mppi_plan(lcs, prm, Z[t], demo["P"][t], rot0, goal, None, gen, **kw)

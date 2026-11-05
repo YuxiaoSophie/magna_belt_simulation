@@ -101,7 +101,9 @@ LETTERS = "abcdefghij"
 
 
 def url(port: int) -> str:
-    return f"udpm://239.255.76.{port - 7600}:{port}?ttl=0"
+    # 239.255.76.<octet> runs out at 7855 (octet 255)
+    return (f"udpm://239.255.76.{port - 7600}:{port}?ttl=0" if port <= 7855
+            else f"udpm://239.255.78.{port - 7800}:{port}?ttl=0")
 
 
 def now() -> str:

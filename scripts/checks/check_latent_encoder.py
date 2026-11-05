@@ -57,6 +57,22 @@ def _belt_cloud(ctx: SimpleNamespace) -> bool:
     return isinstance(ctx.enc, le.BeltCloudPointNetEncoder)
 
 
+def _kw(ctx: SimpleNamespace, k: int) -> dict:
+    """Extra ``encode`` inputs of reference ``k``: grip (grip / ctx deploys), scene + state (ctx)."""
+    r, kw = ctx.ref, {}
+    if getattr(ctx.enc, "grip_dim", 0):
+        kw["grip"] = r["grip"][k]
+    if isinstance(ctx.enc, le.BeltCtxEncoder):
+        kw.update(scene=r["scene_raw"][k], prop40=r["prop"][k])
+    return kw
+
+
+def _batch_kw(ctx: SimpleNamespace, ks) -> dict:
+    kws = [_kw(ctx, k) for k in ks]
+    names = {"grip": "grips", "scene": "scenes", "prop40": "props"}
+    return {names[n]: [kw[n] for kw in kws] for n in kws[0]} if kws else {}
+
+
 def _f32_tol_rel(ctx: SimpleNamespace) -> float | None:
     """The deploy's float32 reference tol of a scene_belt_prop_pointnet export, else None."""
     with np.load(ctx.deploy, allow_pickle=False) as d:
@@ -103,7 +119,8 @@ def check_e0(ctx: SimpleNamespace) -> str:
         etype = getattr(enc, "encoder_type", le.BELT_CLOUD_TYPE)
         _require(report.get("model") == etype and a.get("model") == etype,
                  f"report model {report.get('model')!r} / args {a.get('model')!r}")
-        if etype == le.POINTMAE_TYPE:  # the head input, not the unused point_feat_dim arg
+        # the head input / scene_rv's fixed f_scene 64, not the unused point_feat_dim arg
+        if etype == le.POINTMAE_TYPE or getattr(enc, "skip_cloud_checks", False):
             a = {**a, "point_feat_dim": enc.point_feat_dim}
         _require(enc.frame == report.get("frame") == bc.SEG_FRAME, f"frame {enc.frame!r}")
     dims = {"num_points": (enc.num_points, a["num_points"]),
@@ -138,11 +155,21 @@ def check_e0(ctx: SimpleNamespace) -> str:
 @check("E1 preprocessing bit-exact")
 def check_e1(ctx: SimpleNamespace) -> str:
     r = ctx.ref
+    if getattr(ctx.enc, "skip_cloud_checks", False):  # scene_rv: check_scene_rv.py
+        raise NotApplicable
     if _belt_cloud(ctx):
         n = ctx.enc.num_points
+        ref = r["pc_resized"] if "pc_resized" in r else r["pc_in"]  # grip / ctx: packed pc_in
+        anc = getattr(ctx.enc, "anchor_g", 0.0)
+        g_err = 0.0
         for k, pc in enumerate(r["pc_raw"]):
-            _require(np.array_equal(ctx.enc.preprocess(pc), r["pc_in"][k]),
-                     f"frame {k}: preprocess != pc_in")
+            pre = ctx.enc.preprocess(pc)
+            _require(np.array_equal(pre, ref[k][..., :3]), f"frame {k}: preprocess != pc_in")
+            if anc > 0.0:  # [xyz, g]: g from the float32 tip, as the encoder computes it
+                tip = le.ctx_kinematics(r["prop"][k], ctx.enc.frames["X_BW"]).astype(np.float32)
+                g = np.float32(anc) * bc.anchor_g(pre, tip[:3], ctx.enc.anchor_fold)
+                g_err = max(g_err, float(np.abs(g - ref[k][:, 3]).max()))
+        _require(g_err <= 1e-4, f"anchor g max |err| {g_err:.2e} m > 1e-4")
         n_sub = sum(len(pc) >= n for pc in r["pc_raw"])
         return (f"K={len(r['pc_raw'])} resample_deterministic(pc_raw) == pc_in bit-exact "
                 f"(M >= {n}: {n_sub}, M < {n}: {len(r['pc_raw']) - n_sub})")
@@ -189,8 +216,9 @@ def check_e2(ctx: SimpleNamespace) -> str:
 
 def _e2_belt_cloud(ctx: SimpleNamespace) -> str:
     r, enc = ctx.ref, ctx.enc
-    z = np.stack([enc.encode(pc) for pc in r["pc_raw"]])
-    zb = enc.encode_batch(list(r["pc_raw"]))
+    K = len(r["pc_raw"])
+    z = np.stack([enc.encode(pc, **_kw(ctx, k)) for k, pc in enumerate(r["pc_raw"])])
+    zb = enc.encode_batch(list(r["pc_raw"]), **_batch_kw(ctx, range(K)))
     s = max(1.0, float(np.abs(r["z"]).max()))  # float32 torch reference: error scales with |z|
     with np.load(ctx.deploy, allow_pickle=False) as d:
         rel = max(REF_Z_F32_TOL_REL, float(d["reference_z_f32_tol_rel"])
@@ -198,7 +226,8 @@ def _e2_belt_cloud(ctx: SimpleNamespace) -> str:
     tol = rel * s
     z_err, b_err = float(np.abs(z - r["z"]).max()), float(np.abs(zb - r["z"]).max())
     g_ref = r["pc_global"]
-    g_err = float(np.abs(enc.pc_global(r["pc_in"]) - g_ref).max())
+    pc_in = r["pc_resized"] if "pc_resized" in r else r["pc_in"]  # grip / ctx rows packed after
+    g_err = float(np.abs(enc.pc_global(pc_in) - g_ref).max())
     g_tol = 1e-5 * max(1.0, float(np.abs(g_ref).max()))
     _require(z.dtype == np.float64 and z.shape == r["z"].shape, f"z {z.dtype} {z.shape}")
     _require(z_err <= tol, f"max |encode - z| = {z_err:.2e} > {tol:.1e}")
@@ -250,10 +279,11 @@ def check_e4(ctx: SimpleNamespace) -> str:
     k = int(np.argmax([len(p) for p in r["pc_raw"]]))
     belt_cloud = _belt_cloud(ctx)
     args = (r["pc_raw"][k],) if belt_cloud else (r["pc_raw"][k], r["prop"][k], r["belt_raw"][k])
-    ctx.enc.encode(*args)
+    kw = _kw(ctx, k) if belt_cloud else {}
+    ctx.enc.encode(*args, **kw)
     t0 = time.perf_counter()
     for _ in range(50):
-        ctx.enc.encode(*args)
+        ctx.enc.encode(*args, **kw)
     t_enc = (time.perf_counter() - t0) / 50 * 1e3
     t0 = time.perf_counter()
     for _ in range(200):
@@ -445,11 +475,13 @@ def check_e9(ctx: SimpleNamespace) -> str:
 
 @check("E10 belt-cloud resample + permutation invariance")
 def check_e10(ctx: SimpleNamespace) -> str:
-    if not _belt_cloud(ctx):
+    if not _belt_cloud(ctx) or getattr(ctx.enc, "skip_cloud_checks", False):
         raise NotApplicable
     enc, r = ctx.enc, ctx.ref
     rng = np.random.default_rng(0)
     n = enc.num_points
+    kw0 = _kw(ctx, 0)
+    nb = getattr(enc, "belt_dim", None)  # ctx: the belt fusion gives z_belt only
     z_err = 0.0
     pointmae = getattr(enc, "encoder_type", None) == le.POINTMAE_TYPE
     # torch float32: a batch of 3 and single encodes differ by kernel choice, not by the model
@@ -463,21 +495,24 @@ def check_e10(ctx: SimpleNamespace) -> str:
         perm = pc[rng.permutation(len(pc))]
         _require(np.array_equal(bc.resample_deterministic(perm, n)[0], a),
                  "resample depends on the point order")
-        z = enc.encode(pc)
-        z_err = max(z_err, float(np.abs(enc.encode(perm) - z).max()))
-        if not pointmae:  # Point-MAE FPS starts at point 0: order-free only via the resample
-            z_err = max(z_err, float(np.abs(enc._fuse(enc.pc_global(a[rng.permutation(n)]))
-                                            - z).max()))
+        z = enc.encode(pc, **kw0)
+        z_err = max(z_err, float(np.abs(enc.encode(perm, **kw0) - z).max()))
+        # Point-MAE FPS starts at point 0: order-free only via the resample; anchor: [xyz, g]
+        # needs the tip, covered by the full encode above
+        if not pointmae and not getattr(enc, "anchor_g", 0.0):
+            a = enc.preprocess(pc)  # = a, or the board-frame resample of a ctx deploy
+            z_err = max(z_err, float(np.abs(enc._fuse(enc.pc_global(a[rng.permutation(n)]),
+                                                      kw0.get("grip")) - z[:nb]).max()))
     _require(z_err <= 1e-9, f"z not permutation invariant: {z_err:.2e} > 1e-9")
     small = np.asarray(r["pc_raw"][0], dtype=np.float32)[:n // 3]
     tiled, empty = bc.resample_deterministic(small, n)
     _require(not empty and len(np.unique(tiled, axis=0)) == len(np.unique(small, axis=0)),
              f"M={len(small)} < {n}: cyclic repeat does not cover the cloud")
-    z_small = enc.encode(small)
+    z_small = enc.encode(small, **kw0)
     _require(not enc.last_empty and np.all(np.isfinite(z_small)), "M < n encode")
-    z0 = enc.encode(np.zeros((0, 3), dtype=np.float32))
+    z0 = enc.encode(np.zeros((0, 3), dtype=np.float32), **kw0)
     _require(enc.last_empty is True and np.all(np.isfinite(z0)), "M == 0 not flagged empty")
-    zb = enc.encode_batch([small, np.zeros((0, 3)), r["pc_raw"][0]])
+    zb = enc.encode_batch([small, np.zeros((0, 3)), r["pc_raw"][0]], **_batch_kw(ctx, [0, 0, 0]))
     _require(enc.last_empty.tolist() == [False, True, False], f"batch flags {enc.last_empty}")
     _require(np.abs(zb[1] - z0).max() <= b_tol and np.abs(zb[0] - z_small).max() <= b_tol,
              "encode_batch != encode")

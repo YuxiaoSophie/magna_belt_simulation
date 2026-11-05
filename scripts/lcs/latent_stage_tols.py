@@ -32,13 +32,15 @@ if str(REPO_ROOT / "src") not in sys.path:
 from task_common.latent_encoder import (
     LatentEncoder,
     LearnedLcs,
-    encode_episode_frames,
     episode_input_keys,
+    goal_frame_latents,
 )
 
 STREAK = 3
 N_LAST = 13
 SEG_KEY = "pcd_belt_seg"
+LATCH_AFTER = "move:pre_place_2"
+FIRST_HOLD = "hold:place_3"
 
 
 def sha256(path: Path) -> str:
@@ -49,11 +51,11 @@ def sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def latch_frame(labels: list[str]) -> int:
-    """First frame after the last ``move:pre_place_2`` (``realfirst_loop.goal_frames``)."""
-    mv = [t for t, lab in enumerate(labels) if lab == "move:pre_place_2"]
+def latch_frame(labels: list[str], after: str = LATCH_AFTER) -> int:
+    """First frame after the last ``after`` (``realfirst_loop.goal_frames``)."""
+    mv = [t for t, lab in enumerate(labels) if lab == after]
     if not mv or mv[-1] + 1 >= len(labels):
-        raise ValueError("no frame after move:pre_place_2")
+        raise ValueError(f"no frame after {after}")
     return mv[-1] + 1
 
 
@@ -67,7 +69,10 @@ def load_episode(path: Path, keys=(SEG_KEY,)) -> dict:
                                  + (" (record with --belt-seg)" if k == SEG_KEY else ""))
         meta = json.loads(str(d["sim_meta"]))
         phase = np.asarray(d["sim_phase"], dtype=np.int64)
-        out = {"obs": {k: d[k] for k in keys}, "n": len(d[keys[0]]),
+        obs = {k: d[k] for k in keys}
+        if "sim_hand_mm" in keys and "sim_cmd_source" in d.files:  # grip / ctx: release frames
+            obs["sim_cmd_source"] = d["sim_cmd_source"]
+        out = {"obs": obs, "n": len(d[keys[0]]),
                **({"seg": list(d[SEG_KEY])} if SEG_KEY in keys else {}),
                "ee_f": np.asarray(d["sim_ee_franka"], np.float64),
                "ee_u": np.asarray(d["sim_ee_ur"], np.float64),
@@ -89,8 +94,9 @@ def encode_frames(enc, seg: list, frames) -> tuple[np.ndarray, int]:
 
 
 def encode_obs(enc, ep: dict, frames) -> tuple[np.ndarray, int]:
-    """``encode_frames`` of any encoder on ``load_episode(path, episode_input_keys(enc))``."""
-    z, empty = encode_episode_frames(enc, ep["obs"], frames)
+    """``encode_frames`` of any encoder on ``load_episode(path, episode_input_keys(enc))`` (a
+    scene_rv encoder: the rv-free scene part, ``goal_frame_latents``)."""
+    z, empty = goal_frame_latents(enc, ep["obs"], frames)
     return z, int(empty.sum())
 
 
@@ -116,7 +122,7 @@ def stage_goals(deploy: Path) -> tuple[LearnedLcs, np.ndarray, np.ndarray]:
 
 
 def derive(deploy: Path, demos: list[Path], window: int, floor: float, pct: float,
-           n_last: int = N_LAST, streak: int = STREAK) -> dict:
+           n_last: int = N_LAST, streak: int = STREAK, latch_after: str = LATCH_AFTER) -> dict:
     lcs, g1, g2 = stage_goals(deploy)
     enc = LatentEncoder.load(deploy)
     rows, d1_all, d2_all = [], [], []
@@ -124,7 +130,10 @@ def derive(deploy: Path, demos: list[Path], window: int, floor: float, pct: floa
         ep = load_episode(path, episode_input_keys(enc))
         if ep["labels"] is None:
             raise SystemExit(f"{path}: sim_meta has no phase_labels")
-        i = latch_frame(ep["labels"])
+        try:
+            i = latch_frame(ep["labels"], latch_after)
+        except ValueError as e:
+            raise SystemExit(f"{path}: {e}") from None
         n = ep["n"]
         w = list(range(i, min(i + window + 1, n)))
         last = list(range(max(0, n - n_last), n))
@@ -181,8 +190,9 @@ def main() -> int:
     p.add_argument("--window", type=int, default=6, help="frames after the latch")
     p.add_argument("--floor", type=float, default=0.5)
     p.add_argument("--percentile", type=float, default=90.0)
+    p.add_argument("--latch-after", default=LATCH_AFTER, help="latch = first frame after its last")
     a = p.parse_args()
-    doc = derive(a.deploy, a.demos, a.window, a.floor, a.percentile)
+    doc = derive(a.deploy, a.demos, a.window, a.floor, a.percentile, latch_after=a.latch_after)
     a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(doc, indent=1) + "\n")
     text = table(doc)

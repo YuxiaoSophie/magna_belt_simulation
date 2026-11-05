@@ -6,6 +6,7 @@
 - ``latent_support`` / ``ee_support``: hinge^2 of the distance to the nearest training latent /
   training EE position beyond a radius.
 - ``goal_set``: soft-min goal distance over a set of seated latents.
+- ``latent_limit``: hinge^2 of a linear latent readout ``w z + b`` (e.g. belt length, mm) above ``max``.
 - ``value``: a learned cost-to-go ``V(z)`` (``latent_value``).
 
 ``load_cost_terms`` loads whatever is on once per solver into a ``CostTerms``.
@@ -34,6 +35,8 @@ EE_SUPPORT_KEYS = frozenset({"file", "pulley_pose7", "radius_mm", "weight", "max
                              "where"})
 EE_SUPPORT_DEFAULTS = {"radius_mm": 35.0, "weight": 1.0, "max_points": 3000, "where": "all"}
 EE_SUPPORT_SCALE_MM = 10.0
+LATENT_LIMIT_KEYS = frozenset({"file", "max", "weight", "scale", "where"})
+LATENT_LIMIT_DEFAULTS = {"weight": 1.0, "scale": 1.0, "where": "all"}
 
 
 # --- torch quaternions (wxyz) -------------------------------------------------------------------
@@ -74,6 +77,7 @@ class CostTerms:
     value: tuple | None = None  # LatentValue.torch_params
     lsup: torch.Tensor | None = None  # (M, n_x) training latents, whitened
     esup: torch.Tensor | None = None  # (M, 6) training EE positions, mm
+    llim: tuple | None = None  # (w (n_x,), b ()) latent readout
     # host copies for the solve's info (float64)
     gset_np: np.ndarray | None = None
     vfn: LatentValue | None = None
@@ -101,6 +105,9 @@ def load_cost_terms(lcs, params, with_clearance: bool = True) -> CostTerms:
     if params.ee_support is not None:
         T.esup_np = load_ee_support(params.ee_support) * 1e3
         T.esup = t(T.esup_np)
+    if params.latent_limit is not None:
+        w, b = load_latent_limit(params.latent_limit, nx)
+        T.llim = (t(w), t(b))
     return T
 
 
@@ -379,6 +386,35 @@ def ee_support_cost(es: dict, P: torch.Tensor, S_mm: torch.Tensor) -> torch.Tens
     d = nn_dist(Pk * 1e3, S_mm)
     return float(c["weight"]) * ((d - float(c["radius_mm"])) / EE_SUPPORT_SCALE_MM).clamp_min(
         0.0).square().sum(1)
+
+
+def check_latent_limit(ll: dict) -> None:
+    """``MppiParams.latent_limit`` keys and ranges (the npz is checked when loaded)."""
+    if not isinstance(ll, dict) or not set(ll) <= LATENT_LIMIT_KEYS or not {"file", "max"} <= set(ll):
+        raise ValueError(f"latent_limit {ll!r}: need file, max, within {sorted(LATENT_LIMIT_KEYS)}")
+    c = {**LATENT_LIMIT_DEFAULTS, **ll}
+    if not (math.isfinite(float(c["max"])) and math.isfinite(float(c["weight"])) and float(c["weight"]) >= 0.0
+            and math.isfinite(float(c["scale"])) and float(c["scale"]) > 0.0):
+        raise ValueError(f"latent_limit max {c['max']} finite, weight {c['weight']} >= 0, scale {c['scale']} > 0")
+    if c["where"] not in LATENT_SUPPORT_WHERE:
+        raise ValueError(f"latent_limit.where {c['where']!r}: one of {LATENT_SUPPORT_WHERE}")
+
+
+def load_latent_limit(ll: dict, n_x: int) -> tuple[np.ndarray, np.ndarray]:
+    """``(w (n_x,), b ())`` float64 of the readout npz (keys ``w``, ``b``; raw, unwhitened latent)."""
+    with np.load(Path(ll["file"]), allow_pickle=False) as f:
+        w, b = np.asarray(f["w"], np.float64), np.asarray(f["b"], np.float64).reshape(())
+    if w.shape != (n_x,) or not (np.all(np.isfinite(w)) and np.isfinite(b)):
+        raise ValueError(f"latent limit {ll['file']}: w {w.shape} != ({n_x},) or not finite")
+    return w, b
+
+
+def latent_limit_cost(ll: dict, Z: torch.Tensor, wb: tuple) -> torch.Tensor:
+    """``(K,)`` ``weight sum_k relu((w z_k + b - max) / scale)^2`` of rollouts ``Z (K, H+1, n_x)``."""
+    c = {**LATENT_LIMIT_DEFAULTS, **ll}
+    Zk = Z[:, -1:] if c["where"] == "terminal" else Z[:, 1:]
+    y = Zk @ wb[0] + wb[1]
+    return float(c["weight"]) * ((y - float(c["max"])) / float(c["scale"])).clamp_min(0.0).square().sum(1)
 
 
 def nn_dist(Q: torch.Tensor, S: torch.Tensor, chunk: int | None = None) -> torch.Tensor:

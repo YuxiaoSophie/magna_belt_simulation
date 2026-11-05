@@ -541,7 +541,7 @@ def run_check(cli) -> int:
     pose_f = np.r_[0.45, 0.05, 0.08, 1.0, 0.0, 0.0, 0.0]
     pose_u = np.r_[0.55, -0.1, 0.06, 0.0, 1.0, 0.0, 0.0]
     p0 = np.r_[pose_f[:3], pose_u[:3]]
-    q_kw = {"q_now": np.stack([pose_f[3:7], pose_u[3:7]])} if params.clearance else {}
+    q_kw = {"q_now": np.stack([pose_f[3:7], pose_u[3:7]])} if params.needs_q_now else {}
     Up, info = mppi_plan(T, params, z0, p0, None, L.z_goal, None, gen, **q_kw)
     lb, ub = params.bounds(T)
     in_box = bool(np.all(Up >= lb - BOUND_TOL) and np.all(Up <= ub + BOUND_TOL))
@@ -705,7 +705,7 @@ def check_transport_identity(cli, T: TorchLcs, L) -> tuple[bool, str]:
                         and _same_info(ai1, bi1) and _same_info(ai2, bi2)):
                     bad.append(f"{y.relative_to(REPO_ROOT)} seed {seed}")
     params = load_params(cli)
-    q_kw = {"q_now": q} if params.clearance else {}
+    q_kw = {"q_now": q} if params.needs_q_now else {}
     rows = []
     for goal in (T.np["z_goal"], np.tile(T.np["z_goal"], (params.H, 1))):
         g = torch.Generator(device=T.device).manual_seed(3)
@@ -759,7 +759,7 @@ def check_transport(cli, T: TorchLcs, L) -> tuple[bool, str]:
     p0 = np.r_[0.45, 0.05, 0.09, 0.55, -0.1, 0.1]
     q = (_quat_now(cli) if cli.clearance_model is not None
          else np.array([[1.0, 0, 0, 0], [0, 1.0, 0, 0]]))
-    q_kw = {"q_now": q} if params.clearance else {}
+    q_kw = {"q_now": q} if params.needs_q_now else {}
     u_demo = np.clip(rng.normal(size=(H, L.n_u)) * half * 0.3, lb, ub)
     goal = T.np["z_goal"]
 
@@ -1152,7 +1152,8 @@ def run_bank(cli) -> int:
     # smoothness, cold start.
     bank = dataclasses.replace(live, H=lcs.N, w_s=0.0, u_lb=None, u_ub=None, u_box_outer=None,
                                u_translations_only=False, z_ceiling_above_start_m=math.inf,
-                               rot_envelope_deg={"franka": math.inf, "ur": math.inf})
+                               rot_envelope_deg={"franka": math.inf, "ur": math.inf},
+                               tilt_max_deg=None)
     c3_obj = dataclasses.replace(bank, w_T=0.0)
     gen = torch.Generator(device=lcs.device).manual_seed(cli.seed)
     lb, ub = bank.bounds(lcs)
@@ -1163,7 +1164,7 @@ def run_bank(cli) -> int:
         for tag, prm in (("", bank), ("c3obj_", c3_obj)):
             prm = _with_ceiling(prm, st)
             args = (st["z0"], st["p0"], st["rot0"], st["goal"])
-            q = {"q_now": st["q_now"]} if prm.clearance else {}
+            q = {"q_now": st["q_now"]} if prm.needs_q_now else {}
             c3_cost, c3_bad, _ = rollout_cost(lcs, prm, *args, st["u_c3"], **q)
             U, info = mppi_plan(lcs, prm, *args, None, gen, **q)
             m_cost, m_bad, _ = rollout_cost(lcs, prm, *args, U, **q)
@@ -1181,7 +1182,7 @@ def run_bank(cli) -> int:
         # Live config with this state as the episode start (envelope/ceiling about it).
         Ul, info = mppi_plan(lcs, _with_ceiling(live, {**st, "p_start": st["p0"]}), st["z0"],
                              st["p0"], None, st["goal"], None, gen,
-                             **({"q_now": st["q_now"]} if live.clearance else {}))
+                             **({"q_now": st["q_now"]} if live.needs_q_now else {}))
         row.update(envelope_samples(lcs, live, st["rot0"], gen))
         row.update(live_u0=Ul[0].tolist(), live_solve_ms=info["solve_ms"],
                    live_frac_env=info["frac_env_penalised"],

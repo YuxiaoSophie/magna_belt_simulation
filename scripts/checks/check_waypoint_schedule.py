@@ -68,7 +68,10 @@ LATER = (("stage_skip_ahead", False), ("stage_no_timeout_into", None))
 POLICY = (("prior_mode", "demo"), ("bc_prior", None),
           ("stage_start", None), ("goal_set", None), ("goal_set_tau", 0.0),
           ("value", None), ("latent_support", None),
-          ("ee_support", None))  # later fields (P-M3, V12-30/31/39)
+          ("ee_support", None), ("tilt_max_deg", None),  # later fields (P-M3, V12-30/31/39/96/97)
+          ("constraint_mode", "penalty"), ("exec_guard", None),
+          ("stage_min_dwell", None), ("noise_beta", 0.0), ("du_max", None),
+          ("goal_blend_s", None), ("knot0_chain", None))
 
 
 def load_pair(d: Path | None, tag: str):

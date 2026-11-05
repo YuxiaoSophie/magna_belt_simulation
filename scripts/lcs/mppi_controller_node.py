@@ -43,6 +43,12 @@ the rollout latents' whitened nearest-training-latent distance beyond a radius; 
 ``support_d0`` / ``support_dmax`` = that distance now / max over the plan's knots 1..H.
 Config ``ee_support`` (``MppiParams.ee_support``, off by default): the same on the 6-D EE
 position (mm, nearest training EE position); JSONL ``ee_support_d0`` / ``ee_support_dmax``.
+Config ``stage_min_dwell`` (off by default; waypoint stages): a stage is reached only after
+``stage_min_dwell`` x the goal demo's time between its waypoint and the previous one (stdout
+``[mppi] stage min dwell``, once per stage held back).
+Config ``exec_guard`` (``MppiParams.exec_guard``, off by default): the plan about to be sent is
+projected inside the tilt / envelope / z limits from the measured pose (``guard_plan``); JSONL
+``guard`` (counts, cuts, first knot), stdout ``[mppi] guard`` on the first few, summary count.
 
     uv run --frozen python scripts/lcs/mppi_controller_node.py \\
         --lcm-url 'udpm://239.255.76.162:7762?ttl=0' --config data/lcs/realfirst/v1/mppi.yaml \\
@@ -87,12 +93,16 @@ from round_belt_task.commander import (
 from round_belt_task.controller_bridge import ur_base_world
 from task_common.bc_prior import encoder_fingerprint
 from task_common.latent_encoder import (
+    GRIP_DIM,
     LATENT_STATE_CHANNEL,
+    RV_TYPE,
     DemoGoals,
+    LatentEncoder,
+    grip_gate_vector,
     parse_latent_state_message,
 )
 from task_common.lcm_contract import LcmChannels
-from task_common.lcs_dataset import delta_rotvec
+from task_common.lcs_dataset import STATE_DIM, delta_rotvec
 from task_common.magna_process import check_private_url
 from task_common.mppi_costs import (
     EE_SUPPORT_DEFAULTS,
@@ -103,7 +113,7 @@ from task_common.mppi_costs import (
     load_value,
     support_limits,
 )
-from task_common.mppi_guards import OvershootGuard, PolicyPrior
+from task_common.mppi_guards import OvershootGuard, PolicyPrior, chain_pose, guard_plan
 from task_common.mppi_lcs import (
     MppiParams,
     TorchLcs,
@@ -111,12 +121,14 @@ from task_common.mppi_lcs import (
     mppi_plan,
     qmul,
     quat_exp,
+    safety_limits,
 )
 
 METADATA_NAME = "mppi_controller"
 N_KNOTS = 7
 REPUBLISH_S = 0.05
 HOLD_S = 1.0
+GUARD_PRINTS = 5
 FEATURES_BLOCK = "belt_features"
 FEATURE_SUCCESS_FRAMES = 3
 SCALARS = ("k0", "stage", "dist_ref", "dist_final", "solve_ms", "t_mpc_start", "ref_mode",
@@ -296,6 +308,7 @@ class MppiControllerNode:
         self.bc = (PolicyPrior(self.params.bc_prior, self.lcs, self.params, cli.deploy)
                    if self.params.prior_mode == "policy" else None)
         self.stages = build_stages(cli, self.params, self.lcs, self.wp)
+        self.rv_goals = self._rv_goal_base(cli)
         if self.params.goal_set is not None and cli.goal_mode != "stage":
             raise ValueError("goal_set needs --goal-mode stage (it replaces the last stage's goal)")
         self.gset = (None if self.params.goal_set is None
@@ -319,10 +332,12 @@ class MppiControllerNode:
         self.log = open(cli.log, "a") if cli.log else None  # noqa: SIM115
         self.stage = 0
         self.stage_t0: float | None = None
+        self.blend_from: np.ndarray | None = None
         self.t_mpc_start: float | None = None
         self.start_pose: tuple[np.ndarray, np.ndarray] | None = None
         self.last_utime: int | None = None
         self.plan: np.ndarray | None = None
+        self.prev_knots = None  # knot0_chain: (t, pos, quat) of the last published Franka plan
         self.out: list[tuple[str, bytes]] = []
         self.feature_streak = 0
         self.reach_streak = 0
@@ -331,6 +346,7 @@ class MppiControllerNode:
         self.last_latent = None
         self.pending = None
         self.n_solves = self.n_published = self.n_errors = self.n_skipped = 0
+        self.n_guarded = self.n_guarded_first = 0
         self.solve_ms: list[float] = []
         self._last_pub = time.perf_counter()
         self.clear_reported = False
@@ -341,11 +357,34 @@ class MppiControllerNode:
         self.guard = OvershootGuard(ov) if ov is not None else None
         self.gate_stage = self._gate_stage()
         self.blocked = False
+        self.dwell_held = False
         self.start_info: dict | None = None
         if self.params.stage_start is not None and (self.wp is None
                                                     or cli.goal_mode != "stage"):
             raise ValueError("stage_start progress needs --goal waypoints:PATH --goal-mode stage")
         self._warmup()
+
+    def _rv_goal_base(self, cli):
+        """V61e (scene_rv deploys): the waypoints' rv-free scene parts; each latent re-adds the
+        CURRENT robot part to every goal (``_rv_goals``). None for every other deploy."""
+        with np.load(cli.deploy, allow_pickle=False) as d:
+            if "encoder_type" not in d.files or str(d["encoder_type"]) != RV_TYPE:
+                return None
+        rv_free = cli.goal.startswith("waypoints:") and bool(
+            np.load(cli.goal.split(":", 1)[1]).get("rv_free", False))
+        if self.wp is None or cli.goal_mode != "stage" or not rv_free \
+                or getattr(cli, "waypoint_bank", None) is not None:
+            raise ValueError(f"{RV_TYPE} deploy needs --goal waypoints:<rv_free npz> --goal-mode "
+                             "stage (no bank)")
+        self.rv_enc = LatentEncoder.load(cli.deploy)
+        return self.wp.z_traj.copy(), self.wp.z_wp.copy()
+
+    def _rv_goals(self, prop) -> None:
+        zr = self.rv_enc.robot_part(prop[:STATE_DIM], prop[STATE_DIM:STATE_DIM + GRIP_DIM])
+        self.wp.z_traj[:] = self.rv_goals[0] + zr
+        self.wp.z_wp[:] = self.rv_goals[1] + zr
+        for st in self.stages:
+            st.goal[:] = self.wp.z_wp[st.index]
 
     def _load_bank(self, cli) -> tuple[WaypointBank | None, dict | None]:
         if getattr(cli, "waypoint_bank", None) is None:
@@ -435,7 +474,8 @@ class MppiControllerNode:
 
     def _warmup(self) -> None:
         z = self.stages[-1].goal
-        kw = {"q_now": np.tile([1.0, 0.0, 0.0, 0.0], (2, 1))} if self.params.clearance else {}
+        kw = ({"q_now": np.tile([1.0, 0.0, 0.0, 0.0], (2, 1))} if self.params.needs_q_now
+              else {})
         mppi_plan(self.lcs, self.params, z, np.zeros(6), None, z, None,
                   torch.Generator(device=self.lcs.device).manual_seed(0), **kw)
         prms = self.guard.variants(self.params) if self.guard else []
@@ -468,6 +508,13 @@ class MppiControllerNode:
     def _process(self, msg, parsed) -> None:
         """Replan on the newest latent only (the C++ reads the latest value on its port)."""
         utime, _, z, ee_f, ee_u, _prop = parsed
+        if self.lcs.grip_gate:  # V12-131: the measured grasp bits gate u over the whole horizon
+            if len(_prop) != STATE_DIM + GRIP_DIM:
+                raise ValueError(f"grip-gated deploy: proprio has {len(_prop)} entries, needs "
+                                 f"{STATE_DIM} + {GRIP_DIM} gripper features")
+            self.lcs.set_gate(grip_gate_vector(_prop[STATE_DIM:]))
+        if self.rv_goals is not None:  # V61e: goals = scene part + the current robot part
+            self._rv_goals(_prop)
         self.last_utime = utime
         t = utime * 1e-6
         self.last_latent = (utime, t, ee_f, ee_u)
@@ -504,7 +551,7 @@ class MppiControllerNode:
               flush=True)
         self.stage, self.stage_t0 = best[0], t
         self.feature_streak = self.reach_streak = 0
-        self.blocked = False
+        self.blocked = self.dwell_held = False
 
     def _stage_dist(self, z, j: int) -> float:
         """Whitened distance to stage ``j``'s goal; the goal set's for the last stage."""
@@ -519,6 +566,14 @@ class MppiControllerNode:
         if k > 1 and self.stage + 1 < len(self.stages):
             self.reach_streak = self.reach_streak + 1 if reached else 0
             reached = self.reach_streak >= k
+        if reached and self.params.stage_min_dwell is not None and self.wp is not None:
+            dwell = self._min_dwell(self.stage)
+            if t - self.stage_t0 < dwell:
+                if not self.dwell_held:
+                    self.dwell_held = True
+                    print(f"[mppi] stage min dwell: stage {self.stage} in tol at "
+                          f"{t - self.stage_t0:.3f} s < {dwell:.3f} s t={t:.3f}", flush=True)
+                reached = False
         if self.cli.complete_on_features:
             feats = belt_features(msg)
             if feats is None:
@@ -540,15 +595,35 @@ class MppiControllerNode:
         print(f"[learned-mpc] stage {self.stage} {'reached' if reached else 'timeout'} "
               f"t={t:.3f} dist={dist:.4f}", flush=True)
         if self.stage + 1 < len(self.stages):
+            if self.params.goal_blend_s is not None:  # from where the blend is now (no jump)
+                self.blend_from = self._blended_goal(t, self.stages[self.stage].goal, 1, 0)[0] \
+                    if self.blend_from is not None else self.stages[self.stage].goal
             self.stage += 1
             self.stage_t0 = t
             self.feature_streak = self.reach_streak = 0
-            self.blocked = False
+            self.blocked = self.dwell_held = False
             return True
         print("MPC completed!", flush=True)
         print("Switching to Terminate", flush=True)
         self.done = True
         return True
+
+    def _blended_goal(self, t: float, goal: np.ndarray, H: int, k0: int = 1) -> np.ndarray:
+        """``(H, n_x)``: knot k's goal (k = k0..) at ``t + k dt`` on the line from the previous
+        stage's goal (``goal_blend_s`` after the switch); the plain goal once the blend is over."""
+        a = np.clip((t - self.stage_t0 + self.dt * np.arange(k0, k0 + H))
+                    / self.params.goal_blend_s, 0.0, 1.0)
+        if a[0] >= 1.0:
+            self.blend_from = None
+            return np.broadcast_to(goal, (H, len(goal)))
+        return self.blend_from + a[:, None] * (goal - self.blend_from)
+
+    def _min_dwell(self, s: int) -> float:
+        """``stage_min_dwell`` x the goal demo's time from the previous waypoint (frame 0 before
+        the first) to stage ``s``'s."""
+        k = self.stages[s].index
+        prev = int(self.wp.frames[k - 1]) if k > 0 else 0
+        return float(self.params.stage_min_dwell) * (int(self.wp.frames[k]) - prev) * self.dt
 
     def _rot0(self, ee_f, ee_u) -> np.ndarray:
         """``(2, 3)`` world rotation vectors of the current orientations from the start."""
@@ -604,7 +679,7 @@ class MppiControllerNode:
         rot0 = self._rot0(ee_f, ee_u)
         params = self._params_now()
         solve_ok = 1.0
-        kw = {"q_now": self._q_now(rot0)} if params.clearance else {}
+        kw = {"q_now": self._q_now(rot0)} if params.needs_q_now else {}
         goal, z_ref, dist_ref, extra = stage.goal, stage.goal, dist, {}
         if self.cli.goal_mode == "track" or self.u_demo is not None:
             idx, d_idx = self._progress(t, z)
@@ -645,6 +720,9 @@ class MppiControllerNode:
                 print(f"[mppi] overshoot hold: t={t:.3f} d_seat={d_seat:.4f} (tol "
                       f"{self.guard.tol:.3f})", flush=True)
             extra.update(d_seat=d_seat, prior_scale=gs.prior_scale, mode=gs.mode)
+        if self.blend_from is not None and goal is stage.goal:
+            goal = self._blended_goal(t, stage.goal, params.H)
+            extra["blend"] = float(min(1.0, (t - self.stage_t0) / params.goal_blend_s))
         if self.gset is not None:
             if self.stage == len(self.stages) - 1 and goal is stage.goal:
                 extra["d_single"] = self.lcs.whitened_dist(z, stage.goal)
@@ -664,15 +742,30 @@ class MppiControllerNode:
             self.clear_reported = True
             print(f"[mppi] clearance at the first latent: UR {info['clear_now_ur_mm']:.1f} mm, "
                   f"Franka {info['clear_now_f_mm']:.1f} mm", flush=True)
+        if params.tilt_on and solve_ok and self.n_solves == 0:
+            print(f"[mppi] tilt at the first latent: Franka {info['tilt_now_f_deg']:.1f} deg, UR "
+                  f"{info['tilt_now_ur_deg']:.1f} deg (limit {params.tilt_max_deg})", flush=True)
         U_exec = U.copy()
         if params.action_noise_frac > 0.0 and solve_ok:
             noise = self.rng.normal(size=U.shape[1]) * params.action_noise_frac * self.sigma
             U_exec[0] = np.clip(U[0] + noise, self.lb, self.ub)
+        if params.exec_guard is not None:
+            U_exec, g = guard_plan(U_exec, p0, kw.get("q_now", self._q_now(rot0)),
+                                   self.start_pose[1], safety_limits(params), params.exec_guard)
+            extra["guard"] = g
+            if g["first"] >= 0:
+                self.n_guarded += 1
+                self.n_guarded_first += g["first"] == 0
+                if self.n_guarded <= GUARD_PRINTS:
+                    print(f"[mppi] guard t={t:.3f}: knot {g['first']}, z {g['n_z']} / rot "
+                          f"{g['n_rot']} cut (max {g['z_cut_mm']:.2f} mm, {g['rot_cut_deg']:.2f} "
+                          "deg)", flush=True)
         self.plan = U_exec
         self.n_solves += 1
         self.solve_ms.append(info["solve_ms"])
-        self.out = [(CH.tracking_trajectory_actor_channel,
-                     franka_message(utime, t, self.dt, ee_f, U_exec).encode()),
+        fmsg = (franka_message(utime, t, self.dt, ee_f, U_exec) if params.knot0_chain is None
+                else self._chained_message(utime, t, ee_f, U_exec, params.knot0_chain, extra))
+        self.out = [(CH.tracking_trajectory_actor_channel, fmsg.encode()),
                     (CH.ur_tracking_trajectory_actor_channel,
                      ur_message(utime, t, self.dt, ee_u, U_exec[0], self.X_base_W,
                                 self.X_tracking_tool0).encode())]
@@ -711,6 +804,17 @@ class MppiControllerNode:
                 row["v_now"] = float(self.vfn(z))
             self.log.write(json.dumps(row) + "\n")
             self.log.flush()
+
+    def _chained_message(self, utime: int, t: float, ee_f, U, cfg: dict,
+                         extra: dict) -> lcmt_timestamped_saved_traj:
+        """``knot0_chain``: knot 0 = the previous plan's command at ``t`` (``chain_pose``)."""
+        pose0, info = chain_pose(self.prev_knots, t, self.dt, ee_f, cfg)
+        pos, quat = franka_knots(pose0 if cfg["mode"] == "shift" else ee_f, U, N_KNOTS)
+        if cfg["mode"] == "knot0":
+            pos[0], quat[0] = pose0[:3], pose0[3:7]
+        self.prev_knots = (t, pos, quat)
+        extra["knot0_chain"] = info
+        return _rename(saved_traj_message(utime, pos, quat, t + self.dt * np.arange(N_KNOTS)))
 
     def _sbox_mm(self, p0, P) -> list[float]:
         """[max mm outside the support box now, over the plan's knots 1..H] (nan: no plan)."""
@@ -765,8 +869,11 @@ class MppiControllerNode:
         ms = np.asarray([v for v in self.solve_ms if math.isfinite(v)])
         timing = (f"solve mean {ms.mean():.1f} p95 {np.percentile(ms, 95):.1f} max "
                   f"{ms.max():.1f} ms" if len(ms) else "no solves")
+        guard = (f", guard {self.n_guarded} plans ({self.n_guarded_first} first knot)"
+                 if self.params.exec_guard is not None else "")
         return (f"[mppi] {self.n_solves} solves, {self.n_published} publishes, "
-                f"{self.n_skipped} stale latents skipped, {self.n_errors} errors, {timing}")
+                f"{self.n_skipped} stale latents skipped, {self.n_errors} errors, {timing}"
+                + guard)
 
 
 def create_parser() -> argparse.ArgumentParser:
